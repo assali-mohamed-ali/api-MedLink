@@ -1,0 +1,9 @@
+# Staging — terraform plan -var-file="terraform.tfvars.staging" (ne jamais committer le vrai fichier)
+app_image            = "ghcr.io/assali-mohamed-ali/api-medlink:staging"
+app_container_name   = "api-medlink-staging"
+app_external_port    = 8081
+network_name         = "medlink-staging"
+db_url               = "jdbc:postgresql://postgres-staging:5432/mydatabase"
+db_username          = "myuser"
+db_password          = "change-me-staging"
+jwt_secret           = "change-me-32-chars-minimum-staging"

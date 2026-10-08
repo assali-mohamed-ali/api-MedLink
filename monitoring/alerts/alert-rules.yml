@@ -2,12 +2,12 @@ groups:
   - name: api-medlink
     rules:
       - alert: AppDown
-        expr: up{job="api-medlink"} == 0
+        expr: up{job=~"api-medlink-.+"} == 0
         for: 2m
         labels:
           severity: critical
         annotations:
-          summary: 'api-MedLink down'
+          summary: 'api-MedLink down ({{ $labels.job }})'
       - alert: HighErrorRate
         expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count[5m])) > 0.05
         for: 5m

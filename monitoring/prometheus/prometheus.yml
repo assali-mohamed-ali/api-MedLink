@@ -11,8 +11,15 @@ rule_files:
   - /etc/prometheus/alert-rules.yml
 
 scrape_configs:
-  - job_name: api-medlink
+  - job_name: api-medlink-prod
     metrics_path: /actuator/prometheus
     static_configs:
       - targets: ['app:8080']
+        labels: { env: prod }
+    scrape_interval: 15s
+  - job_name: api-medlink-staging
+    metrics_path: /actuator/prometheus
+    static_configs:
+      - targets: ['app-staging:8080']
+        labels: { env: staging }
     scrape_interval: 15s

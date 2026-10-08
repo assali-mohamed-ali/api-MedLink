@@ -2,7 +2,7 @@ name: CD
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, staging, prod]
     tags: ['v*']
   workflow_dispatch:
 
@@ -15,8 +15,10 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  deploy:
+  build-push:
     runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.tags }}
     steps:
       - uses: actions/checkout@v7
 
@@ -56,13 +58,48 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
-      - name: Terraform fmt/validate (dry-run)
-        uses: hashicorp/setup-terraform@v4
+  deploy-staging:
+    needs: build-push
+    if: github.ref == 'refs/heads/staging'
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.9.x
 
-      - run: |
+      - name: Validate + plan (staging)
+        run: |
           cd terraform
           terraform init -backend=false
           terraform fmt -check
           terraform validate
+        env:
+          TF_VAR_app_image: ${{ needs.build-push.outputs.image }}
+          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+          TF_VAR_db_password: ${{ secrets.STAGING_DB_PASSWORD }}
+
+  deploy-prod:
+    needs: build-push
+    if: github.ref == 'refs/heads/prod' || github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.9.x
+
+      - name: Validate + plan (prod)
+        run: |
+          cd terraform
+          terraform init -backend=false
+          terraform fmt -check
+          terraform validate
+        env:
+          TF_VAR_app_image: ${{ needs.build-push.outputs.image }}
+          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
+          TF_VAR_db_password: ${{ secrets.PROD_DB_PASSWORD }}

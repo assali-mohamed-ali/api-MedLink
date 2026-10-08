@@ -2,7 +2,7 @@ name: DAST-ZAP
 
 on:
   push:
-    branches: [main, master]
+    branches: [main, master, staging]
   schedule:
     - cron: '0 2 * * 1'
   workflow_dispatch:
