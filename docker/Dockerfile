@@ -8,7 +8,7 @@ RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -DskipTests dependency:go-offl
 COPY src src
 RUN --mount=type=cache,target=/root/.m2 ./mvnw -B -DskipTests package
 
-FROM eclipse-temurin:17-jre-jammy AS runtime
+FROM eclipse-temurin:25-jre-jammy AS runtime
 RUN addgroup --system app && adduser --system --ingroup app app
 WORKDIR /app
 COPY --from=build /app/target/*.jar app.jar
