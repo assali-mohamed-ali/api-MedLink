@@ -2,9 +2,9 @@ name: SCA-Dependency-Check
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master, staging, prod, develop]
   pull_request:
-    branches: [main, master]
+    branches: [main, master, staging, prod]
   schedule:
     - cron: '0 4 * * 1'
 
