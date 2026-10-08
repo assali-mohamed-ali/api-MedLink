@@ -36,11 +36,13 @@ build/
 .env
 .env.*
 !.env.example
+!.env.*.example
 terraform/.terraform/
 terraform/*.tfstate
 terraform/*.tfstate.*
 terraform/*.tfvars
 !terraform/*.tfvars.example
+!terraform/*.tfvars.*.example
 dependency-check-report.*
 trivy-*.sarif
 app.log
