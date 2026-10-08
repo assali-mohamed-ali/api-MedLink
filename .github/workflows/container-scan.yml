@@ -21,7 +21,7 @@ jobs:
         run: docker build -f docker/Dockerfile -t api-medlink:${{ github.sha }} .
 
       - name: Trivy config scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: 'config'
           scan-ref: '.'
@@ -31,7 +31,7 @@ jobs:
           severity: 'CRITICAL,HIGH'
 
       - name: Trivy image scan
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@v0.36.0
         with:
           image-ref: 'api-medlink:${{ github.sha }}'
           format: 'sarif'
