@@ -6,14 +6,46 @@ updates:
       interval: weekly
       day: monday
       time: '06:00'
-    open-pull-requests-limit: 10
+    open-pull-requests-limit: 5
+    groups:
+      maven-minor-patch:
+        patterns:
+          - '*'
+        update-types:
+          - minor
+          - patch
+      maven-major:
+        patterns:
+          - '*'
+        update-types:
+          - major
+    cooldown:
+      default-days: 7
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: weekly
+      day: monday
+      time: '06:00'
     open-pull-requests-limit: 5
+    groups:
+      gha-all:
+        patterns:
+          - '*'
   - package-ecosystem: docker
     directory: /docker
     schedule:
       interval: weekly
+      day: monday
+      time: '06:00'
     open-pull-requests-limit: 5
+    groups:
+      docker-all:
+        patterns:
+          - '*'
+    ignore:
+      # Reste sur Java 17 (pom.xml). Ne pas auto-bump vers 21/25.
+      - dependency-name: 'eclipse-temurin'
+        update-types: ['version-update:semver-major']
+      - dependency-name: 'maven'
+        update-types: ['version-update:semver-major']
