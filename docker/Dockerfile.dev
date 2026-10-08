@@ -1,0 +1,11 @@
+FROM maven:3.9-eclipse-temurin-17
+WORKDIR /app
+COPY pom.xml .
+COPY .mvn .mvn
+COPY mvnw mvnw.cmd ./
+RUN ./mvnw -B -DskipTests dependency:go-offline || true
+COPY src src
+EXPOSE 8080 5005
+ENV SPRING_PROFILES_ACTIVE=dev
+ENV MAVEN_OPTS=-agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005
+CMD ["./mvnw", "spring-boot:run"]

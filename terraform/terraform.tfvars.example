@@ -1,0 +1,9 @@
+# terraform plan -var-file="terraform.tfvars" — ne jamais committer le vrai fichier
+app_image            = "ghcr.io/assali-mohamed-ali/api-medlink:latest"
+app_container_name   = "api-medlink"
+app_external_port    = 8080
+network_name         = "medlink"
+db_url               = "jdbc:postgresql://postgres:5432/mydatabase"
+db_username          = "myuser"
+db_password          = "change-me"
+jwt_secret           = "change-me-32-chars-minimum"

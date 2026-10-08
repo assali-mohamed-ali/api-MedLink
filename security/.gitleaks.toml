@@ -1,0 +1,17 @@
+title = "api-MedLink gitleaks config"
+
+[allowlist]
+description = "Faux positifs autorisés"
+paths = [
+  '''security/.gitleaks.toml''',
+  '''.*test.*''',
+  '''HELP.md''',
+]
+# Exemple : ignorer un hash de doc
+# regexes = ['''change-me-please-use-env.*''']
+
+[[rules]]
+description = "JWT / secrets génériques"
+id = "generic-jwt"
+regex = '''(?i)(jwt_secret|api[_-]?key|secret)\s*[:=]\s*['\"][^'\"]{8,}['\"]'''
+tags = ["secret"]

@@ -1,0 +1,31 @@
+groups:
+  - name: api-medlink
+    rules:
+      - alert: AppDown
+        expr: up{job="api-medlink"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'api-MedLink down'
+      - alert: HighErrorRate
+        expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Taux 5xx > 5% sur 5m'
+      - alert: HighLatencyP95
+        expr: histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 1
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'p95 > 1s sur 5m'
+      - alert: JvmMemoryHigh
+        expr: jvm_memory_used_bytes{area="heap"} / jvm_memory_max_bytes{area="heap"} > 0.9
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Heap JVM > 90%'

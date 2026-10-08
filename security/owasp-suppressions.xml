@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<suppressions xmlns="https://jeremylong.github.io/DependencyCheck/dependency-suppression.1.3.xsd">
+  <!-- Exemple : supprimer un faux positif documenté avec expiration -->
+  <!--
+  <suppress until="2026-12-31">
+    <notes><![CDATA[FP confirmé : ... Ticket: ...]]></notes>
+    <packageUrl regex="true">^pkg:maven/org\.example/.*$</packageUrl>
+    <cve>CVE-20XX-XXXXX</cve>
+  </suppress>
+  -->
+</suppressions>

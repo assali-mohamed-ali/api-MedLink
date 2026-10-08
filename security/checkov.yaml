@@ -1,0 +1,12 @@
+# Checkov — référencé en pre-commit et en CI optionnelle
+compact: true
+quiet: true
+framework:
+  - dockerfile
+  - docker_compose
+  - terraform
+  - github_actions
+skip-check:
+  # À justifier au cas par cas, ne pas empiler sans ticket
+  - CKV_DOCKER_2
+output: cli

@@ -1,0 +1,12 @@
+target/
+.git/
+.github/
+.gitignore
+.idea/
+*.iml
+terraform/
+monitoring/
+security/
+*.md
+docker-compose*.yml
+compose.yaml

@@ -1,0 +1,9 @@
+# ZAP baseline rules — format TSV : ID	ACTION	URL
+# Actions : FAIL, WARN, IGNORE, INFO
+10021	WARN	.*
+10038	WARN	.*
+10109	WARN	.*
+# Exiger HSTS/STS en prod (à passer en FAIL quand mûr)
+10035	INFO	.*
+# Ignorer le faux positif swagger local si besoin
+# 10024	IGNORE	http://localhost:8080/v3/api-docs.*

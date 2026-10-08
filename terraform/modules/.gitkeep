@@ -1,0 +1,6 @@
+# Module placeholder — découpez ici (ex: modules/app, modules/db, modules/network)
+# Exemple d'usage futur :
+# module "app" {
+#   source    = "./modules/app"
+#   app_image = var.app_image
+# }

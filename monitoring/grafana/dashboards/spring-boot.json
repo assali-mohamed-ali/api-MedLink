@@ -1,0 +1,6 @@
+{
+  "title": "api-MedLink (placeholder)",
+  "uid": "api-medlink",
+  "panels": [],
+  "__note": "Importez un dashboard Spring Boot / Micrometer-Prometheus et pointez la datasource Prometheus (voir monitoring/prometheus/prometheus.yml)."
+}

@@ -1,0 +1,15 @@
+# Trivy — référencé par .github/workflows/container-scan.yml
+format: sarif
+severity:
+  - CRITICAL
+  - HIGH
+vulnerability:
+  type:
+    - os
+    - library
+misconfig:
+  scanners:
+    - misconfig
+secret:
+  scanners:
+    - secret
