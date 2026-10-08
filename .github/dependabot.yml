@@ -44,8 +44,15 @@ updates:
         patterns:
           - '*'
     ignore:
-      # Reste sur Java 17 (pom.xml). Ne pas auto-bump vers 21/25.
-      - dependency-name: 'eclipse-temurin'
-        update-types: ['version-update:semver-major']
+      # Pin Java 17 (pom.xml java.version=17). Tags like 3.9-eclipse-temurin-26
+      # ne sont pas du semver classique, donc update-types ne suffit pas.
+      # On bloque tout tag temurin 21+ par wildcard, on garde les patchs 17.
       - dependency-name: 'maven'
-        update-types: ['version-update:semver-major']
+        versions:
+          - '*-eclipse-temurin-2*'
+          - '*-eclipse-temurin-3*'
+          - '*temurin-21*'
+          - '*temurin-25*'
+          - '*temurin-26*'
+      - dependency-name: 'eclipse-temurin'
+        versions: ['2*', '21*', '23*', '24*', '25*', '26*', '3*']
