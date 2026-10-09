@@ -2,6 +2,9 @@
 
 Spring Boot 4.1 / Java 17 API. Package: `com.example.apimedlink`.
 
+> New here? Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): architecture, auth flow,
+> DevSecOps pipeline, ISO 27001 mapping and onboarding steps.
+
 Branches: `master` (integration) → `staging` (pre-prod) → `prod` (release).
 Flow: feature PR → `master`, promote `master` → `staging`, validate, then
 `staging` → `prod` (or tag `v*` for release). CI runs on all three;
