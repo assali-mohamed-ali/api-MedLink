@@ -21,7 +21,7 @@ class UserControllerTest {
 
     @Test
     void unauthenticatedIsRejected() throws Exception {
-        // /api/users requiert un JWT -> 401/403 sans token
-        mvc.perform(get("/api/users")).andExpect(status().is4xxClientError());
+        // /api/users requiert une session (login Keycloak) -> 401 sans session
+        mvc.perform(get("/api/users")).andExpect(status().isUnauthorized());
     }
 }

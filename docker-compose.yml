@@ -24,12 +24,69 @@ services:
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-mydatabase}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-myuser}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-secret}
-      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET must be set}
+      KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}
+      KEYCLOAK_INTERNAL_URL: http://keycloak:8080
+      KEYCLOAK_REALM: medlink
+      KEYCLOAK_CLIENT_ID: medlink-bff
+      KEYCLOAK_CLIENT_SECRET: ${KC_BFF_CLIENT_SECRET:?KC_BFF_CLIENT_SECRET must be set}
     ports:
       - '8080:8080'
     depends_on:
       postgres:
         condition: service_healthy
+      keycloak:
+        condition: service_healthy
+
+  # Keycloak has its own database (separate container + volume), never the app's one.
+  keycloak-db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${KEYCLOAK_DB_NAME:-keycloak}
+      POSTGRES_USER: ${KEYCLOAK_DB_USER:-keycloak}
+      POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD must be set}
+    volumes:
+      - keycloak-db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  keycloak:
+    image: quay.io/keycloak/keycloak:26.7.5
+    # start-dev locally; set KEYCLOAK_START_MODE=start for staging/prod.
+    # --import-realm only creates the realm if it does not exist yet (data kept in keycloak-db-data).
+    command: ['${KEYCLOAK_START_MODE:-start-dev}', '--import-realm']
+    environment:
+      KC_DB: postgres
+      KC_DB_URL: jdbc:postgresql://keycloak-db:5432/${KEYCLOAK_DB_NAME:-keycloak}
+      KC_DB_USERNAME: ${KEYCLOAK_DB_USER:-keycloak}
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD must be set}
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KEYCLOAK_ADMIN:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KEYCLOAK_ADMIN_PASSWORD:?KEYCLOAK_ADMIN_PASSWORD must be set}
+      KC_HOSTNAME: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}
+      KC_HOSTNAME_BACKCHANNEL_DYNAMIC: 'true'
+      KC_HTTP_ENABLED: 'true'
+      KC_HEALTH_ENABLED: 'true'
+      KC_METRICS_ENABLED: 'true'
+      # Placeholders resolved inside keycloak/realm-medlink.json at import
+      KC_BFF_CLIENT_SECRET: ${KC_BFF_CLIENT_SECRET:?KC_BFF_CLIENT_SECRET must be set}
+      KC_BFF_BASE_URL: ${APP_PUBLIC_URL:-http://localhost:8080}
+      KC_DEV_USERS_PASSWORD: ${KC_DEV_USERS_PASSWORD:?KC_DEV_USERS_PASSWORD must be set}
+    volumes:
+      - ./keycloak/realm-medlink.json:/opt/keycloak/data/import/realm-medlink.json:ro
+    ports:
+      - '8180:8080'
+    depends_on:
+      keycloak-db:
+        condition: service_healthy
+    healthcheck:
+      # no curl in the image: plain HTTP over bash /dev/tcp on the management port
+      test: ['CMD', 'bash', '-c', "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   prometheus:
     image: prom/prometheus:v2.53.0
@@ -43,3 +100,4 @@ services:
 
 volumes:
   pgdata:
+  keycloak-db-data:

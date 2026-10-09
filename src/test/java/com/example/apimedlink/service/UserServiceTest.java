@@ -20,17 +20,15 @@ class UserServiceTest {
 
     @Test
     void createThenFind() {
-        var created = service.create(
-                new UserDto(null, "alice", "alice@example.com", "USER"), "Secret123!");
+        var created = service.create(new UserDto(null, "alice", "alice@example.com"));
         assertThat(created.id()).isNotNull();
         assertThat(service.findById(created.id()).username()).isEqualTo("alice");
     }
 
     @Test
     void duplicateUsernameIsRejected() {
-        service.create(new UserDto(null, "bob", "bob@example.com", "USER"), "Secret123!");
-        assertThatThrownBy(() ->
-                        service.create(new UserDto(null, "bob", "bob2@example.com", "USER"), "Secret123!"))
+        service.create(new UserDto(null, "bob", "bob@example.com"));
+        assertThatThrownBy(() -> service.create(new UserDto(null, "bob", "bob2@example.com")))
                 .isInstanceOf(EntityExistsException.class);
     }
 }

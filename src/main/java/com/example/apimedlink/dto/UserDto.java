@@ -7,5 +7,4 @@ import jakarta.validation.constraints.Size;
 public record UserDto(
         Long id,
         @NotBlank @Size(max = 50) String username,
-        @NotBlank @Email @Size(max = 254) String email,
-        String role) {}
+        @NotBlank @Email @Size(max = 254) String email) {}
