@@ -15,6 +15,14 @@ Profiles: `dev` (local) → `staging` (`application-staging.yml`) →
 
 ## 1. Setup (once)
 
+Windows shortcut: [`scripts/setup-dev.ps1`](scripts/setup-dev.ps1) clones the repo, creates `.env`,
+starts Postgres + Keycloak, verifies the realm, runs the tests, starts the API and logs in as
+`doctor.dev` to prove the whole chain works:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1            # or -SkipTests, -FullStack, -Reset, -Stop
+```
+
 ```bash
 git clone https://github.com/assali-mohamed-ali/api-MedLink.git
 cd api-MedLink

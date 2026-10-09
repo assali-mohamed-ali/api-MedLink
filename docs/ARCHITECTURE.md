@@ -16,6 +16,8 @@ The ISO 27001 section maps the repo's technical controls to Annex A. The repo su
 
 Five steps take a new developer from clone to a running stack and a first PR.
 
+**Windows shortcut:** `scripts/setup-dev.ps1` runs steps 1–4 and checks everything (realm, tests, login). Run it with `powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1`.
+
 **Prerequisites:** JDK 17 (Temurin), Docker Desktop, Git, an IDE with Lombok support, and optionally `pre-commit` (`pip install pre-commit`) and `gitleaks`.
 
 1. Clone and prepare secrets
