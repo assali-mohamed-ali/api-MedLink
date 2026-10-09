@@ -8,6 +8,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.util.UUID;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
@@ -33,12 +34,9 @@ public class User {
     @Column(nullable = false, unique = true, length = 254)
     private String email;
 
-    @Column(nullable = false)
-    private String password;
-
-    @Column(nullable = false, length = 20)
-    @Builder.Default
-    private String role = "USER";
+    /** Keycloak user id ({@code sub} claim). Passwords and roles live in Keycloak only. */
+    @Column(unique = true)
+    private UUID keycloakId;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;

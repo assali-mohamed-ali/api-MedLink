@@ -6,7 +6,6 @@ import com.example.apimedlink.repository.UserRepository;
 import jakarta.persistence.EntityExistsException;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.List;
-import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -15,11 +14,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
 
     private final UserRepository users;
-    private final PasswordEncoder passwordEncoder;
 
-    public UserService(UserRepository users, PasswordEncoder passwordEncoder) {
+    public UserService(UserRepository users) {
         this.users = users;
-        this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional(readOnly = true)
@@ -33,7 +30,7 @@ public class UserService {
                 .orElseThrow(() -> new EntityNotFoundException("User " + id + " not found")));
     }
 
-    public UserDto create(UserDto dto, String rawPassword) {
+    public UserDto create(UserDto dto) {
         if (users.existsByUsername(dto.username())) {
             throw new EntityExistsException("Username already taken");
         }
@@ -43,8 +40,6 @@ public class UserService {
         User saved = users.save(User.builder()
                 .username(dto.username())
                 .email(dto.email())
-                .password(passwordEncoder.encode(rawPassword))
-                .role(dto.role() == null ? "USER" : dto.role())
                 .build());
         return toDto(saved);
     }
@@ -57,6 +52,6 @@ public class UserService {
     }
 
     private UserDto toDto(User u) {
-        return new UserDto(u.getId(), u.getUsername(), u.getEmail(), u.getRole());
+        return new UserDto(u.getId(), u.getUsername(), u.getEmail());
     }
 }

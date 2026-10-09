@@ -17,9 +17,9 @@ spring:
     locations: classpath:db/migration
     baseline-on-migrate: true
 
-jwt:
-  secret: ${JWT_SECRET:change-me-please-use-env-JWT_SECRET-32-chars-min}
-  expiration-ms: 3600000
+keycloak:
+  # Client secret of the medlink-bff client (keycloak/realm-medlink.json)
+  client-secret: ${KEYCLOAK_CLIENT_SECRET:dev-only-medlink-bff-secret}
 
 app:
   cors:

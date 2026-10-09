@@ -16,9 +16,9 @@ spring:
     baseline-on-migrate: true
     validate-on-migrate: true
 
-jwt:
-  secret: ${JWT_SECRET}
-  expiration-ms: 3600000
+keycloak:
+  # Client secret of the medlink-bff client (keycloak/realm-medlink.json)
+  client-secret: ${KEYCLOAK_CLIENT_SECRET}
 
 app:
   cors:
