@@ -2,6 +2,9 @@
 
 Spring Boot 4.1 / Java 17 API. Package: `com.example.apimedlink`.
 
+> New here? Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): architecture, auth flow,
+> DevSecOps pipeline, ISO 27001 mapping and onboarding steps.
+
 Branches: `master` (integration) → `staging` (pre-prod) → `prod` (release).
 Flow: feature PR → `master`, promote `master` → `staging`, validate, then
 `staging` → `prod` (or tag `v*` for release). CI runs on all three;
@@ -11,6 +14,14 @@ Profiles: `dev` (local) → `staging` (`application-staging.yml`) →
 `prod` (`application-prod.yml`). Select via `SPRING_PROFILES_ACTIVE`.
 
 ## 1. Setup (once)
+
+Windows shortcut: [`scripts/setup-dev.ps1`](scripts/setup-dev.ps1) clones the repo, creates `.env`,
+starts Postgres + Keycloak, verifies the realm, runs the tests, starts the API and logs in as
+`doctor.dev` to prove the whole chain works:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1            # or -SkipTests, -FullStack, -Reset, -Stop
+```
 
 ```bash
 git clone https://github.com/assali-mohamed-ali/api-MedLink.git
@@ -23,12 +34,12 @@ cp .env.example .env        # then edit secrets inside, never commit .env
 Run locally:
 
 ```bash
-# Option A: Postgres via compose.yaml + app via Maven (dev profile)
+# Option A: Postgres + Keycloak via compose.yaml + app via Maven (dev profile)
 docker compose -f compose.yaml up -d
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 
-# Option B: full stack (app + postgres + prometheus)
-# set JWT_SECRET first: $env:JWT_SECRET="at-least-32-chars-secret-here" (PowerShell)
+# Option B: full stack (app + postgres + keycloak + keycloak-db + prometheus)
+# fill .env first (KC_BFF_CLIENT_SECRET, KEYCLOAK_DB_PASSWORD, KEYCLOAK_ADMIN_PASSWORD, KC_DEV_USERS_PASSWORD)
 docker compose -f docker-compose.yml up --build
 # Staging / prod: same file, different env + profile
 docker compose --env-file .env.staging -f docker-compose.yml up --build   # SPRING_PROFILES_ACTIVE=staging
@@ -36,7 +47,24 @@ docker compose --env-file .env.prod -f docker-compose.yml up --build -d    # SPR
 ```
 
 Useful URLs: API `http://localhost:8080`, Swagger `http://localhost:8080/swagger-ui.html`,
-health `http://localhost:8080/actuator/health`, Prometheus `http://localhost:9090`.
+health `http://localhost:8080/actuator/health`, Prometheus `http://localhost:9090`,
+Keycloak `http://localhost:8180` (admin console: `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`, `admin`/`admin` with `compose.yaml`).
+
+### Keycloak (auth)
+
+- Keycloak owns logins, passwords and roles. The backend stores **no password and no role**.
+- Realm `medlink` is created from `keycloak/realm-medlink.json` on the first start
+  (`--import-realm`). If the realm already exists the file is ignored, so changes made in the
+  admin console are kept (data lives in the `keycloak-db-data` volume, separate `keycloak-db` Postgres).
+  To re-import from the file: `docker compose down -v` (deletes Keycloak data).
+- Access management: realm roles `ADMIN`, `DOCTOR`, `PATIENT`, given through groups
+  `/admins`, `/doctors`, `/patients` (new users land in `/patients`). To add a role: create the
+  role + a group holding it (console or JSON) — no backend change, `KeycloakRolesMapper` turns
+  every realm role from the `roles` claim into `ROLE_<NAME>`.
+- Client `medlink-bff`: confidential, authorization code + PKCE. The browser only gets a session
+  cookie; tokens stay in the backend (BFF). Login starts at `/oauth2/authorization/keycloak`.
+- Test users (dev): `admin.dev`, `doctor.dev`, `patient.dev`, password = `KC_DEV_USERS_PASSWORD`
+  (`MedLink-Dev-2026!` with `compose.yaml`). Delete them in staging/prod after the first start.
 
 ## 2. Where to code
 
@@ -47,14 +75,15 @@ src/main/java/com/example/apimedlink/
   repository/   Spring Data JPA interfaces
   model/        JPA entities
   dto/          records for API in/out (never expose password hashes)
-  config/       SecurityConfig, JwtConfig, CorsConfig
-  security/     JwtAuthFilter, UserDetailsServiceImpl
+  config/       SecurityConfig (oauth2Login BFF), CorsConfig
+  security/     KeycloakRolesMapper (Keycloak roles -> ROLE_*)
   exception/    GlobalExceptionHandler
 src/main/resources/
-  application.properties        base (name only)
+  application.properties        base (name + Keycloak client registration)
   application-dev.yml           local (localhost Postgres, show-sql)
-  application-prod.yml          docker/prod (strict, needs JWT_SECRET env)
+  application-prod.yml          docker/prod (strict, needs KEYCLOAK_CLIENT_SECRET env)
   db/migration/V1__init.sql     Flyway migrations — see below
+keycloak/realm-medlink.json     Keycloak realm import (roles, groups, client, dev users)
 src/test/java/.../              mirror packages: controller/, service/, security/, integration/
 ```
 
@@ -63,9 +92,9 @@ Rules:
 - New table/column → new Flyway file `V<N>__description.sql`, never edit an old `V*.sql`.
   Prod uses `ddl-auto: validate`, so the migration IS the schema.
 - New endpoint → DTO + service method + controller method + test.
-- Passwords: always `PasswordEncoder` (bcrypt, see `UserService`), never log or return them.
-- Roles: default `USER`. Don't let callers self-assign `ADMIN` (see `security/threat-model.md` TODO).
-- JWT: secret comes from env `JWT_SECRET` (32+ chars). No hardcoded secrets anywhere.
+- Passwords and roles: Keycloak only. Never store or accept a password in the backend.
+- Roles: assign them through Keycloak groups, never from request data.
+- Secrets (`KC_BFF_CLIENT_SECRET`, DB/admin passwords) come from env. No hardcoded secrets anywhere.
 
 ## 3. Before you commit (local gates — same as CI)
 
@@ -76,7 +105,7 @@ Rules:
 ./mvnw -B -DskipTests test-compile
 ```
 
-Secrets check (never commit `.env`, tokens, or `JWT_SECRET` values):
+Secrets check (never commit `.env`, tokens, or `KC_BFF_CLIENT_SECRET` values):
 
 ```bash
 gitleaks detect --source . --config security/.gitleaks.toml --redact -v
@@ -120,7 +149,7 @@ git checkout prod && git pull && git merge --no-ff staging && git push origin pr
 (`application-staging.yml`, port 8081, `terraform.tfvars.staging.example`);
 `prod` uses `.env.prod` + `SPRING_PROFILES_ACTIVE=prod`
 (`application-prod.yml`, port 8080, `terraform.tfvars.prod.example`).
-Secrets (`JWT_SECRET`, DB passwords) live in GitHub Environments
+Secrets (`KC_BFF_CLIENT_SECRET`, Keycloak admin, DB passwords) live in GitHub Environments
 (`staging`, `production`) — never in git.
 
 ## 5. What CI does to your PR (and how to react)
@@ -155,6 +184,6 @@ include version/commit, repro steps, impact. Threat overview: `security/threat-m
 - Spring Boot 4 moved test classes: `AutoConfigureMockMvc` is now in
   `org.springframework.boot.webmvc.test.autoconfigure`, `TestRestTemplate` in
   `org.springframework.boot.resttestclient`. Don't "fix" by downgrading Boot.
-- `JWT_SECRET must be set` in compose → export it or fill `.env`.
+- `KC_BFF_CLIENT_SECRET must be set` (or another `... must be set`) in compose → fill `.env` from `.env.example`.
 - Actuator exposes only `health,info,prometheus` — intentional, don't open more
   without a security review.

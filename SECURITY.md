@@ -32,7 +32,8 @@
 
 ## Périmètre
 
-- `src/main/java/com/example/apimedlink/**` (auth JWT, `UserController`, JPA/Flyway)
+- `src/main/java/com/example/apimedlink/**` (auth BFF Keycloak, `UserController`, JPA/Flyway)
+- `keycloak/realm-medlink.json` (realm, rôles, client)
 - `docker/Dockerfile`, `docker-compose.yml`, `terraform/**`
 - Workflows `.github/workflows/**`, config `security/**`, `monitoring/**`
 

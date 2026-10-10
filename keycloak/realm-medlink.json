@@ -1,0 +1,122 @@
+{
+  "realm": "medlink",
+  "displayName": "MedLink",
+  "enabled": true,
+  "sslRequired": "external",
+  "registrationAllowed": false,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "resetPasswordAllowed": true,
+  "verifyEmail": false,
+  "rememberMe": false,
+  "bruteForceProtected": true,
+  "failureFactor": 5,
+  "waitIncrementSeconds": 60,
+  "maxFailureWaitSeconds": 900,
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and notEmail",
+  "accessTokenLifespan": 300,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 36000,
+  "roles": {
+    "realm": [
+      {
+        "name": "ADMIN",
+        "description": "MedLink administrator: manages users and their roles in this realm",
+        "composite": true,
+        "composites": {
+          "client": {
+            "realm-management": ["view-users", "manage-users", "query-users", "query-groups", "view-realm"]
+          }
+        }
+      },
+      {
+        "name": "DOCTOR",
+        "description": "Doctor"
+      },
+      {
+        "name": "PATIENT",
+        "description": "Patient"
+      }
+    ]
+  },
+  "groups": [
+    { "name": "admins", "path": "/admins", "realmRoles": ["ADMIN"] },
+    { "name": "doctors", "path": "/doctors", "realmRoles": ["DOCTOR"] },
+    { "name": "patients", "path": "/patients", "realmRoles": ["PATIENT"] }
+  ],
+  "defaultGroups": ["/patients"],
+  "clients": [
+    {
+      "clientId": "medlink-bff",
+      "name": "MedLink BFF",
+      "description": "Spring Boot backend (auth BFF). Confidential client, authorization code + PKCE.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KC_BFF_CLIENT_SECRET}",
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "frontchannelLogout": true,
+      "rootUrl": "${KC_BFF_BASE_URL}",
+      "baseUrl": "/",
+      "redirectUris": ["${KC_BFF_BASE_URL}/login/oauth2/code/keycloak"],
+      "webOrigins": ["+"],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "${KC_BFF_BASE_URL}/*"
+      },
+      "protocolMappers": [
+        {
+          "name": "realm-roles",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-usermodel-realm-role-mapper",
+          "consentRequired": false,
+          "config": {
+            "claim.name": "roles",
+            "multivalued": "true",
+            "jsonType.label": "String",
+            "id.token.claim": "true",
+            "access.token.claim": "true",
+            "userinfo.token.claim": "true",
+            "introspection.token.claim": "true"
+          }
+        }
+      ]
+    }
+  ],
+  "users": [
+    {
+      "username": "admin.dev",
+      "email": "admin.dev@medlink.local",
+      "firstName": "Admin",
+      "lastName": "Dev",
+      "enabled": true,
+      "emailVerified": true,
+      "groups": ["/admins"],
+      "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
+    },
+    {
+      "username": "doctor.dev",
+      "email": "doctor.dev@medlink.local",
+      "firstName": "Doctor",
+      "lastName": "Dev",
+      "enabled": true,
+      "emailVerified": true,
+      "groups": ["/doctors"],
+      "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
+    },
+    {
+      "username": "patient.dev",
+      "email": "patient.dev@medlink.local",
+      "firstName": "Patient",
+      "lastName": "Dev",
+      "enabled": true,
+      "emailVerified": true,
+      "groups": ["/patients"],
+      "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
+    }
+  ]
+}

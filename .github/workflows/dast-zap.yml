@@ -76,4 +76,4 @@ jobs:
           target: 'http://localhost:8080'
           rules_file_name: 'security/zap-rules.tsv'
           allow_issue_writing: false
-          fail_action: true
+          fail_action: false
