@@ -70,10 +70,12 @@ jobs:
 
       # BLOCKING GATE: fail_action fails the job on rule violations.
       # Tune only via security/zap-rules.tsv with a justification comment.
+      # BLOCKING GATE: fail_action fails the job on rule violations.
+      # Tune only via security/zap-rules.tsv with a justification comment.
       - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.15.0
         with:
           target: 'http://localhost:8080'
           rules_file_name: 'security/zap-rules.tsv'
           allow_issue_writing: false
-          fail_action: false
+          fail_action: true

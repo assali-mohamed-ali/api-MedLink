@@ -25,6 +25,10 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      # BLOCKING GATE: fails on CVSS >= 7. No `|| true` — see
+      # security/owasp-suppressions.xml for the only allowed exceptions
+      # (each needs expiry + ticket reference). Without NVD_API_KEY the
+      # scan still runs with the local mirror (-Dautoupdate=false).
       - name: OWASP Dependency-Check
         run: |
           if [ -n "${NVD_API_KEY:-}" ]; then
@@ -35,14 +39,14 @@ jobs:
           ./mvnw -B org.owasp:dependency-check-maven:check \
             ${NVD_ARG} \
             -DsuppressionFile=security/owasp-suppressions.xml \
-            -Dformat=SARIF || true
+            -DfailBuildOnCVSS=7 \
+            -Dformat=SARIF
         env:
           NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
 
       - name: Upload SARIF
         if: always() && hashFiles('target/dependency-check-report.sarif') != ''
-        uses: github/codeql-action/upload-sarif@v3
-        continue-on-error: true
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: target/dependency-check-report.sarif
           category: owasp-dependency-check
@@ -53,4 +57,5 @@ jobs:
         with:
           name: dependency-check-report
           path: target/dependency-check-report.html
-          if-no-files-found: ignore
+          if-no-files-found: error
+          retention-days: 14

@@ -26,7 +26,7 @@
 | 4 | Info disclosure | PII exposée via API/actuator | DTO sans password, actuator restreint, CORS allowlist, Gitleaks |
 | 5 | DoS | Abus `/api/users` | Rate-limit au reverse-proxy (TODO), healthchecks, pool Hikari borné |
 | 6 | EoP | Rôle forgé | Rôles attribués uniquement via groupes Keycloak (claim `roles` signé), plus de rôle stocké/accepté par l'API |
-| 7 | Supply-chain | Dépendance/image vulnérable | Dependabot, Dependency-Check, Trivy FS+image, CodeQL |
+| 7 | Supply-chain | Dépendance/image vulnérable | Dependabot groupé, Dependency-Check BLOQUANT (CVSS>=7, SARIF), Trivy config+image BLOQUANT (CRITICAL/HIGH, SARIF), CodeQL `security-extended` |
 
 ## TODO sécurité
 - [ ] Endpoints `AuthBffController` (me/logout) + tests d'autorisation négatifs
