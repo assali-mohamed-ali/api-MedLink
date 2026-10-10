@@ -125,15 +125,15 @@ Secrets (`JWT_SECRET`, DB passwords) live in GitHub Environments
 
 ## 5. What CI does to your PR (and how to react)
 
-| Check | Workflow | If red |
-|---|---|---|
-| Build + tests | `ci.yml` | run `./mvnw verify` locally, fix code/tests |
-| SAST (CodeQL) | `sast-codeql.yml` | fix flagged pattern, don't suppress without comment |
-| Deps CVEs | `sca-dependency-check.yml` | upgrade dep, or justify suppression in `security/owasp-suppressions.xml` with expiry + ticket |
-| Secrets | `secrets-scan.yml` | remove secret, rotate it, rewrite history if pushed |
-| Image + config | `container-scan.yml` (Trivy) | bump base image / fix Dockerfile misconfig |
-| DAST (ZAP) | `dast-zap.yml` (master/staging) | fix endpoint, update `security/zap-rules.tsv` only with reason |
-| Publish | `cd.yml` (staging→staging env, prod/master/v*→production env) | builds + pushes `ghcr.io/...` image, validates terraform |
+| Check | Workflow | Blocking? | If red |
+|---|---|---|---|
+| Build + tests | `ci.yml` | YES — test failure fails job, blocks PR | run `./mvnw verify` locally, fix code/tests |
+| SAST (CodeQL) | `sast-codeql.yml` | YES — errors fail job, alerts to code scanning | fix flagged pattern, don't suppress without comment |
+| Deps CVEs | `sca-dependency-check.yml` | YES — fails on CVSS >= 7 | upgrade dep, or justify suppression in `security/owasp-suppressions.xml` with expiry + ticket |
+| Secrets | `secrets-scan.yml` | YES — any leak fails job | remove secret, rotate it, rewrite history if pushed |
+| Image + config | `container-scan.yml` (Trivy) | YES — CRITICAL/HIGH fails job | bump base image / fix Dockerfile misconfig |
+| DAST (ZAP) | `dast-zap.yml` (master/staging) | YES — `fail_action: true` | fix endpoint, update `security/zap-rules.tsv` only with reason |
+| Publish | `cd.yml` (staging→staging env, prod/v*→production env) | env-gated | builds + pushes `ghcr.io/...` image, validates terraform |
 
 Dependabot opens grouped PRs weekly (`dependabot.yml`):
 `maven-minor-patch`, `maven-major`, `gha-all`, `docker-all`.

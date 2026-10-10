@@ -25,7 +25,7 @@
 | 4 | Info disclosure | PII exposée via API/actuator | DTO sans password, actuator restreint, CORS allowlist, Gitleaks |
 | 5 | DoS | Abus `/api/users` | Rate-limit au reverse-proxy (TODO), healthchecks, pool Hikari borné |
 | 6 | EoP | `role` forgé à la création | Durcir `UserService.create` (forcer `USER` sauf admin) — TODO |
-| 7 | Supply-chain | Dépendance/image vulnérable | Dependabot, Dependency-Check, Trivy FS+image, CodeQL |
+| 7 | Supply-chain | Dépendance/image vulnérable | Dependabot groupé, Dependency-Check BLOQUANT (CVSS>=7), Trivy config+image BLOQUANT (CRITICAL/HIGH, SARIF), CodeQL `security-extended` |
 
 ## TODO sécurité
 - [ ] Endpoint `/api/auth/**` (login/refresh) + tests d'autorisation négatifs
