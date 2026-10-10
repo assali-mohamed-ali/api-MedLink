@@ -20,6 +20,7 @@ jobs:
       - name: Build image (no push)
         run: docker build -f docker/Dockerfile -t api-medlink:${{ github.sha }} .
 
+      # BLOCKING GATE: exit-code 1 fails the job on CRITICAL/HIGH.
       - name: Trivy config scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -29,7 +30,10 @@ jobs:
           format: 'sarif'
           output: 'trivy-config.sarif'
           severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
 
+      # BLOCKING GATE: exit-code 1 fails the job on CRITICAL/HIGH.
       - name: Trivy image scan
         uses: aquasecurity/trivy-action@v0.36.0
         with:
@@ -37,10 +41,19 @@ jobs:
           format: 'sarif'
           output: 'trivy-image.sarif'
           severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
 
-      - name: Upload SARIF
-        if: always()
-        uses: github/codeql-action/upload-sarif@v3
+      - name: Upload config SARIF
+        if: always() && hashFiles('trivy-config.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
+        with:
+          sarif_file: 'trivy-config.sarif'
+          category: trivy-config
+
+      - name: Upload image SARIF
+        if: always() && hashFiles('trivy-image.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-image.sarif'
           category: trivy-image

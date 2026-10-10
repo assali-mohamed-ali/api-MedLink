@@ -39,12 +39,16 @@ jobs:
 
       - name: Start app
         run: |
-          ./mvnw -B -DskipTests package
+          chmod +x mvnw || true
+          ./mvnw --no-transfer-progress --fail-fast -DskipTests package
+          # CI fallback secret so PRs from forks (no secrets) still exercise DAST.
+          # Real staging/prod runs use the JWT_SECRET environment secret.
+          EFFECTIVE_JWT_SECRET="${JWT_SECRET:-ci-fallback-secret-32-chars-minimum-1234567890}"
           SPRING_PROFILES_ACTIVE=dev \
           SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/mydatabase \
           SPRING_DATASOURCE_USERNAME=myuser \
           SPRING_DATASOURCE_PASSWORD=secret \
-          JWT_SECRET=${{ secrets.JWT_SECRET }} \
+          JWT_SECRET="$EFFECTIVE_JWT_SECRET" \
           nohup java -jar target/*.jar > app.log 2>&1 &
           for i in $(seq 1 30); do
             curl -sf http://localhost:8080/actuator/health && break
@@ -52,7 +56,22 @@ jobs:
           done
           curl -sf http://localhost:8080/actuator/health
           cat app.log | tail -100
+        env:
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
+      - name: Upload app log
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: dast-app-log
+          path: app.log
+          if-no-files-found: warn
+          retention-days: 7
+
+      # BLOCKING GATE: fail_action fails the job on rule violations.
+      # Tune only via security/zap-rules.tsv with a justification comment.
+      # BLOCKING GATE: fail_action fails the job on rule violations.
+      # Tune only via security/zap-rules.tsv with a justification comment.
       - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.15.0
         with:
