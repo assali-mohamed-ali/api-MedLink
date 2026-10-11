@@ -32,6 +32,9 @@ build/
 ### VS Code ###
 .vscode/
 
+### Dev setup scripts (local state) ###
+.dev/
+
 ### DevSecOps ###
 .env
 .env.*

@@ -16,9 +16,9 @@ The ISO 27001 section maps the repo's technical controls to Annex A. The repo su
 
 Five steps take a new developer from clone to a running stack and a first PR.
 
-**Windows shortcut:** `scripts/setup-dev.ps1` runs steps 1–4 and checks everything (realm, tests, login). Run it with `powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1`.
+**One-command shortcut:** the setup script runs steps 1–4 and checks everything (realm, tests, login), with no configuration. Windows: `powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1`. macOS / Linux: `./scripts/setup-dev.sh`. It finds a JDK 17+ by itself (or lets Docker build the API when there is none) and re-imports the realm when `keycloak/realm-medlink.json` changed.
 
-**Prerequisites:** JDK 17 (Temurin), Docker Desktop, Git, an IDE with Lombok support, and optionally `pre-commit` (`pip install pre-commit`) and `gitleaks`.
+**Prerequisites:** Docker Desktop and Git. For coding: JDK 17 (Temurin), an IDE with Lombok support, and optionally `pre-commit` (`pip install pre-commit`) and `gitleaks`.
 
 1. Clone and prepare secrets
    - `git clone https://github.com/assali-mohamed-ali/api-MedLink.git && cd api-MedLink`
@@ -129,7 +129,7 @@ flowchart LR
 3. Add users to the group. They get `ROLE_NURSE` at their next login.
 4. Protect endpoints with it: `.requestMatchers("/api/care/**").hasRole("NURSE")` in `SecurityConfig`, or `@PreAuthorize("hasRole('NURSE')")` once `@EnableMethodSecurity` is added (not enabled yet).
 
-The realm file is imported **only when the realm does not exist yet**. After the first start, the console is the source of truth; export the realm if you want the file updated.
+The realm file is imported **only when the realm does not exist yet**. In staging and prod the console is therefore the source of truth after the first start; export the realm if you want the file updated. In local dev the file is the source of truth: the setup script re-imports it (and wipes the dev volumes) whenever it changed, so change the realm through the file in a PR, not only in your console.
 
 ## The why behind each setup
 
@@ -295,7 +295,7 @@ The first group blocks a working staging/prod deployment; the rest closes the *P
 - [ ] Route Prometheus alerts (Alertmanager target) and add a central log store
 - [ ] Backup + tested restore for `pgdata` and `keycloak-db-data`
 - [ ] Turn on branch protection with required checks for `master`, `staging`, `prod`
-- [ ] Pin `postgres:latest` in `compose.yaml` and `TestcontainersConfiguration.java`
+- [x] Pin `postgres:latest` in `compose.yaml` and `TestcontainersConfiguration.java` (now `postgres:16`)
 - [ ] Rate limiting, HSTS and CSP at the reverse proxy
 - [ ] Shared sessions (e.g. Spring Session) before running more than one API instance
 - [ ] Add a Sonar workflow or remove `sonar-project.properties`
@@ -322,7 +322,7 @@ Ten rules cover most review comments; the FAQ covers the errors new team members
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `... must be set` when starting `docker-compose.yml` | A required secret is missing | Fill `.env` from `.env.example` |
-| Realm changes in the JSON are ignored | The realm already exists; import runs only once | Change it in the console, or `docker compose down -v` to reset Keycloak data (deletes users) |
+| Realm changes in the JSON are ignored | The realm already exists; import runs only once | Local dev: re-run the setup script, it re-imports a changed realm file (deletes dev users). Elsewhere: change it in the console |
 | `/api/...` returns 401 | No session | Log in at `/oauth2/authorization/keycloak` first |
 | POST/PUT/DELETE returns 403 | Missing CSRF token | Send the `XSRF-TOKEN` cookie value as the `X-XSRF-TOKEN` header |
 | A new role does not show up | Roles are read at login | Log out and in again |

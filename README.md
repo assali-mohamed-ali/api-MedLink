@@ -15,19 +15,40 @@ Profiles: `dev` (local) → `staging` (`application-staging.yml`) →
 
 ## 1. Setup (once)
 
-Windows shortcut: [`scripts/setup-dev.ps1`](scripts/setup-dev.ps1) clones the repo, creates `.env`,
-starts Postgres + Keycloak, verifies the realm, runs the tests, starts the API and logs in as
-`practitioner.dev` to prove the whole chain works:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1            # or -SkipTests, -FullStack, -Reset, -Stop
-```
+Install Git and Docker Desktop, clone, then run one script. It is the same on every machine and
+needs no configuration:
 
 ```bash
 git clone https://github.com/assali-mohamed-ali/api-MedLink.git
 cd api-MedLink
+```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1     # or -SkipTests, -FullStack, -Reset, -KeepData, -Stop
+```
+
+```bash
+# macOS / Linux
+./scripts/setup-dev.sh                                               # or --skip-tests, --full-stack, --reset, --keep-data, --stop
+```
+
+The script ([`setup-dev.ps1`](scripts/setup-dev.ps1) / [`setup-dev.sh`](scripts/setup-dev.sh)) creates
+`.env` with random secrets, starts Postgres + Keycloak, verifies the realm, runs the tests, starts the
+API and logs in as `practitioner.dev` to prove the whole chain works. What it handles for you:
+
+- **JDK:** it finds a JDK 17+ on the machine and uses it for this run only (no `JAVA_HOME` to set).
+  With no JDK 17+ it switches to full-stack mode, where Docker builds and runs the API.
+- **Realm changes:** when `keycloak/realm-medlink.json` changed since your last run (after a `git pull`),
+  it deletes the dev volumes and re-imports the realm, so everyone has the same roles, groups and
+  users. Dev data is lost on that run; pass `-KeepData` / `--keep-data` to skip it.
+- **Line endings and images:** `.gitattributes` and pinned image versions (Postgres 16, Keycloak
+  26.7.5) keep the files and containers identical on Windows, macOS and Linux.
+
+By hand instead (JDK 17 + Docker required, tests use Testcontainers/Postgres):
+
+```bash
 cp .env.example .env        # then edit secrets inside, never commit .env
-# Java 17 + Docker Desktop required (tests use Testcontainers/Postgres)
 ./mvnw -B -DskipTests compile
 ```
 
