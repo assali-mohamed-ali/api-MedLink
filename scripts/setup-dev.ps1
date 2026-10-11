@@ -267,7 +267,14 @@ if ($Reset) { Write-Ok 'volumes deleted: Keycloak will import the realm from scr
 
 $busy = @()
 $ports = @(8080, 8180)
-if ($FullStack) { $ports += 5432, 9090 }
+if ($FullStack) {
+    # Host side only: inside the compose network the API still reaches postgres:5432.
+    $pgPort = 5432
+    while ((Get-ListeningProcess $pgPort) -and $pgPort -lt 5442) { $pgPort++ }
+    if ($pgPort -ne 5432) { Write-Host "  [INFO] port 5432 is taken (a local PostgreSQL?): the database is published on $pgPort instead" -ForegroundColor Yellow }
+    $env:POSTGRES_HOST_PORT = "$pgPort"
+    $ports += $pgPort, 9090
+}
 foreach ($port in $ports) {
     $owner = Get-ListeningProcess $port
     if ($owner) { $busy += "port $port is used by $owner" }

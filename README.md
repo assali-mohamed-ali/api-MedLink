@@ -38,7 +38,8 @@ The script ([`setup-dev.ps1`](scripts/setup-dev.ps1) / [`setup-dev.sh`](scripts/
 API and logs in as `practitioner.dev` to prove the whole chain works. What it handles for you:
 
 - **JDK:** it finds a JDK 17+ on the machine and uses it for this run only (no `JAVA_HOME` to set).
-  With no JDK 17+ it switches to full-stack mode, where Docker builds and runs the API.
+  With no JDK 17+ it switches to full-stack mode, where Docker builds and runs the API. In that
+  mode, if a local PostgreSQL already uses port 5432, the database is published on the next free port.
 - **Realm changes:** when `keycloak/realm-medlink.json` changed since your last run (after a `git pull`),
   it deletes the dev volumes and re-imports the realm, so everyone has the same roles, groups and
   users. Dev data is lost on that run; pass `-KeepData` / `--keep-data` to skip it.

@@ -273,7 +273,14 @@ else
 fi
 
 PORTS='8080 8180'
-[ "$FULL_STACK" -eq 1 ] && PORTS="$PORTS 5432 9090"
+if [ "$FULL_STACK" -eq 1 ]; then
+    # Host side only: inside the compose network the API still reaches postgres:5432.
+    PG_PORT=5432
+    while port_busy "$PG_PORT" && [ "$PG_PORT" -lt 5442 ]; do PG_PORT=$((PG_PORT + 1)); done
+    [ "$PG_PORT" -ne 5432 ] && info "port 5432 is taken (a local PostgreSQL?): the database is published on $PG_PORT instead"
+    export POSTGRES_HOST_PORT="$PG_PORT"
+    PORTS="$PORTS $PG_PORT 9090"
+fi
 BUSY=''
 for port in $PORTS; do
     port_busy "$port" && BUSY="$BUSY
