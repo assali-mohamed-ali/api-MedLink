@@ -347,7 +347,7 @@ else
         bad 'client medlink-bff not found'
     else
         ok 'client medlink-bff exists'
-        REDIRECTS="$(printf '%s' "$CLIENT" | sed -n 's/.*"redirectUris":\[\([^]]*\)\].*/\1/p')"
+        REDIRECTS="$(printf '%s' "$CLIENT" | sed -n 's/.*"redirectUris":\[\([^]]*\)\].*/\1/p' | tr -d '"')"
         case "$REDIRECTS" in
             *'${'*) bad "redirect URIs contain an unresolved placeholder: $REDIRECTS" ;;
             *) ok "redirect URI $REDIRECTS" ;;
