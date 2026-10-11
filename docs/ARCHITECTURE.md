@@ -43,7 +43,7 @@ Five steps take a new developer from clone to a running stack and a first PR.
 | Keycloak admin console | http://localhost:8180 | `admin` / `admin` (compose.yaml) or `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` |
 | Prometheus (Option B) | http://localhost:9090 | none |
 
-**Test users (dev only):** `admin.dev`, `doctor.dev`, `patient.dev`. Password = `KC_DEV_USERS_PASSWORD` (`MedLink-Dev-2026!` with `compose.yaml`).
+**Test users (dev only):** `staff.dev`, `practitioner.dev`, `patient.dev`. Password = `KC_DEV_USERS_PASSWORD` (`MedLink-Dev-2026!` with `compose.yaml`).
 
 ## Architecture
 
@@ -105,21 +105,21 @@ sequenceDiagram
 ```mermaid
 flowchart LR
   subgraph KC[Keycloak realm medlink]
-    UA[admin.dev] --> GA[/admins/]
-    UD[doctor.dev] --> GD[/doctors/]
+    UA[staff.dev] --> GA[/administrative-staff/]
+    UD[practitioner.dev] --> GD[/practitioners/]
     UP[patient.dev] --> GP[/patients/]
     NEW[any new user] -. default group .-> GP
-    GA --> RA[ADMIN]
-    GD --> RD[DOCTOR]
+    GA --> RA[ADMINISTRATIVE_STAFF]
+    GD --> RD[PRACTITIONER]
     GP --> RP[PATIENT]
     RA --> RM["realm-management: view, manage and query users, query groups, view realm"]
   end
   RA & RD & RP --> C[claim roles in the ID token]
-  C --> M[KeycloakRolesMapper] --> S[ROLE_ADMIN / ROLE_DOCTOR / ROLE_PATIENT]
+  C --> M[KeycloakRolesMapper] --> S[ROLE_ADMINISTRATIVE_STAFF / ROLE_PRACTITIONER / ROLE_PATIENT]
 ```
 
-- **Roles are given through groups, never to users directly.** Moving someone from `/patients` to `/doctors` is one change in the console, and every holder of a role can be listed from its group.
-- **`ADMIN` is a realm admin, not a Keycloak super-admin.** It can manage users and groups in `medlink` only; the bootstrap `admin` account in the master realm stays separate.
+- **Roles are given through groups, never to users directly.** Moving someone from `/patients` to `/practitioners` is one change in the console, and every holder of a role can be listed from its group.
+- **`ADMINISTRATIVE_STAFF` is a realm admin, not a Keycloak super-admin.** It can manage users and groups in `medlink` only; the bootstrap `admin` account in the master realm stays separate.
 - **Role changes apply at the next login,** because the roles are read from the ID token issued at login.
 
 ### How to add a role (no backend change needed)
@@ -142,7 +142,7 @@ Every choice below trades a little simplicity for less attack surface or less cu
 | Confidential client + PKCE S256 | A stolen authorization code is useless without the verifier and the client secret | Implicit flow and password grant are disabled in the realm |
 | Separate `keycloak-db` container + volume | Identity data is isolated from business data: separate credentials, backups and upgrades; the volume keeps realm and users across restarts | One shared Postgres: fewer containers, but one breach or bad migration hits both |
 | `--import-realm` from `keycloak/realm-medlink.json` | Any new environment boots with the same realm, roles and client; existing realms are never overwritten | Re-importing on every start would wipe changes made in the console |
-| Roles via groups + one generic mapper | New roles need no code; `ADMIN` is limited to user management in its own realm | A hard-coded `role` column (dropped in V2) |
+| Roles via groups + one generic mapper | New roles need no code; `ADMINISTRATIVE_STAFF` is limited to user management in its own realm | A hard-coded `role` column (dropped in V2) |
 | No password or role in the API database | Data minimisation and a single source of truth for identity | Kept columns would drift from Keycloak and widen the breach impact |
 | Explicit OIDC endpoints, not `issuer-uri` | The API starts even when Keycloak is down (tests, CI, DAST); browser and backend use different Keycloak URLs inside Docker | Discovery needs less config but makes Keycloak a hard startup dependency |
 | CSRF on, SPA cookie mode | Session cookies are sent automatically, so CSRF tokens are required | The old stateless JWT setup had CSRF disabled |
@@ -168,7 +168,7 @@ Code lives under `src/main/java/com/example/apimedlink/`; everything security-re
 | `exception/` | `GlobalExceptionHandler` (404 / 409 / 400 JSON errors) | Adding an error type |
 | `resources/application.properties` | Base config + Keycloak client registration | Changing Keycloak URLs or client |
 | `resources/application-{dev,staging,prod}.yml` | Per-environment DB, CORS, actuator, logging, client secret | Environment-specific settings |
-| `resources/db/migration/` | Flyway: `V1__init.sql`, `V2__keycloak_users.sql` | Any schema change: add `V3__...`, never edit an old file |
+| `resources/db/migration/` | Flyway: `V1__init.sql`, `V2__keycloak_users.sql`, `V3__users_uuid_id.sql` | Any schema change: add `V4__...`, never edit an old file |
 | `keycloak/realm-medlink.json` | Realm, roles, groups, `medlink-bff` client, dev users | Bootstrapping new environments |
 | `compose.yaml` / `docker-compose.yml` | Dev dependencies / full stack | Adding a service |
 | `docker/` | Multi-stage `Dockerfile` (non-root), `Dockerfile.dev` (debug port 5005) | Changing the image |
@@ -254,7 +254,7 @@ The repository implements or evidences 25 Annex A controls: 10 covered, 12 parti
 | 5.16 Identity management | One identity store (Keycloak); the API keeps only a `keycloak_id` link | `keycloak/realm-medlink.json`, `V2__keycloak_users.sql` | Covered | |
 | 5.17 Authentication information | Passwords live only in Keycloak; policy: 12+ chars, upper, lower, digit, special, not username/email | realm `passwordPolicy`, V2 drops `users.password` | Covered | |
 | 5.18 Access rights | Roles granted through groups; new users default to `/patients`; no role accepted from requests | realm `groups`, `defaultGroups` | Partial | Define a periodic access review of group membership |
-| 8.2 Privileged access rights | `ADMIN` limited to user management in its realm; bootstrap admin separate; Actuator limited to health/info/prometheus | realm `roles`, `application-*.yml` | Partial | Enforce MFA (OTP) for `ADMIN` and the bootstrap admin |
+| 8.2 Privileged access rights | `ADMINISTRATIVE_STAFF` limited to user management in its realm; bootstrap admin separate; Actuator limited to health/info/prometheus | realm `roles`, `application-*.yml` | Partial | Enforce MFA (OTP) for `ADMINISTRATIVE_STAFF` and the bootstrap admin |
 | 8.4 Access to source code | CODEOWNERS on security-sensitive paths; PR-only flow | `.github/CODEOWNERS`, README | Partial | Verify branch protection on `master`/`staging`/`prod` in GitHub settings |
 | 8.5 Secure authentication | OIDC code + PKCE S256, confidential client, brute-force lockout after 5 failures, 30 min idle / 10 h max session | realm settings, `application.properties` | Partial | MFA not enforced; TLS terminates at a proxy that is not in the repo |
 | 8.8 Management of technical vulnerabilities | Dependabot weekly; OWASP Dependency-Check, Trivy, CodeQL; private disclosure | `.github/dependabot.yml`, workflows, `SECURITY.md` | Partial | Make SCA and Trivy fail on HIGH/CRITICAL |
@@ -290,7 +290,7 @@ The first group blocks a working staging/prod deployment; the rest closes the *P
 ### Security hardening
 
 - [ ] Implement `AuthBffController` endpoints (current user, logout with OIDC end-session, CSRF bootstrap) and negative authorization tests
-- [ ] Enforce MFA (OTP) for `ADMIN` and the bootstrap admin; enable Keycloak login and admin events
+- [ ] Enforce MFA (OTP) for `ADMINISTRATIVE_STAFF` and the bootstrap admin; enable Keycloak login and admin events
 - [ ] Make OWASP Dependency-Check and Trivy fail on HIGH/CRITICAL; move ZAP rules from WARN to FAIL
 - [ ] Route Prometheus alerts (Alertmanager target) and add a central log store
 - [ ] Backup + tested restore for `pgdata` and `keycloak-db-data`

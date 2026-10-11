@@ -6,6 +6,7 @@ import com.example.apimedlink.repository.UserRepository;
 import jakarta.persistence.EntityExistsException;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.List;
+import java.util.UUID;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,7 +26,7 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public UserDto findById(Long id) {
+    public UserDto findById(UUID id) {
         return toDto(users.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("User " + id + " not found")));
     }
@@ -44,7 +45,7 @@ public class UserService {
         return toDto(saved);
     }
 
-    public void delete(Long id) {
+    public void delete(UUID id) {
         if (!users.existsById(id)) {
             throw new EntityNotFoundException("User " + id + " not found");
         }

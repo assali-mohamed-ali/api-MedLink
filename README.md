@@ -17,7 +17,7 @@ Profiles: `dev` (local) → `staging` (`application-staging.yml`) →
 
 Windows shortcut: [`scripts/setup-dev.ps1`](scripts/setup-dev.ps1) clones the repo, creates `.env`,
 starts Postgres + Keycloak, verifies the realm, runs the tests, starts the API and logs in as
-`doctor.dev` to prove the whole chain works:
+`practitioner.dev` to prove the whole chain works:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1            # or -SkipTests, -FullStack, -Reset, -Stop
@@ -57,13 +57,14 @@ Keycloak `http://localhost:8180` (admin console: `KEYCLOAK_ADMIN` / `KEYCLOAK_AD
   (`--import-realm`). If the realm already exists the file is ignored, so changes made in the
   admin console are kept (data lives in the `keycloak-db-data` volume, separate `keycloak-db` Postgres).
   To re-import from the file: `docker compose down -v` (deletes Keycloak data).
-- Access management: realm roles `ADMIN`, `DOCTOR`, `PATIENT`, given through groups
-  `/admins`, `/doctors`, `/patients` (new users land in `/patients`). To add a role: create the
+- Access management: realm roles `ADMINISTRATIVE_STAFF`, `PRACTITIONER`, `PATIENT` (same names as
+  the `Role` enum of the class diagram), given through groups `/administrative-staff`,
+  `/practitioners`, `/patients` (new users land in `/patients`). To add a role: create the
   role + a group holding it (console or JSON) — no backend change, `KeycloakRolesMapper` turns
   every realm role from the `roles` claim into `ROLE_<NAME>`.
 - Client `medlink-bff`: confidential, authorization code + PKCE. The browser only gets a session
   cookie; tokens stay in the backend (BFF). Login starts at `/oauth2/authorization/keycloak`.
-- Test users (dev): `admin.dev`, `doctor.dev`, `patient.dev`, password = `KC_DEV_USERS_PASSWORD`
+- Test users (dev): `staff.dev`, `practitioner.dev`, `patient.dev`, password = `KC_DEV_USERS_PASSWORD`
   (`MedLink-Dev-2026!` with `compose.yaml`). Delete them in staging/prod after the first start.
 
 ## 2. Where to code

@@ -9,7 +9,7 @@
     4. Starts the containers and waits until Keycloak serves the "medlink" realm.
     5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
     6. Runs ./mvnw verify (unless -SkipTests).
-    7. Starts the API and runs smoke tests, including a real login as doctor.dev.
+    7. Starts the API and runs smoke tests, including a real login as practitioner.dev.
 
     Run from PowerShell (5.1 or 7):
         powershell -ExecutionPolicy Bypass -File .\setup-dev.ps1
@@ -282,12 +282,12 @@ try {
     else { Write-Bad "issuer is $($wellKnown.issuer), expected $KeycloakUrl/realms/medlink (check KC_HOSTNAME)" }
 
     $roleNames = (Invoke-RestMethod "$admin/roles" -Headers $auth).name
-    $missingRoles = @('ADMIN', 'DOCTOR', 'PATIENT') | Where-Object { $roleNames -notcontains $_ }
-    if ($missingRoles) { Write-Bad "missing realm roles: $($missingRoles -join ', ')" } else { Write-Ok 'roles ADMIN, DOCTOR, PATIENT' }
+    $missingRoles = @('ADMINISTRATIVE_STAFF', 'PRACTITIONER', 'PATIENT') | Where-Object { $roleNames -notcontains $_ }
+    if ($missingRoles) { Write-Bad "missing realm roles: $($missingRoles -join ', ')" } else { Write-Ok 'roles ADMINISTRATIVE_STAFF, PRACTITIONER, PATIENT' }
 
     $groupNames = (Invoke-RestMethod "$admin/groups" -Headers $auth).name
-    $missingGroups = @('admins', 'doctors', 'patients') | Where-Object { $groupNames -notcontains $_ }
-    if ($missingGroups) { Write-Bad "missing groups: $($missingGroups -join ', ')" } else { Write-Ok 'groups admins, doctors, patients' }
+    $missingGroups = @('administrative-staff', 'practitioners', 'patients') | Where-Object { $groupNames -notcontains $_ }
+    if ($missingGroups) { Write-Bad "missing groups: $($missingGroups -join ', ')" } else { Write-Ok 'groups administrative-staff, practitioners, patients' }
 
     $client = @(Invoke-RestMethod "$admin/clients?clientId=medlink-bff" -Headers $auth)
     if ($client.Count -ne 1) {
@@ -305,8 +305,8 @@ try {
     }
 
     $userNames = (Invoke-RestMethod "$admin/users?briefRepresentation=true&max=50" -Headers $auth).username
-    $missingUsers = @('admin.dev', 'doctor.dev', 'patient.dev') | Where-Object { $userNames -notcontains $_ }
-    if ($missingUsers) { Write-Warn "test users missing: $($missingUsers -join ', ') (deleted on purpose?)" } else { Write-Ok 'test users admin.dev, doctor.dev, patient.dev' }
+    $missingUsers = @('staff.dev', 'practitioner.dev', 'patient.dev') | Where-Object { $userNames -notcontains $_ }
+    if ($missingUsers) { Write-Warn "test users missing: $($missingUsers -join ', ') (deleted on purpose?)" } else { Write-Ok 'test users staff.dev, practitioner.dev, patient.dev' }
 } catch {
     Write-Bad "Keycloak admin API check failed: $($_.Exception.Message)"
     if (-not $FullStack) { Write-Host '  (if Keycloak data comes from an older run with another admin password, re-run with -Reset)' }
@@ -361,7 +361,7 @@ if ($location -like "$KeycloakUrl/realms/medlink/protocol/openid-connect/auth*" 
 $swagger = Get-HttpStatus "$AppUrl/swagger-ui.html"
 if ($swagger -in 200, 302) { Write-Ok 'Swagger UI reachable' } else { Write-Warn "Swagger UI returned $swagger" }
 
-# End-to-end: log in as doctor.dev through the Keycloak login form, then call the API with the session.
+# End-to-end: log in as practitioner.dev through the Keycloak login form, then call the API with the session.
 try {
     $session = New-Object Microsoft.PowerShell.Commands.WebRequestSession
     $loginPage = Invoke-WebRequest -Uri "$AppUrl/oauth2/authorization/keycloak" -WebSession $session -UseBasicParsing
@@ -369,13 +369,13 @@ try {
     $action = [System.Net.WebUtility]::HtmlDecode($Matches[1])
     try {
         Invoke-WebRequest -Uri $action -Method Post -WebSession $session -UseBasicParsing `
-            -Body @{ username = 'doctor.dev'; password = $usersPassword; credentialId = '' } | Out-Null
+            -Body @{ username = 'practitioner.dev'; password = $usersPassword; credentialId = '' } | Out-Null
     } catch {
         # After login Spring redirects to "/", which has no page (404): expected, the session is what matters.
         if (-not $_.Exception.Response) { throw }
     }
     $api = Invoke-WebRequest -Uri "$AppUrl/api/users" -WebSession $session -UseBasicParsing
-    if ($api.StatusCode -eq 200) { Write-Ok 'end-to-end login as doctor.dev works: /api/users returns 200 with the session' }
+    if ($api.StatusCode -eq 200) { Write-Ok 'end-to-end login as practitioner.dev works: /api/users returns 200 with the session' }
     else { Write-Bad "after login /api/users returned $($api.StatusCode)" }
 } catch {
     Write-Warn "automated login check did not complete ($($_.Exception.Message)). Test it in a browser: $AppUrl/oauth2/authorization/keycloak"
@@ -394,7 +394,7 @@ Write-Host @"
   Login           $AppUrl/oauth2/authorization/keycloak
   Swagger UI      $AppUrl/swagger-ui.html
   Keycloak admin  $KeycloakUrl   (user: $kcAdminUser, password: $(if ($FullStack) { 'KEYCLOAK_ADMIN_PASSWORD in .env' } else { 'admin' }))
-  Test users      admin.dev / doctor.dev / patient.dev   (password: $(if ($FullStack) { 'KC_DEV_USERS_PASSWORD in .env' } else { $DevUsersPassword }))
+  Test users      staff.dev / practitioner.dev / patient.dev   (password: $(if ($FullStack) { 'KC_DEV_USERS_PASSWORD in .env' } else { $DevUsersPassword }))
   Logs            $LogDir
 
   Stop everything:  powershell -ExecutionPolicy Bypass -File "$Repo\scripts\setup-dev.ps1" -Stop
