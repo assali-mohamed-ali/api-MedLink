@@ -43,6 +43,10 @@ API and logs in as `practitioner.dev` to prove the whole chain works. What it ha
 - **Realm changes:** when `keycloak/realm-medlink.json` changed since your last run (after a `git pull`),
   it deletes the dev volumes and re-imports the realm, so everyone has the same roles, groups and
   users. Dev data is lost on that run; pass `-KeepData` / `--keep-data` to skip it.
+  Safety net: before any wipe it saves the realm as it is in your Keycloak to
+  `.dev/realm-backups/realm-backup-<date>.json` (flows, roles, groups, clients; no users, secrets
+  masked; the 10 latest are kept). Console work you forgot to export is there. It is a backup,
+  not sharing: teammates still get a change only when it is in `keycloak/realm-medlink.json`.
 - **Line endings and images:** `.gitattributes` and pinned image versions (Postgres 16, Keycloak
   26.7.5) keep the files and containers identical on Windows, macOS and Linux.
 

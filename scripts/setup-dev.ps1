@@ -12,6 +12,7 @@
     3. Creates .env from .env.example with generated secrets (only if .env is missing).
     4. Starts the containers and waits until Keycloak serves the "medlink" realm. The realm is
        re-imported automatically when keycloak/realm-medlink.json changed since the last run.
+       Before any wipe, the current realm is saved to .dev\realm-backups\ (no users, no secrets).
     5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
     6. Runs ./mvnw verify (unless -SkipTests).
     7. Starts the API and runs smoke tests, including a real login as practitioner.dev.
@@ -47,6 +48,8 @@ $LogDir = Join-Path $env:TEMP 'medlink-setup'
 $PidFile = Join-Path $LogDir 'app.pid'
 # Which realm file and compose mode the Keycloak volume was created from (git-ignored).
 $RealmStamp = Join-Path $Repo '.dev\realm.stamp'
+# Realm exports taken automatically before the dev volumes are deleted (git-ignored).
+$BackupDir = Join-Path $Repo '.dev\realm-backups'
 $KeycloakUrl = 'http://localhost:8180'
 $AppUrl = 'http://localhost:8080'
 $DevUsersPassword = 'MedLink-Dev-2026!'   # matches compose.yaml and the docs
@@ -173,6 +176,52 @@ function Find-Jdk {
     return @($usable)[0].Home
 }
 
+# Before the dev volumes are deleted: save the realm as it is in Keycloak (flows, roles, groups,
+# clients; no users, secrets masked), so console work that was never exported is not lost.
+# Best effort: a failure here is a warning, it never blocks the run.
+function Backup-Realm([string]$PreviousComposeFile) {
+    Push-Location $Repo
+    try {
+        $nameLine = (docker compose -f compose.yaml config 2>$null) | Where-Object { $_ -match '^name: (.+)$' } | Select-Object -First 1
+        if ($nameLine -notmatch '^name: (.+)$') { return }
+        if (-not (Test-Quiet "docker volume inspect $($Matches[1].Trim())_keycloak-db-data")) { return }   # nothing to save yet
+
+        $realmUrl = "$KeycloakUrl/realms/medlink"
+        if ((Get-HttpStatus $realmUrl) -ne 200) {
+            cmd /c "docker compose -f $PreviousComposeFile up -d keycloak >nul 2>&1"
+            if (-not (Wait-Until { (Get-HttpStatus $realmUrl) -eq 200 } 'Keycloak, to save the realm before the wipe' 180)) {
+                Write-Warn 'the realm could not be saved before the wipe: Keycloak did not start'
+                return
+            }
+        }
+
+        $user = 'admin'; $pass = 'admin'                                # fixed dev values in compose.yaml
+        if ($PreviousComposeFile -eq 'docker-compose.yml' -and (Test-Path '.env')) {
+            $values = Read-DotEnv '.env'
+            if ($values['KEYCLOAK_ADMIN']) { $user = $values['KEYCLOAK_ADMIN'] }
+            $pass = $values['KEYCLOAK_ADMIN_PASSWORD']
+        }
+        $token = Invoke-RestMethod -Method Post -Uri "$KeycloakUrl/realms/master/protocol/openid-connect/token" `
+            -ContentType 'application/x-www-form-urlencoded' `
+            -Body @{ grant_type = 'password'; client_id = 'admin-cli'; username = $user; password = $pass }
+
+        New-Item -ItemType Directory -Force -Path $BackupDir | Out-Null
+        $file = Join-Path $BackupDir ("realm-backup-{0}.json" -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+        & curl.exe -s -f --max-time 60 -X POST -H "Authorization: Bearer $($token.access_token)" -o $file `
+            "$KeycloakUrl/admin/realms/medlink/partial-export?exportClients=true&exportGroupsAndRoles=true"
+        if ($LASTEXITCODE -eq 0 -and (Test-Path $file) -and (Select-String -Path $file -Pattern '"realm"' -Quiet)) {
+            Write-Ok "realm saved to $file before the wipe"
+        } else {
+            Remove-Item $file -Force -ErrorAction SilentlyContinue
+            Write-Warn 'the realm could not be saved before the wipe: the export was refused'
+        }
+        # keep the 10 most recent backups
+        Get-ChildItem $BackupDir -Filter 'realm-backup-*.json' | Sort-Object Name -Descending | Select-Object -Skip 10 | Remove-Item -Force
+    } catch {
+        Write-Warn "the realm could not be saved before the wipe: $($_.Exception.Message)"
+    } finally { Pop-Location }
+}
+
 # The realm file is only imported into an empty Keycloak, so the volume is tied to the file it came from.
 function Get-RealmStamp([string]$ComposeFile) {
     return "$ComposeFile $((Get-FileHash (Join-Path $Repo 'keycloak\realm-medlink.json') -Algorithm SHA256).Hash)"
@@ -259,6 +308,12 @@ $knownStamp = if (Test-Path $RealmStamp) { (Get-Content $RealmStamp -Raw).Trim()
 if (-not $Reset -and $knownStamp -ne $wantedStamp) {
     if ($KeepData) { Write-Warn 'the realm file or the compose mode changed since the volumes were created; kept because of -KeepData' }
     else { $Reset = $true; Write-Host '  [INFO] realm file or compose mode changed since the last run: re-importing the realm' -ForegroundColor Yellow }
+}
+
+if ($Reset) {
+    $previousComposeFile = ($knownStamp -split ' ')[0]
+    if (-not $previousComposeFile) { $previousComposeFile = $composeFile }
+    Backup-Realm $previousComposeFile
 }
 
 Stop-App

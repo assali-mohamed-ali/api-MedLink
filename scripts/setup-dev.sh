@@ -11,6 +11,7 @@
 #   3. Creates .env from .env.example with generated secrets (only if .env is missing).
 #   4. Starts the containers and waits until Keycloak serves the "medlink" realm. The realm is
 #      re-imported automatically when keycloak/realm-medlink.json changed since the last run.
+#      Before any wipe, the current realm is saved to .dev/realm-backups/ (no users, no secrets).
 #   5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
 #   6. Runs ./mvnw verify (unless --skip-tests).
 #   7. Starts the API and runs smoke tests, including a real login as practitioner.dev.
@@ -52,6 +53,8 @@ LOG_DIR="${TMP_ROOT%/}/medlink-setup"
 PID_FILE="$LOG_DIR/app.pid"
 # Which realm file and compose mode the Keycloak volume was created from (git-ignored).
 REALM_STAMP="$REPO/.dev/realm.stamp"
+# Realm exports taken automatically before the dev volumes are deleted (git-ignored).
+BACKUP_DIR="$REPO/.dev/realm-backups"
 KEYCLOAK_URL='http://localhost:8180'
 APP_URL='http://localhost:8080'
 DEV_USERS_PASSWORD='MedLink-Dev-2026!' # matches compose.yaml and the docs
@@ -137,6 +140,50 @@ file_hash() {
 
 # The realm file is only imported into an empty Keycloak, so the volume is tied to the file it came from.
 realm_stamp() { echo "$1 $(file_hash "$REPO/keycloak/realm-medlink.json")"; }
+
+# Before the dev volumes are deleted: save the realm as it is in Keycloak (flows, roles, groups,
+# clients; no users, secrets masked), so console work that was never exported is not lost.
+# Best effort: a failure here is a warning, it never blocks the run.
+backup_realm() {
+    local previous_file="$1" project user pass token file
+    project="$(docker compose -f compose.yaml config 2>/dev/null | sed -n 's/^name: //p' | head -n 1)"
+    [ -n "$project" ] || return 0
+    docker volume inspect "${project}_keycloak-db-data" >/dev/null 2>&1 || return 0 # nothing to save yet
+
+    if ! realm_ready; then
+        docker compose -f "$previous_file" up -d keycloak >/dev/null 2>&1
+        if ! wait_until 180 'Keycloak, to save the realm before the wipe' realm_ready; then
+            warn 'the realm could not be saved before the wipe: Keycloak did not start'
+            return 0
+        fi
+    fi
+
+    user='admin'
+    pass='admin' # fixed dev values in compose.yaml
+    if [ "$previous_file" = docker-compose.yml ] && [ -f .env ]; then
+        user="$(read_env KEYCLOAK_ADMIN)"
+        user="${user:-admin}"
+        pass="$(read_env KEYCLOAK_ADMIN_PASSWORD)"
+    fi
+    token="$(curl -s --max-time 15 \
+        -d grant_type=password -d client_id=admin-cli \
+        --data-urlencode "username=$user" --data-urlencode "password=$pass" \
+        "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" |
+        sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+
+    mkdir -p "$BACKUP_DIR"
+    file="$BACKUP_DIR/realm-backup-$(date +%Y%m%d-%H%M%S).json"
+    if [ -n "$token" ] && curl -s -f --max-time 60 -X POST -H "Authorization: Bearer $token" -o "$file" \
+        "$KEYCLOAK_URL/admin/realms/medlink/partial-export?exportClients=true&exportGroupsAndRoles=true" &&
+        grep -q '"realm"' "$file"; then
+        ok "realm saved to $file before the wipe"
+    else
+        rm -f "$file"
+        warn 'the realm could not be saved before the wipe: admin login or export refused'
+    fi
+    # keep the 10 most recent backups (names sort by date)
+    find "$BACKUP_DIR" -name 'realm-backup-*.json' | sort -r | tail -n +11 | while IFS= read -r old; do rm -f "$old"; done
+}
 
 # Major version of a JDK folder, read from its "release" file (0 when the folder is not a JDK).
 jdk_major() {
@@ -262,6 +309,11 @@ if [ "$RESET" -eq 0 ] && [ "$KNOWN_STAMP" != "$WANTED_STAMP" ]; then
         RESET=1
         info 'realm file or compose mode changed since the last run: re-importing the realm'
     fi
+fi
+
+if [ "$RESET" -eq 1 ]; then
+    PREVIOUS_COMPOSE_FILE="${KNOWN_STAMP%% *}"
+    backup_realm "${PREVIOUS_COMPOSE_FILE:-$COMPOSE_FILE}"
 fi
 
 stop_app
