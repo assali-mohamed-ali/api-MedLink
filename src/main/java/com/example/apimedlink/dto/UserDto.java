@@ -5,6 +5,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Size;
 import java.util.UUID;
 
+/** {@code id} is the Keycloak user id. */
 public record UserDto(
         UUID id,
         @NotBlank @Size(max = 50) String username,

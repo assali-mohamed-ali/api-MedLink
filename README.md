@@ -128,10 +128,14 @@ src/test/java/.../              mirror packages: controller/, service/, security
 
 Rules:
 
-- Names follow the class diagram: roles `PATIENT`, `PRACTITIONER`, `ADMINISTRATIVE_STAFF`; entity
-  ids are UUIDs (`@GeneratedValue(strategy = GenerationType.UUID)`), never auto-increment numbers.
+- Names follow the class diagram: roles `PATIENT`, `PRACTITIONER`, `ADMINISTRATIVE_STAFF`.
   The diagram's `passwordHash`, `mfaSecret`, `failedAttempts`, `lockedUntil` and `Session` live in
   Keycloak, not in our tables.
+- One id per person, and it comes from Keycloak: `users.id` is the Keycloak user id (the `sub`
+  claim). We never generate it: create the Keycloak account first, then save the row with that id.
+  Profile tables (`patients`, later `practitioners`) reuse the same id as their own primary key
+  (`@MapsId`), so one login can hold several profiles. Every other entity generates its own UUID
+  (`@GeneratedValue(strategy = GenerationType.UUID)`); no auto-increment numbers.
 - New table/column → new Flyway file `V<N>__description.sql` (next free number: `V4`), never edit
   an old `V*.sql`. Prod uses `ddl-auto: validate`, so the migration IS the schema.
 - New endpoint → DTO + service method + controller method + test.

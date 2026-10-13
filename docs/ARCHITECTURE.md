@@ -161,14 +161,14 @@ Code lives under `src/main/java/com/example/apimedlink/`; everything security-re
 | --- | --- | --- |
 | `controller/` | REST endpoints, thin, validation only. `AuthBffController` is an empty skeleton | Adding an endpoint |
 | `service/` | Business logic (`UserService`) | Adding behaviour |
-| `repository/`, `model/` | Spring Data JPA interfaces and entities (`User` has `keycloakId`, no password) | Adding a table |
+| `repository/`, `model/` | Spring Data JPA interfaces and entities (`User.id` is the Keycloak user id, no password) | Adding a table |
 | `dto/` | Records for API input/output | Changing what the API exposes |
 | `config/` | `SecurityConfig` (oauth2Login, CSRF, public paths), `CorsConfig` | Changing who can call what (code owner review) |
 | `security/` | `KeycloakRolesMapper` (Keycloak roles → `ROLE_*`) | Rarely; roles are added in Keycloak |
 | `exception/` | `GlobalExceptionHandler` (404 / 409 / 400 JSON errors) | Adding an error type |
 | `resources/application.properties` | Base config + Keycloak client registration | Changing Keycloak URLs or client |
 | `resources/application-{dev,staging,prod}.yml` | Per-environment DB, CORS, actuator, logging, client secret | Environment-specific settings |
-| `resources/db/migration/` | Flyway: `V1__init.sql`, `V2__keycloak_users.sql`, `V3__users_uuid_id.sql` | Any schema change: add `V4__...`, never edit an old file |
+| `resources/db/migration/` | Flyway: `V1__init.sql`, `V2__keycloak_users.sql`, `V3__users_keycloak_id_as_pk.sql` | Any schema change: add `V4__...`, never edit an old file |
 | `keycloak/realm-medlink.json` | Realm, roles, groups, `medlink-bff` client, dev users | Bootstrapping new environments |
 | `compose.yaml` / `docker-compose.yml` | Dev dependencies / full stack | Adding a service |
 | `docker/` | Multi-stage `Dockerfile` (non-root), `Dockerfile.dev` (debug port 5005) | Changing the image |
@@ -251,7 +251,7 @@ The repository implements or evidences 25 Annex A controls: 10 covered, 12 parti
 | --- | --- | --- | --- | --- |
 | 5.8 Information security in project management | STRIDE threat model; security checklist on every PR | `security/threat-model.md`, `.github/pull_request_template.md` | Covered | Review the threat model each release |
 | 5.15 Access control | Deny by default: every request needs a session except health, info, API docs and metrics | `config/SecurityConfig.java` | Covered | |
-| 5.16 Identity management | One identity store (Keycloak); the API keeps only a `keycloak_id` link | `keycloak/realm-medlink.json`, `V2__keycloak_users.sql` | Covered | |
+| 5.16 Identity management | One identity store (Keycloak); the API uses the Keycloak user id as the primary key of `users`, with no id of its own | `keycloak/realm-medlink.json`, `V3__users_keycloak_id_as_pk.sql` | Covered | |
 | 5.17 Authentication information | Passwords live only in Keycloak; policy: 12+ chars, upper, lower, digit, special, not username/email | realm `passwordPolicy`, V2 drops `users.password` | Covered | |
 | 5.18 Access rights | Roles granted through groups; new users default to `/patients`; no role accepted from requests | realm `groups`, `defaultGroups` | Partial | Define a periodic access review of group membership |
 | 8.2 Privileged access rights | `ADMINISTRATIVE_STAFF` limited to user management in its realm; bootstrap admin separate; Actuator limited to health/info/prometheus | realm `roles`, `application-*.yml` | Partial | Enforce MFA (OTP) for `ADMINISTRATIVE_STAFF` and the bootstrap admin |

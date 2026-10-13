@@ -31,7 +31,14 @@ public class UserService {
                 .orElseThrow(() -> new EntityNotFoundException("User " + id + " not found")));
     }
 
+    /** {@code dto.id()} is the Keycloak user id: the Keycloak account is created first. */
     public UserDto create(UserDto dto) {
+        if (dto.id() == null) {
+            throw new IllegalArgumentException("User id (the Keycloak user id) is required");
+        }
+        if (users.existsById(dto.id())) {
+            throw new EntityExistsException("User already exists");
+        }
         if (users.existsByUsername(dto.username())) {
             throw new EntityExistsException("Username already taken");
         }
@@ -39,6 +46,7 @@ public class UserService {
             throw new EntityExistsException("Email already taken");
         }
         User saved = users.save(User.builder()
+                .id(dto.id())
                 .username(dto.username())
                 .email(dto.email())
                 .build());
