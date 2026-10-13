@@ -1,6 +1,7 @@
 package com.example.apimedlink.controller;
 
 import com.example.apimedlink.dto.UserDto;
+import com.example.apimedlink.mapper.UserMapper;
 import com.example.apimedlink.service.UserService;
 import java.util.List;
 import java.util.Map;
@@ -25,12 +26,12 @@ public class UserController {
 
     @GetMapping
     public List<UserDto> list() {
-        return service.findAll();
+        return service.findAll().stream().map(UserMapper::toDto).toList();
     }
 
     @GetMapping("/{id}")
     public UserDto get(@PathVariable UUID id) {
-        return service.findById(id);
+        return UserMapper.toDto(service.findById(id));
     }
 
     @DeleteMapping("/{id}")

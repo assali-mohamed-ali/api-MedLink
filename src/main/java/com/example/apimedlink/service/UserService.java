@@ -1,6 +1,5 @@
 package com.example.apimedlink.service;
 
-import com.example.apimedlink.dto.UserDto;
 import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.UserRepository;
 import jakarta.persistence.EntityExistsException;
@@ -21,36 +20,35 @@ public class UserService {
     }
 
     @Transactional(readOnly = true)
-    public List<UserDto> findAll() {
-        return users.findAll().stream().map(this::toDto).toList();
+    public List<User> findAll() {
+        return users.findAll();
     }
 
     @Transactional(readOnly = true)
-    public UserDto findById(UUID id) {
-        return toDto(users.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("User " + id + " not found")));
+    public User findById(UUID id) {
+        return users.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("User " + id + " not found"));
     }
 
-    /** {@code dto.id()} is the Keycloak user id: the Keycloak account is created first. */
-    public UserDto create(UserDto dto) {
-        if (dto.id() == null) {
+    /** {@code id} is the Keycloak user id: the Keycloak account is created first. */
+    public User create(UUID id, String username, String email) {
+        if (id == null) {
             throw new IllegalArgumentException("User id (the Keycloak user id) is required");
         }
-        if (users.existsById(dto.id())) {
+        if (users.existsById(id)) {
             throw new EntityExistsException("User already exists");
         }
-        if (users.existsByUsername(dto.username())) {
+        if (users.existsByUsername(username)) {
             throw new EntityExistsException("Username already taken");
         }
-        if (users.existsByEmail(dto.email())) {
+        if (users.existsByEmail(email)) {
             throw new EntityExistsException("Email already taken");
         }
-        User saved = users.save(User.builder()
-                .id(dto.id())
-                .username(dto.username())
-                .email(dto.email())
+        return users.save(User.builder()
+                .id(id)
+                .username(username)
+                .email(email)
                 .build());
-        return toDto(saved);
     }
 
     public void delete(UUID id) {
@@ -58,9 +56,5 @@ public class UserService {
             throw new EntityNotFoundException("User " + id + " not found");
         }
         users.deleteById(id);
-    }
-
-    private UserDto toDto(User u) {
-        return new UserDto(u.getId(), u.getUsername(), u.getEmail());
     }
 }

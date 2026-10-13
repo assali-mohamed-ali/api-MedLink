@@ -112,8 +112,9 @@ Keycloak `http://localhost:8180` (admin console: `KEYCLOAK_ADMIN` / `KEYCLOAK_AD
 
 ```text
 src/main/java/com/example/apimedlink/
-  controller/   REST endpoints (thin, validation only)
-  service/      business logic
+  controller/   REST endpoints (thin: validation, then entity <-> DTO through a mapper)
+  mapper/       entity <-> DTO conversion, called by controllers only
+  service/      business logic on entities and plain values (never a DTO)
   repository/   Spring Data JPA interfaces
   model/        JPA entities
   dto/          records for API in/out (never expose password hashes)
@@ -142,7 +143,8 @@ Rules:
   (`@GeneratedValue(strategy = GenerationType.UUID)`); no auto-increment numbers.
 - New table/column → new Flyway file `V<N>__description.sql` (next free number: `V4`), never edit
   an old `V*.sql`. Prod uses `ddl-auto: validate`, so the migration IS the schema.
-- New endpoint → DTO + service method + controller method + test.
+- New endpoint → DTO + mapper + service method + controller method + test. The controller maps;
+  the service takes and returns entities or plain values, so it never depends on the API's shape.
 - Passwords and roles: Keycloak only. Never store or accept a password in the backend.
 - Roles: assign them through Keycloak groups, never from request data.
 - Secrets (`KC_BFF_CLIENT_SECRET`, DB/admin passwords) come from env. No hardcoded secrets anywhere.

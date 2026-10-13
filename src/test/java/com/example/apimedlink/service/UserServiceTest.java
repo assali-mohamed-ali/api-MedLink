@@ -4,7 +4,6 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.example.apimedlink.TestcontainersConfiguration;
-import com.example.apimedlink.dto.UserDto;
 import jakarta.persistence.EntityExistsException;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
@@ -23,30 +22,30 @@ class UserServiceTest {
     void createKeepsTheKeycloakIdAsUserId() {
         UUID keycloakId = UUID.randomUUID();
 
-        var created = service.create(new UserDto(keycloakId, "alice", "alice@example.com"));
+        var created = service.create(keycloakId, "alice", "alice@example.com");
 
-        assertThat(created.id()).isEqualTo(keycloakId);
-        assertThat(service.findById(keycloakId).username()).isEqualTo("alice");
+        assertThat(created.getId()).isEqualTo(keycloakId);
+        assertThat(service.findById(keycloakId).getUsername()).isEqualTo("alice");
     }
 
     @Test
     void duplicateUsernameIsRejected() {
-        service.create(new UserDto(UUID.randomUUID(), "bob", "bob@example.com"));
-        assertThatThrownBy(() -> service.create(new UserDto(UUID.randomUUID(), "bob", "bob2@example.com")))
+        service.create(UUID.randomUUID(), "bob", "bob@example.com");
+        assertThatThrownBy(() -> service.create(UUID.randomUUID(), "bob", "bob2@example.com"))
                 .isInstanceOf(EntityExistsException.class);
     }
 
     @Test
     void duplicateIdIsRejected() {
         UUID keycloakId = UUID.randomUUID();
-        service.create(new UserDto(keycloakId, "carol", "carol@example.com"));
-        assertThatThrownBy(() -> service.create(new UserDto(keycloakId, "carol2", "carol2@example.com")))
+        service.create(keycloakId, "carol", "carol@example.com");
+        assertThatThrownBy(() -> service.create(keycloakId, "carol2", "carol2@example.com"))
                 .isInstanceOf(EntityExistsException.class);
     }
 
     @Test
     void missingIdIsRejected() {
-        assertThatThrownBy(() -> service.create(new UserDto(null, "dave", "dave@example.com")))
+        assertThatThrownBy(() -> service.create(null, "dave", "dave@example.com"))
                 .isInstanceOf(IllegalArgumentException.class);
     }
 }

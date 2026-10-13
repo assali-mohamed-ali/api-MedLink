@@ -159,8 +159,9 @@ Code lives under `src/main/java/com/example/apimedlink/`; everything security-re
 
 | Path | What it holds | Touch it when |
 | --- | --- | --- |
-| `controller/` | REST endpoints, thin, validation only. `AuthBffController` is an empty skeleton | Adding an endpoint |
-| `service/` | Business logic (`UserService`) | Adding behaviour |
+| `controller/` | REST endpoints, thin: validation, then entity ↔ DTO through a mapper. `AuthBffController` is an empty skeleton | Adding an endpoint |
+| `mapper/` | Entity ↔ DTO conversion (`UserMapper`), called by controllers only | Changing what the API exposes |
+| `service/` | Business logic on entities and plain values, never a DTO (`UserService`) | Adding behaviour |
 | `repository/`, `model/` | Spring Data JPA interfaces and entities (`User.id` is the Keycloak user id, no password) | Adding a table |
 | `dto/` | Records for API input/output | Changing what the API exposes |
 | `config/` | `SecurityConfig` (oauth2Login, CSRF, public paths), `CorsConfig` | Changing who can call what (code owner review) |
@@ -308,7 +309,7 @@ Ten rules cover most review comments; the FAQ covers the errors new team members
 
 1. Branch `feat/`, `fix/`, `chore/` or `security/`; PR to `master`; one topic per PR; fill the checklist.
 2. Never store or accept a password or a role in the API. Identity belongs to Keycloak.
-3. New endpoint = DTO + service method + controller method + test, including a test that an unauthorised user is refused.
+3. New endpoint = DTO + mapper + service method + controller method + test, including a test that an unauthorised user is refused. The controller maps entities to DTOs; services never return a DTO.
 4. Schema change = new `V<N>__description.sql`. Never edit an applied migration.
 5. Secrets only through env. Never commit `.env`; run gitleaks if unsure.
 6. Never suppress a scanner finding without a comment, an expiry date and a ticket (`security/owasp-suppressions.xml`, `zap-rules.tsv`).
