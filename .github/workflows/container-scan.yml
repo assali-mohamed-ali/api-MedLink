@@ -10,6 +10,7 @@ permissions:
   contents: read
   security-events: write
   packages: read
+  actions: read
 
 jobs:
   trivy:
@@ -44,15 +45,34 @@ jobs:
           exit-code: '1'
           ignore-unfixed: true
 
+      # SARIF keeps findings out of the log: print them (never blocks here).
+      - name: Show findings
+        if: always()
+        run: |
+          for f in trivy-config.sarif trivy-image.sarif; do
+            if [ -f "$f" ]; then scripts/ci/sarif-gate.sh 11 "$f"; fi
+          done
+
+      - name: Upload SARIF artifacts
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: trivy-sarif
+          path: trivy-*.sarif
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # Code scanning needs a public repo or GitHub Advanced Security:
+      # set the repo variable CODE_SCANNING_ENABLED=true once it is on.
       - name: Upload config SARIF
-        if: always() && hashFiles('trivy-config.sarif') != ''
+        if: always() && vars.CODE_SCANNING_ENABLED == 'true' && hashFiles('trivy-config.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-config.sarif'
           category: trivy-config
 
       - name: Upload image SARIF
-        if: always() && hashFiles('trivy-image.sarif') != ''
+        if: always() && vars.CODE_SCANNING_ENABLED == 'true' && hashFiles('trivy-image.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: 'trivy-image.sarif'
