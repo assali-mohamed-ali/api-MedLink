@@ -25,7 +25,7 @@
   "adminEventsDetailsEnabled": true,
   "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and notEmail",
   "accessTokenLifespan": 300,
-  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionIdleTimeout": 900,
   "ssoSessionMaxLifespan": 36000,
   "roles": {
     "realm": [
