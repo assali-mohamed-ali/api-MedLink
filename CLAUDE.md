@@ -31,6 +31,8 @@ This repository is its Spring Boot API. It is also the only component that talks
   test for the right role + test for the wrong role.
 - **Entities evolve as needed**: change them through a new migration, in the sub-sprint that
   needs the change, and record it in `report.md`.
+- **YouTrack mirrors the work:** a task goes to *In Progress* when work on it starts, *To Verify*
+  when its PR opens (with the PR link), *Done* when the PR is merged. One task at a time.
 - Aim: secure, robust, fast, simple to use. Prefer the simplest design that meets the contract.
 
 ## Versions (do not downgrade to make code compile)
@@ -48,7 +50,10 @@ classes (see README §7). Use only APIs of these versions.
 
 ## Git
 
-- Pull `master`, check the tree is clean, then branch: `feat/ss<N>-<slug>` for a sub-sprint,
+- Before any work, check the worktree: clean status, in sync with the remote, no unknown
+  stash, no local branch ahead of its remote or tracking a gone one
+  (`docs/sprints/sprint-2/README.md` step 3). Stop and report if one fails.
+- Pull `master`, then branch: `feat/ss<N>-<slug>` for a sub-sprint,
   `fix/…`, `docs/…`, `chore/…` otherwise. Never commit on `master`, `staging` or `prod`.
 - One commit per task, message prefixed `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`,
   `test:`; mention the YouTrack id (`MLink-79`) in the body.
