@@ -1,5 +1,7 @@
 package com.example.apimedlink.config;
 
+import com.example.apimedlink.security.ProvisioningOidcUserService;
+import com.example.apimedlink.service.UserProvisioningService;
 import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -20,7 +22,7 @@ import org.springframework.security.web.servlet.util.matcher.PathPatternRequestM
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain filterChain(HttpSecurity http, UserProvisioningService provisioning) throws Exception {
         // Same cookie as csrf.spa() (readable by the SPA), plus SameSite like the session cookie
         CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
         csrfTokens.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
@@ -50,7 +52,9 @@ public class SecurityConfig {
                         .permitAll()
                         .anyRequest()
                         .authenticated())
-                .oauth2Login(Customizer.withDefaults())
+                // Every login ensures the account's row in our database (GitHub #29)
+                .oauth2Login(login -> login.userInfoEndpoint(info -> info
+                        .oidcUserService(new ProvisioningOidcUserService(provisioning))))
                 // API calls get a 401 instead of a redirect to the Keycloak login page
                 .exceptionHandling(ex -> ex.defaultAuthenticationEntryPointFor(
                         new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),
