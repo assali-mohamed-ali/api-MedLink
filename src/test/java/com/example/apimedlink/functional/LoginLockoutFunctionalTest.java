@@ -19,25 +19,36 @@ class LoginLockoutFunctionalTest extends FunctionalTestBase {
 
     final KeycloakConsole console = new KeycloakConsole();
 
-    /** Five wrong passwords in a row through the login form, as an attacker would. */
+    /**
+     * Wrong passwords through the login form at a person's pace. Faster than one per second,
+     * Keycloak's quick-login guard locks after two failures (one minute) and would hide the rule.
+     */
+    private void wrongPasswords(String email, int count) throws Exception {
+        for (int attempt = 1; attempt <= count; attempt++) {
+            Thread.sleep(1_200);
+            new Browser().login(email, "Wrong-Pass-" + attempt + "!");
+        }
+    }
+
     private UUID lockedOutUser() throws Exception {
         String email = uniqueEmail("lockout");
         UUID id = console.createUser(email, PASSWORD);
-        for (int attempt = 1; attempt <= 5; attempt++) {
-            new Browser().login(email, "Wrong-Pass-" + attempt + "!");
-        }
+        wrongPasswords(email, 5);
         return id;
     }
 
     @Test
-    void fiveWrongPasswordsLockTheAccountAndTheRightOneIsRefused() throws Exception {
-        UUID id = lockedOutUser();
-        String email = (String) ((Map<?, ?>) console.read("/users/{id}", id)).get("email");
+    void theFifthWrongPasswordLocksTheAccountAndThenTheRightOneIsRefused() throws Exception {
+        String email = uniqueEmail("lockout");
+        UUID id = console.createUser(email, PASSWORD);
 
+        wrongPasswords(email, 4);
+        assertThat(console.lockout(id).get("disabled")).as("not locked after 4").isEqualTo(false);
+
+        wrongPasswords(email, 1);
+        assertThat(console.lockout(id).get("disabled")).as("locked at the 5th").isEqualTo(true);
         Browser browser = new Browser().login(email, PASSWORD);
-
         assertThat(browser.call("/api/users/_health").statusCode()).as("no session with the right password").isEqualTo(401);
-        assertThat(console.lockout(id).get("disabled")).isEqualTo(true);
     }
 
     @Test
