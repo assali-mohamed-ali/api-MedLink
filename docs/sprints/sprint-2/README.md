@@ -16,13 +16,23 @@ context than these files.
 
 1. **Know where we are.** Read `report.md` (status table at the top), then the section of the
    next sub-sprint in `plan.md`, then its YouTrack tasks (project `MLink`, sprint `sprint2`).
+   If the previous sub-sprint's PR is merged, move its *To Verify* tasks to *Done*.
 2. **Understand the endpoints before code.** Re-read the contracts of the sub-sprint. If one is
    unclear or wrong, fix it in `plan.md` first (same PR) and say why in `report.md`.
-3. **Prepare the branch.** `git checkout master && git pull`, check `git status` is clean,
-   then `git checkout -b feat/ss<N>-<slug>`. Run the setup script once
-   (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`); it must end with 0 failures.
-4. **Plan the work** in a few lines: files, migrations, realm changes, tests. Set the
-   sub-sprint's YouTrack tasks to *In Progress*.
+3. **Check the worktree, then prepare the branch.** Before any work, all of these must hold;
+   if one does not, stop and sort it out first:
+   - `git status --porcelain` is empty (nothing modified, staged or untracked);
+   - after `git fetch --prune`, `git status -sb` shows no commits ahead or behind;
+   - `git stash list` is empty, or every stash is known;
+   - `git branch -vv` shows no branch `ahead` of its remote or tracking a `gone` one
+     (merged or not, decide before deleting).
+
+   Then `git checkout master && git pull --ff-only && git checkout -b feat/ss<N>-<slug>`.
+   Run the setup script once (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`); it must end
+   with 0 failures.
+4. **Plan the work** in a few lines: files, migrations, realm changes, tests. Move **each**
+   YouTrack task to *In Progress* right before starting it, not the whole sub-sprint at once.
+   Only tasks built in this repository; React tasks belong to their owner.
 5. **Test first.** Write the tests from the contract (status codes, bodies, the wrong-role
    case), watch them fail, then write the code.
 6. **Verify for real.** `./mvnw -B verify` (JDK 17, Docker running) and the setup script.
@@ -31,7 +41,11 @@ context than these files.
 8. **Report.** In the same PR: update `report.md` (status, PR link, proof, decisions, limits,
    next step) and move the YouTrack tasks to *To Verify* with a link to the PR.
 
-A sub-sprint is **done** when its PR is merged and `report.md` says so.
+A sub-sprint is **done** when its PR is merged and `report.md` says so; its tasks then move
+to *Done*. A task that review sends back returns to *In Progress*.
+
+YouTrack states in short: *Open* → *In Progress* (work started) → *To Verify* (PR open) →
+*Done* (PR merged).
 
 ## Rules that apply to every sub-sprint
 
