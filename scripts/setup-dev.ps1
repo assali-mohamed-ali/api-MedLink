@@ -466,9 +466,9 @@ if ($loginPage -match 'action="([^"]*login-actions/authenticate[^"]*)"') {
     # After login Spring redirects to "/", which has no page (404): expected, the session is what matters.
     & curl.exe -s -L -o NUL --max-time 30 -c $cookies -b $cookies `
         --data-urlencode 'username=practitioner.dev' --data-urlencode "password=$usersPassword" -d 'credentialId=' $action
-    $apiStatus = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -b $cookies "$AppUrl/api/users")
-    if ($apiStatus -eq 200) { Write-Ok 'end-to-end login as practitioner.dev works: /api/users returns 200 with the session' }
-    else { Write-Bad "after login /api/users returned $apiStatus" }
+    $apiStatus = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -b $cookies "$AppUrl/api/users/_health")
+    if ($apiStatus -eq 200) { Write-Ok 'end-to-end login as practitioner.dev works: /api/users/_health returns 200 with the session' }
+    else { Write-Bad "after login /api/users/_health returned $apiStatus" }
 } else {
     Write-Warn "automated login check did not complete (Keycloak login form not found). Test it in a browser: $AppUrl/oauth2/authorization/keycloak"
 }

@@ -29,6 +29,24 @@ section 6 "Sub-sprint 1" of `plan.md`.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## MLink-57 — lock `/api/users` (2026-10-14, ahead of sub-sprint 5)
+
+**Built:** `@EnableMethodSecurity` in `config/SecurityConfig`; `security/Roles` holds the three
+role names (no role typed as a string elsewhere); `GET /api/users` and `DELETE /api/users/{id}`
+are `ADMINISTRATIVE_STAFF` only (`@PreAuthorize`). `anyRequest().authenticated()` is unchanged.
+Both setup scripts' login check now calls `/api/users/_health`, since practitioner.dev gets 403
+on the list.
+
+**Proof:** `UserControllerTest`: patient and practitioner get 403 on list and delete, staff gets
+200 / 204, anonymous gets 401 (the 4 non-staff cases failed before the change). `./mvnw -B verify`:
+18 tests, 0 failures. Setup script: 0 warnings.
+
+**Why early:** any logged-in user, a patient included, could list every user and delete any of
+them. MLink-57 needs nothing and blocks MLink-58 and MLink-60.
+
+**Limits:** `GET /api/users/{id}` stays open to any logged-in user until MLink-58 (self or staff).
+`DELETE` removes our row only, not the Keycloak account.
+
 ## Sub-sprint 0 — the plan (2026-10-14)
 
 **Built:** `CLAUDE.md`, this folder (`README.md`, `plan.md`, `report.md`); README and
@@ -45,6 +63,8 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-14 | MLink-57 (lock `/api/users`) done before sub-sprint 5 | Live hole: a patient could list and delete users; the task has no dependency | Waiting for sub-sprint 5 |
+| 2026-10-14 | Role checks with `@PreAuthorize` and `security/Roles` constants | One readable rule per endpoint; role names typed once | URL rules per role in `SecurityConfig` |
 | 2026-10-14 | The frontend never talks to Keycloak: register, verify, login, code, logout, passwords, accounts all go through the API | Users never see Keycloak; one place to secure | Skinned Keycloak pages (decided 2026-10-11, now superseded) |
 | 2026-10-14 | Login = API → Keycloak password grant, server to server, confidential client | Only way to log in without a Keycloak page; tokens never leave the API | Browser redirect to Keycloak |
 | 2026-10-14 | Email verification: our token (hashed, 24 h, single use) and our mail; the link opens a React page that POSTs the token | Keycloak's mail links point at Keycloak; POST stops mail scanners from consuming the token | Keycloak's verification mail; a GET link to the API |
