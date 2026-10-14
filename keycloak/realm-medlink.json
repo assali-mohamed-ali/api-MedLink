@@ -14,6 +14,15 @@
   "permanentLockout": false,
   "waitIncrementSeconds": 900,
   "maxFailureWaitSeconds": 900,
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "eventsListeners": ["jboss-logging"],
+  "enabledEventTypes": [
+    "LOGIN", "LOGIN_ERROR", "LOGOUT", "USER_DISABLED_BY_TEMPORARY_LOCKOUT",
+    "UPDATE_PASSWORD", "UPDATE_TOTP", "VERIFY_EMAIL"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
   "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and notEmail",
   "accessTokenLifespan": 300,
   "ssoSessionIdleTimeout": 1800,
