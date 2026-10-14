@@ -4,6 +4,14 @@ Spring Boot 4.1 / Java 17 API. Package: `com.example.apimedlink`.
 
 > New here? Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): architecture, auth flow,
 > DevSecOps pipeline, ISO 27001 mapping and onboarding steps.
+>
+> Working on the current sprint (or starting an AI session)? Read [CLAUDE.md](CLAUDE.md), then
+> [docs/sprints/sprint-2/README.md](docs/sprints/sprint-2/README.md): the endpoint contracts,
+> the sub-sprints and the progress report live there.
+>
+> **Rule since 2026-10-14: the frontend never talks to Keycloak.** Registration, email
+> verification, login, staff code, logout and account management all go through this API,
+> which talks to Keycloak. The redirect login described below is replaced in sub-sprint 2.
 
 Branches: `master` (integration) → `staging` (pre-prod) → `prod` (release).
 Flow: feature PR → `master`, promote `master` → `staging`, validate, then
@@ -104,7 +112,8 @@ Keycloak `http://localhost:8180` (admin console: `KEYCLOAK_ADMIN` / `KEYCLOAK_AD
   role + a group holding it (console or JSON) — no backend change, `KeycloakRolesMapper` turns
   every realm role from the `roles` claim into `ROLE_<NAME>`.
 - Client `medlink-bff`: confidential, authorization code + PKCE. The browser only gets a session
-  cookie; tokens stay in the backend (BFF). Login starts at `/oauth2/authorization/keycloak`.
+  cookie; tokens stay in the backend (BFF). Login starts at `/oauth2/authorization/keycloak`
+  until sub-sprint 2 replaces it with `POST /api/auth/login` (see `docs/sprints/sprint-2/plan.md`).
 - Test users (dev): `staff.dev`, `practitioner.dev`, `patient.dev`, password = `KC_DEV_USERS_PASSWORD`
   (`MedLink-Dev-2026!` with `compose.yaml`). Delete them in staging/prod after the first start.
 
