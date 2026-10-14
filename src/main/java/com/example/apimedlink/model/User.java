@@ -3,6 +3,8 @@ package com.example.apimedlink.model;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
+import jakarta.persistence.Inheritance;
+import jakarta.persistence.InheritanceType;
 import jakarta.persistence.PostLoad;
 import jakarta.persistence.PostPersist;
 import jakarta.persistence.PrePersist;
@@ -17,8 +19,14 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 import org.springframework.data.domain.Persistable;
 
+/**
+ * A MedLink account. Each role is a subclass with its own table sharing this id
+ * ({@code JOINED}): a patient is a {@link Patient}. A person holds one role only, so there is
+ * never a second profile for the same login.
+ */
 @Entity
 @Table(name = "users")
+@Inheritance(strategy = InheritanceType.JOINED)
 @Getter
 @Setter
 @NoArgsConstructor

@@ -3,7 +3,6 @@ package com.example.apimedlink.service;
 import com.example.apimedlink.exception.EmailTakenException;
 import com.example.apimedlink.model.EmailToken.Purpose;
 import com.example.apimedlink.model.Patient;
-import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.repository.UserRepository;
 import java.util.Locale;
@@ -47,7 +46,7 @@ public class RegistrationService {
     }
 
     /**
-     * @param profile a new patient without its user; the user is created here
+     * @param profile a new patient without id or email: both come from the Keycloak account created here
      * @return the new user's id (Keycloak's)
      */
     public UUID register(String email, String password, Patient profile) {
@@ -61,9 +60,10 @@ public class RegistrationService {
         try {
             keycloak.setPassword(id, password);
             token = tx.execute(status -> {
-                User user = users.save(User.builder().id(id).username(normalized).email(normalized).build());
-                profile.setUser(user);
-                patients.save(profile);
+                profile.setId(id);
+                profile.setUsername(normalized);
+                profile.setEmail(normalized);
+                patients.save(profile); // the users row and the patients row, under the Keycloak id
                 return tokens.issue(id, Purpose.VERIFY_EMAIL);
             });
         } catch (RuntimeException e) {

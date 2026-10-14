@@ -118,7 +118,7 @@ class RegistrationControllerTest {
         assertThat(user.getUsername()).isEqualTo(email);
         tx.executeWithoutResult(s -> {
             Patient patient = patients.findById(keycloakId).orElseThrow();
-            assertThat(patient.getUser().getId()).isEqualTo(keycloakId);
+            assertThat(patient.getEmail()).isEqualTo(email);
             assertThat(patient.getFirstName()).isEqualTo("Amel");
             assertThat(patient.getBirthDate()).isEqualTo(LocalDate.of(1990, 4, 12));
             assertThat(patient.getPhone()).isEqualTo("+216 22 123 456");
