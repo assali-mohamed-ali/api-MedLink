@@ -7,7 +7,8 @@ As of 2026-10-09 · living copy (with editable diagrams and the coverage tracker
 
 api-MedLink is a Spring Boot 4.1 / Java 17 health API where **Keycloak owns identity** (logins, passwords, roles) and the backend acts as an **auth BFF**: the browser only ever holds a session cookie. Security is built into every step of delivery: local hooks, six security scans in CI, and promotion through `master` → `staging` → `prod`.
 
-- **State today:** Keycloak, its realm and the BFF skeleton are initialised on branch `feat/keycloak-init`. Feature APIs come next.
+- **State today:** Keycloak, its realm and the BFF skeleton are on `master`. Sprint 2 builds the identity features; its plan, endpoint contracts and progress are in [`docs/sprints/sprint-2/`](sprints/sprint-2/README.md).
+- **Rule since 2026-10-14: the frontend never talks to Keycloak.** Login, registration, email verification, staff code and account management go browser → API → Keycloak → API → browser. The redirect login shown below is the current code; sub-sprint 2 replaces it with `POST /api/auth/login`.
 - **How to read this:** new to the team → read *Day-1 onboarding*, then *Architecture* and *Rules of the road*. Reviewing security or compliance → jump to *DevSecOps in the SDLC* and *ISO 27001 mapping*.
 
 The ISO 27001 section maps the repo's technical controls to Annex A. The repo supplies evidence for an ISMS; it does not make the organisation certified on its own.
@@ -78,6 +79,11 @@ The BFF is the only component that talks to both Keycloak and the app database. 
 Keycloak decides who you are and which groups you belong to; the BFF only turns the signed `roles` claim into Spring authorities. The API stores no password and no role.
 
 ### Login flow (authorization code + PKCE)
+
+> **Being replaced in sub-sprint 2.** The browser will no longer be redirected to Keycloak: it
+> posts the email and password to `POST /api/auth/login`, and the API asks Keycloak (password
+> grant, server to server, confidential client). The target flows are in
+> [`docs/sprints/sprint-2/plan.md`](sprints/sprint-2/plan.md), section 3.
 
 ```mermaid
 sequenceDiagram
