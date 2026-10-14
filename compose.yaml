@@ -43,6 +43,7 @@ services:
       - 'KC_HEALTH_ENABLED=true'
       # Placeholders resolved inside keycloak/realm-medlink.json at import (dev values only)
       - 'KC_BFF_CLIENT_SECRET=dev-only-medlink-bff-secret'
+      - 'KC_ADMIN_CLIENT_SECRET=dev-only-medlink-admin-secret'
       - 'KC_BFF_BASE_URL=http://localhost:8080'
       - 'KC_DEV_USERS_PASSWORD=MedLink-Dev-2026!'
     volumes:

@@ -276,18 +276,31 @@ if [ -f .env ]; then
 else
     tr -d '\r' < .env.example | awk \
         -v pg="$(new_secret)" -v kcdb="$(new_secret)" -v kcadmin="$(new_secret)" \
-        -v bff="$(new_secret)" -v users="$DEV_USERS_PASSWORD" '
+        -v bff="$(new_secret)" -v kcapi="$(new_secret)" -v users="$DEV_USERS_PASSWORD" '
         /^POSTGRES_PASSWORD=/       { print "POSTGRES_PASSWORD=" pg; next }
         /^KEYCLOAK_DB_PASSWORD=/    { print "KEYCLOAK_DB_PASSWORD=" kcdb; next }
         /^KEYCLOAK_ADMIN_PASSWORD=/ { print "KEYCLOAK_ADMIN_PASSWORD=" kcadmin; next }
         /^KC_BFF_CLIENT_SECRET=/    { print "KC_BFF_CLIENT_SECRET=" bff; next }
+        /^KC_ADMIN_CLIENT_SECRET=/  { print "KC_ADMIN_CLIENT_SECRET=" kcapi; next }
         /^KC_DEV_USERS_PASSWORD=/   { print "KC_DEV_USERS_PASSWORD=" users; next }
         { print }' > .env
     chmod 600 .env
     ok '.env created with random secrets (git-ignored, never commit it)'
 fi
+# Keys added to .env.example after this .env was created: appended, secrets generated.
+ADDED=''
+for key in $(tr -d '\r' < .env.example | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do
+    grep -q "^$key=" .env && continue
+    case "$key" in
+        *SECRET* | *PASSWORD*) value="$(new_secret)" ;;
+        *) value="$(tr -d '\r' < .env.example | sed -n "s/^$key=//p" | head -n 1)" ;;
+    esac
+    printf '\n%s=%s' "$key" "$value" >> .env
+    ADDED="$ADDED $key"
+done
+[ -n "$ADDED" ] && ok "added to .env:$ADDED"
 if [ "$FULL_STACK" -eq 1 ]; then
-    for key in KC_BFF_CLIENT_SECRET KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD; do
+    for key in KC_BFF_CLIENT_SECRET KC_ADMIN_CLIENT_SECRET KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD; do
         value="$(read_env "$key")"
         case "$value" in
             '' | change-me*) abort "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." ;;
@@ -346,12 +359,14 @@ if [ "$FULL_STACK" -eq 1 ]; then
     KC_ADMIN_USER="${KC_ADMIN_USER:-admin}"
     KC_ADMIN_PASS="$(read_env KEYCLOAK_ADMIN_PASSWORD)"
     EXPECTED_SECRET="$(read_env KC_BFF_CLIENT_SECRET)"
+    EXPECTED_ADMIN_SECRET="$(read_env KC_ADMIN_CLIENT_SECRET)"
     USERS_PASSWORD="$(read_env KC_DEV_USERS_PASSWORD)"
     docker compose -f "$COMPOSE_FILE" up -d --build || abort "docker compose -f $COMPOSE_FILE up failed."
 else
     KC_ADMIN_USER='admin'
     KC_ADMIN_PASS='admin'                          # fixed dev values in compose.yaml
     EXPECTED_SECRET='dev-only-medlink-bff-secret'  # compose.yaml + application-dev.yml
+    EXPECTED_ADMIN_SECRET='dev-only-medlink-admin-secret'  # compose.yaml + application-dev.yml
     USERS_PASSWORD="$DEV_USERS_PASSWORD"
     docker compose -f "$COMPOSE_FILE" up -d || abort "docker compose -f $COMPOSE_FILE up failed."
 fi
@@ -418,6 +433,27 @@ else
             *'${'*) bad 'client secret is an unresolved placeholder: KC_BFF_CLIENT_SECRET was not passed to Keycloak' ;;
             *) bad 'client secret differs from what the API uses (realm imported earlier with another secret? re-run with --reset)' ;;
         esac
+    fi
+
+    # Service account of the API: can manage users, nothing more (least rights).
+    ADMIN_CLIENT_ID="$(admin_get '/clients?clientId=medlink-admin' | sed -n 's/^\[{"id":"\([^"]*\)".*/\1/p')"
+    if [ -z "$ADMIN_CLIENT_ID" ]; then
+        bad 'client medlink-admin not found'
+    else
+        ADMIN_SECRET="$(admin_get "/clients/$ADMIN_CLIENT_ID/client-secret" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')"
+        if [ "$ADMIN_SECRET" != "$EXPECTED_ADMIN_SECRET" ]; then
+            bad 'client medlink-admin: secret differs from what the API uses (KC_ADMIN_CLIENT_SECRET; re-run with --reset)'
+        else
+            SA_TOKEN="$(curl -s --max-time 15 -d grant_type=client_credentials -d client_id=medlink-admin \
+                --data-urlencode "client_secret=$ADMIN_SECRET" \
+                "$KEYCLOAK_URL/realms/medlink/protocol/openid-connect/token" |
+                sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+            LIST_USERS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Authorization: Bearer $SA_TOKEN" "$KEYCLOAK_URL/admin/realms/medlink/users?max=1")"
+            # GET on the realm itself answers 200 with a short summary to any admin: ask for its clients instead.
+            REALM_SETTINGS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Authorization: Bearer $SA_TOKEN" "$KEYCLOAK_URL/admin/realms/medlink/clients")"
+            if [ "$LIST_USERS" = 200 ] && [ "$REALM_SETTINGS" = 403 ]; then ok 'service account medlink-admin: can list users, refused on realm settings (clients)'
+            else bad "service account medlink-admin: list users $LIST_USERS (expected 200), realm clients $REALM_SETTINGS (expected 403)"; fi
+        fi
     fi
 
     MISSING="$(missing_values "$(admin_get '/users?briefRepresentation=true&max=50')" username staff.dev practitioner.dev patient.dev)"

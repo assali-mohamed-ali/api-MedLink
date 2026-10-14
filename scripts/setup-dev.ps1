@@ -283,6 +283,7 @@ if (Test-Path '.env') {
         KEYCLOAK_DB_PASSWORD    = New-Secret
         KEYCLOAK_ADMIN_PASSWORD = New-Secret
         KC_BFF_CLIENT_SECRET    = New-Secret
+        KC_ADMIN_CLIENT_SECRET  = New-Secret
         KC_DEV_USERS_PASSWORD   = $DevUsersPassword
     }
     foreach ($key in $generated.Keys) {
@@ -292,8 +293,19 @@ if (Test-Path '.env') {
     [System.IO.File]::WriteAllText((Join-Path $Repo '.env'), $content, (New-Object System.Text.UTF8Encoding($false)))
     Write-Ok '.env created with random secrets (git-ignored, never commit it)'
 }
+# Keys added to .env.example after this .env was created: appended, secrets generated.
 $envValues = Read-DotEnv '.env'
-foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD') {
+$added = @()
+foreach ($key in (Read-DotEnv '.env.example').Keys) {
+    if ($envValues.ContainsKey($key)) { continue }
+    $value = (Read-DotEnv '.env.example')[$key]
+    if ($key -like '*SECRET*' -or $key -like '*PASSWORD*') { $value = New-Secret }
+    [System.IO.File]::AppendAllText((Join-Path $Repo '.env'), "`n$key=$value", (New-Object System.Text.UTF8Encoding($false)))
+    $added += $key
+}
+if ($added) { Write-Ok "added to .env: $($added -join ', ')" }
+$envValues = Read-DotEnv '.env'
+foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KC_ADMIN_CLIENT_SECRET', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD') {
     if (-not $envValues[$key] -or $envValues[$key] -like 'change-me*') {
         if ($FullStack) { Stop-Setup "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." }
     }
@@ -341,11 +353,13 @@ if ($FullStack) {
     $kcAdminUser = $envValues['KEYCLOAK_ADMIN']; if (-not $kcAdminUser) { $kcAdminUser = 'admin' }
     $kcAdminPass = $envValues['KEYCLOAK_ADMIN_PASSWORD']
     $expectedSecret = $envValues['KC_BFF_CLIENT_SECRET']
+    $expectedAdminSecret = $envValues['KC_ADMIN_CLIENT_SECRET']
     $usersPassword = $envValues['KC_DEV_USERS_PASSWORD']
     Invoke-Native docker @('compose', '-f', $composeFile, 'up', '-d', '--build')
 } else {
     $kcAdminUser = 'admin'; $kcAdminPass = 'admin'               # fixed dev values in compose.yaml
     $expectedSecret = 'dev-only-medlink-bff-secret'              # compose.yaml + application-dev.yml
+    $expectedAdminSecret = 'dev-only-medlink-admin-secret'       # compose.yaml + application-dev.yml
     $usersPassword = $DevUsersPassword
     Invoke-Native docker @('compose', '-f', $composeFile, 'up', '-d')
 }
@@ -396,6 +410,27 @@ try {
         if ($secret -eq $expectedSecret) { Write-Ok 'client secret matches what the API uses' }
         elseif ($secret -match '\$\{') { Write-Bad 'client secret is an unresolved placeholder: KC_BFF_CLIENT_SECRET was not passed to Keycloak' }
         else { Write-Bad 'client secret differs from what the API uses (realm imported earlier with another secret? re-run with -Reset)' }
+    }
+
+    # Service account of the API: can manage users, nothing more (least rights).
+    $adminClient = @(Invoke-RestMethod "$admin/clients?clientId=medlink-admin" -Headers $auth)
+    if ($adminClient.Count -ne 1) {
+        Write-Bad 'client medlink-admin not found'
+    } else {
+        $adminSecret = (Invoke-RestMethod "$admin/clients/$($adminClient[0].id)/client-secret" -Headers $auth).value
+        if ($adminSecret -ne $expectedAdminSecret) {
+            Write-Bad 'client medlink-admin: secret differs from what the API uses (KC_ADMIN_CLIENT_SECRET; re-run with -Reset)'
+        } else {
+            $saToken = Invoke-RestMethod -Method Post -Uri "$KeycloakUrl/realms/medlink/protocol/openid-connect/token" `
+                -ContentType 'application/x-www-form-urlencoded' `
+                -Body @{ grant_type = 'client_credentials'; client_id = 'medlink-admin'; client_secret = $adminSecret }
+            $saAuth = "Authorization: Bearer $($saToken.access_token)"
+            $listUsers = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -H $saAuth "$admin/users?max=1")
+            # GET on the realm itself answers 200 with a short summary to any admin: ask for its clients instead.
+            $realmSettings = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -H $saAuth "$admin/clients")
+            if ($listUsers -eq 200 -and $realmSettings -eq 403) { Write-Ok 'service account medlink-admin: can list users, refused on realm settings (clients)' }
+            else { Write-Bad "service account medlink-admin: list users $listUsers (expected 200), realm clients $realmSettings (expected 403)" }
+        }
     }
 
     $userNames = (Invoke-RestMethod "$admin/users?briefRepresentation=true&max=50" -Headers $auth).username

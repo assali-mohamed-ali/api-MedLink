@@ -85,9 +85,31 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "medlink-admin",
+      "name": "MedLink admin calls",
+      "description": "Service account the API uses for Keycloak admin calls (create users, passwords, email verified). No login flow.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KC_ADMIN_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
     }
   ],
   "users": [
+    {
+      "username": "service-account-medlink-admin",
+      "enabled": true,
+      "serviceAccountClientId": "medlink-admin",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users", "query-users", "query-groups"]
+      }
+    },
     {
       "username": "staff.dev",
       "email": "staff.dev@medlink.local",
