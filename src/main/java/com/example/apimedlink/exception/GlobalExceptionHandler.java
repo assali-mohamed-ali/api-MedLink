@@ -2,7 +2,6 @@ package com.example.apimedlink.exception;
 
 import jakarta.persistence.EntityExistsException;
 import jakarta.persistence.EntityNotFoundException;
-import java.time.Instant;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -27,14 +26,7 @@ public class GlobalExceptionHandler {
 
     private ResponseEntity<Map<String, Object>> body(
             HttpStatus status, String code, String message, Map<String, String> details) {
-        Map<String, Object> body = new LinkedHashMap<>();
-        body.put("timestamp", Instant.now().toString());
-        body.put("status", status.value());
-        body.put("error", status.getReasonPhrase());
-        body.put("code", code);
-        body.put("message", message);
-        body.put("details", details == null ? Map.of() : details);
-        return ResponseEntity.status(status).body(body);
+        return ResponseEntity.status(status).body(ErrorBody.of(status, code, message, details));
     }
 
     @ExceptionHandler(ApiException.class)
