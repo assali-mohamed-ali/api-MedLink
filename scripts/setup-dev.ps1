@@ -412,6 +412,18 @@ try {
         else { Write-Bad 'client secret differs from what the API uses (realm imported earlier with another secret? re-run with -Reset)' }
     }
 
+    # Login protections from the realm file (MLink-66, MLink-67) and the login endpoint's grant (MLink-55).
+    $realmSettings = Invoke-RestMethod $admin -Headers $auth
+    if ($realmSettings.bruteForceProtected -and $realmSettings.failureFactor -eq 5 -and $realmSettings.waitIncrementSeconds -eq 900 -and -not $realmSettings.permanentLockout) {
+        Write-Ok 'lockout: 15 minutes after 5 failed logins'
+    } else { Write-Bad "lockout: failureFactor $($realmSettings.failureFactor), waitIncrementSeconds $($realmSettings.waitIncrementSeconds) (expected 5 and 900)" }
+    $eventsConfig = Invoke-RestMethod "$admin/events/config" -Headers $auth
+    if ($eventsConfig.eventsEnabled -and $eventsConfig.adminEventsEnabled -and ($eventsConfig.enabledEventTypes -contains 'LOGIN_ERROR')) {
+        Write-Ok 'event log on: login failures, lockouts and admin changes are kept'
+    } else { Write-Bad 'event log is off (eventsEnabled / adminEventsEnabled / LOGIN_ERROR)' }
+    if ($client.Count -eq 1 -and $client[0].directAccessGrantsEnabled) { Write-Ok 'medlink-bff may exchange a password for tokens (login endpoint)' }
+    else { Write-Bad 'medlink-bff: direct grants are off, the login endpoint cannot work' }
+
     # Service account of the API: can manage users, nothing more (least rights).
     $adminClient = @(Invoke-RestMethod "$admin/clients?clientId=medlink-admin" -Headers $auth)
     if ($adminClient.Count -ne 1) {
