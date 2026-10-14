@@ -59,7 +59,7 @@
     {
       "clientId": "medlink-bff",
       "name": "MedLink BFF",
-      "description": "Spring Boot backend (auth BFF). Confidential client, authorization code + PKCE.",
+      "description": "Spring Boot backend (auth BFF). Confidential client: password grant for the API's login endpoint (server to server); authorization code + PKCE until that endpoint replaces the redirect login.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,
@@ -67,7 +67,7 @@
       "secret": "${KC_BFF_CLIENT_SECRET}",
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "frontchannelLogout": true,
       "rootUrl": "${KC_BFF_BASE_URL}",
