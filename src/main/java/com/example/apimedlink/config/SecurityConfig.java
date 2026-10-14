@@ -1,5 +1,6 @@
 package com.example.apimedlink.config;
 
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -29,6 +30,9 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.spa().csrfTokenRepository(csrfTokens))
                 .authorizeHttpRequests(auth -> auth
+                        // sendError (CSRF refused, 415...) forwards to /error: keep that status, not a 401
+                        .dispatcherTypeMatchers(DispatcherType.ERROR)
+                        .permitAll()
                         .requestMatchers(
                                 "/actuator/health",
                                 "/actuator/info",
@@ -37,6 +41,14 @@ public class SecurityConfig {
                                 "/swagger-ui.html")
                         .permitAll()
                         .requestMatchers(HttpMethod.GET, "/actuator/prometheus")
+                        .permitAll()
+                        // Public auth endpoints (plan.md §4); CSRF still applies to these POSTs
+                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf")
+                        .permitAll()
+                        .requestMatchers(HttpMethod.POST,
+                                "/api/auth/register",
+                                "/api/auth/verify-email",
+                                "/api/auth/verify-email/resend")
                         .permitAll()
                         .anyRequest()
                         .authenticated())

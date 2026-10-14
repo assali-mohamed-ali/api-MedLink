@@ -20,6 +20,9 @@ spring:
 keycloak:
   # Client secret of the medlink-bff client (keycloak/realm-medlink.json)
   client-secret: ${KEYCLOAK_CLIENT_SECRET:dev-only-medlink-bff-secret}
+  admin:
+    # Service account medlink-admin (same dev value as compose.yaml)
+    client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET:dev-only-medlink-admin-secret}
 
 app:
   cors:

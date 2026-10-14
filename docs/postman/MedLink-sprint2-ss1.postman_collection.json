@@ -1,0 +1,1919 @@
+{
+  "info": {
+    "name": "MedLink API · Sprint 2 · Sub-sprint 1 (registration and email verification)",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases.\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created.\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them."
+  },
+  "item": [
+    {
+      "name": "0 · CSRF and CORS",
+      "description": "Endpoint 1. Run first: it saves the XSRF-TOKEN cookie into {{xsrf}}, which every write sends as X-XSRF-TOKEN.",
+      "item": [
+        {
+          "name": "GET /csrf → 204 and readable XSRF-TOKEN cookie",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf",
+            "description": "Public. React calls it once before its first write."
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// One fresh set of emails per run, so the collection can be run again and again",
+                  "const run = Date.now();",
+                  "pm.collectionVariables.set(\"email\", \"postman.\" + run + \"@example.com\");",
+                  "pm.collectionVariables.set(\"emailRole\", \"postman.role.\" + run + \"@example.com\");",
+                  "pm.collectionVariables.set(\"emailSlow\", \"postman.slow.\" + run + \"@example.com\");",
+                  "pm.collectionVariables.set(\"tomorrow\", new Date(Date.now() + 86400000).toISOString().slice(0, 10));",
+                  "pm.collectionVariables.set(\"longName\", \"A\".repeat(101));",
+                  "pm.collectionVariables.set(\"longPassword\", \"Aa1!\".repeat(33));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "",
+                  "const xsrf = pm.cookies.get(\"XSRF-TOKEN\");",
+                  "pm.test(\"XSRF-TOKEN cookie present\", () => pm.expect(xsrf).to.be.a(\"string\").and.not.empty);",
+                  "pm.collectionVariables.set(\"xsrf\", xsrf);",
+                  "const set = pm.response.headers.all().filter(h => h.key.toLowerCase() === \"set-cookie\" && h.value.startsWith(\"XSRF-TOKEN=\"));",
+                  "if (set.length) {",
+                  "    pm.test(\"XSRF-TOKEN is readable by JavaScript (not HttpOnly)\", () => pm.expect(set[0].value).to.not.match(/httponly/i));",
+                  "}",
+                  "pm.test(\"no body\", () => pm.expect(pm.response.text()).to.eql(\"\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CORS preflight from React (localhost:3000) allows X-XSRF-TOKEN",
+          "request": {
+            "method": "OPTIONS",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "http://localhost:3000"
+              },
+              {
+                "key": "Access-Control-Request-Method",
+                "value": "POST"
+              },
+              {
+                "key": "Access-Control-Request-Headers",
+                "value": "content-type,x-xsrf-token"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test(\"origin allowed\", () => pm.response.to.have.header(\"Access-Control-Allow-Origin\", \"http://localhost:3000\"));",
+                  "pm.test(\"credentials allowed\", () => pm.response.to.have.header(\"Access-Control-Allow-Credentials\", \"true\"));",
+                  "pm.test(\"x-xsrf-token allowed\", () => pm.expect(pm.response.headers.get(\"Access-Control-Allow-Headers\").toLowerCase()).to.include(\"x-xsrf-token\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "CORS preflight from an unknown origin → 403",
+          "request": {
+            "method": "OPTIONS",
+            "header": [
+              {
+                "key": "Origin",
+                "value": "http://evil.example"
+              },
+              {
+                "key": "Access-Control-Request-Method",
+                "value": "POST"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "",
+                  "pm.test(\"no Access-Control-Allow-Origin\", () => pm.response.to.not.have.header(\"Access-Control-Allow-Origin\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "1 · Register (endpoint 2)",
+      "description": "POST /api/auth/register. Public, CSRF header required.",
+      "item": [
+        {
+          "name": "201 · valid patient",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "",
+                  "pm.test(\"message\", () => pm.expect(pm.response.json().message).to.eql(\"Vérifiez votre boîte mail pour activer votre compte.\"));",
+                  "pm.test(\"only a message comes back (no id, no token)\", () => pm.expect(Object.keys(pm.response.json())).to.eql([\"message\"]));",
+                  "",
+                  "pm.test(\"the password never comes back\", () => pm.expect(pm.response.text()).to.not.include(pm.collectionVariables.get(\"password\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "409 · same email again",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code EMAIL_TAKEN\", () => pm.expect(err.code).to.eql(\"EMAIL_TAKEN\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"message\", () => pm.expect(pm.response.json().message).to.eql(\"Un compte existe déjà avec cet e-mail.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "409 · same email in upper case with spaces (normalised)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"  {{emailUpper}}  \",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"emailUpper\", pm.collectionVariables.get(\"email\").toUpperCase());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code EMAIL_TAKEN\", () => pm.expect(err.code).to.eql(\"EMAIL_TAKEN\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "409 · email known only to Keycloak (dev user, no row of ours)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "description": "patient.dev exists in the realm import but has no users row: Keycloak's 409 is mapped to EMAIL_TAKEN.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient.dev@medlink.local\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code EMAIL_TAKEN\", () => pm.expect(err.code).to.eql(\"EMAIL_TAKEN\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · one error per field (bad email, empty first name, birth date tomorrow)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"not-an-email\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"{{tomorrow}}\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "const d = pm.response.json().details;",
+                  "pm.test(\"details.email\", () => pm.expect(d.email).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"details.firstName\", () => pm.expect(d.firstName).to.be.a(\"string\").and.not.empty);",
+                  "pm.test(\"details.birthDate\", () => pm.expect(d.birthDate).to.eql(\"La date de naissance doit être dans le passé.\"));",
+                  "pm.test(\"no error on the valid fields\", () => pm.expect(d).to.not.have.any.keys(\"password\", \"lastName\", \"phone\", \"address\"));",
+                  "",
+                  "pm.test(\"the password never comes back\", () => pm.expect(pm.response.text()).to.not.include(pm.collectionVariables.get(\"password\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · empty body: every required field listed",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "const d = pm.response.json().details;",
+                  "pm.test(\"required fields\", () => pm.expect(d).to.include.keys(\"email\", \"password\", \"firstName\", \"lastName\", \"birthDate\"));",
+                  "pm.test(\"phone and address are optional\", () => pm.expect(d).to.not.have.any.keys(\"phone\", \"address\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · phone with letters",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"phone.{{email}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"call me maybe\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"details.phone\", () => pm.expect(pm.response.json().details.phone).to.include(\"chiffres\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · first and last name over 100 characters",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"long.{{email}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"{{longName}}\",\n  \"lastName\": \"{{longName}}\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"details.firstName and lastName\", () => pm.expect(pm.response.json().details).to.include.keys(\"firstName\", \"lastName\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · password over 128 characters (stopped before Keycloak)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"longpw.{{email}}\",\n  \"password\": \"{{longPassword}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"details.password\", () => pm.expect(pm.response.json().details.password).to.include(\"128\"));",
+                  "pm.test(\"the password never comes back\", () => pm.expect(pm.response.text()).to.not.include(pm.collectionVariables.get(\"longPassword\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · password policy: no special character (Keycloak rule, in French)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "description": "The Keycloak user created for this attempt is deleted by the API (no account left without its rows).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"weak.{{email}}\",\n  \"password\": \"MotDePasse2026\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code PASSWORD_POLICY\", () => pm.expect(err.code).to.eql(\"PASSWORD_POLICY\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"details.password says the rule\", () => pm.expect(pm.response.json().details.password).to.eql(\"Le mot de passe doit contenir au moins 1 caractère spécial (par exemple ! ? @ #).\"));",
+                  "pm.test(\"the password never comes back\", () => pm.expect(pm.response.text()).to.not.include(\"MotDePasse2026\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · password policy: too short",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"short.{{email}}\",\n  \"password\": \"Ab1!\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code PASSWORD_POLICY\", () => pm.expect(err.code).to.eql(\"PASSWORD_POLICY\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"details.password mentions 12 characters\", () => pm.expect(pm.response.json().details.password).to.include(\"12 caractères\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "201 · after a policy refusal the same email can register (nothing left behind)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "description": "Proves the half-created Keycloak user from the refusal above was removed.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"weak.{{email}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · malformed JSON",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"x@example.com\", ",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"message\", () => pm.expect(pm.response.json().message).to.eql(\"La requête est mal formée.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · birth date not in yyyy-MM-dd",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"date.{{email}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"12/04/1990\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "415 · body sent as text/plain",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "text/plain"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"text.{{email}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 415\", () => pm.response.to.have.status(415));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · no X-XSRF-TOKEN header",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nocsrf.{{email}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · wrong X-XSRF-TOKEN header",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "not-the-token"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"badcsrf.{{email}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "201 · an id and a role in the body are ignored",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "description": "The account is a patient with Keycloak's id. Checked in Keycloak in folder 4.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"id\": \"11111111-1111-1111-1111-111111111111\",\n  \"role\": \"ADMINISTRATIVE_STAFF\",\n  \"email\": \"{{emailRole}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "2 · The verification mail (Mailpit)",
+      "description": "Reads the mail the API sent, from Mailpit's API (dev only), and keeps the token of its link.",
+      "item": [
+        {
+          "name": "Mailpit: exactly one mail for the new patient",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{email}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "// Mailpit's to: search matches substrings (weak.postman... too): keep the exact recipient",
+                  "const to = pm.collectionVariables.get(\"email\");",
+                  "const m = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to));",
+                  "pm.test(\"one mail (the duplicate attempts sent none)\", () => pm.expect(m.length).to.eql(1));",
+                  "pm.collectionVariables.set(\"mailId\", m[0].ID);",
+                  "pm.test(\"subject\", () => pm.expect(m[0].Subject).to.eql(\"Confirmez votre adresse e-mail MedLink\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mailpit: the mail is in French and links to the React page",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/message/{{mailId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const mail = pm.response.json();",
+                  "pm.test(\"from MedLink\", () => pm.expect(mail.From.Address).to.eql(\"no-reply@medlink.local\"));",
+                  "pm.test(\"greets by first name\", () => pm.expect(mail.Text).to.include(\"Bonjour Amel,\"));",
+                  "pm.test(\"says the link lasts 24 h\", () => pm.expect(mail.Text).to.include(\"valable 24 heures\"));",
+                  "pm.test(\"HTML part has a link\", () => pm.expect(mail.HTML).to.include('<a href=\"http://localhost:3000/verifier-email?token='));",
+                  "pm.test(\"no Keycloak URL in the mail\", () => pm.expect(mail.Text + mail.HTML).to.not.include(\"8180\"));",
+                  "const match = mail.Text.match(/verifier-email\\?token=([A-Za-z0-9_-]+)/);",
+                  "pm.test(\"link to /verifier-email with a 43-character token\", () => {",
+                  "    pm.expect(match).to.not.be.null;",
+                  "    pm.expect(match[1]).to.have.lengthOf(43);",
+                  "});",
+                  "pm.collectionVariables.set(\"verifyToken\", match[1]);"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "3 · Resend before verification (endpoint 4)",
+      "description": "Always 202 with the same message: it never tells whether an account exists.",
+      "item": [
+        {
+          "name": "202 · within a minute of the first mail: same answer, no new mail",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email/resend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 202\", () => pm.response.to.have.status(202));",
+                  "",
+                  "pm.test(\"message\", () => pm.expect(pm.response.json().message).to.eql(\"Si un compte non vérifié existe pour cet e-mail, un nouveau lien a été envoyé.\"));",
+                  "",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/search?query=to:\" + pm.collectionVariables.get(\"email\"), (e, res) => {",
+                  "    pm.test(\"still one mail (at most one per minute)\", () => {",
+                  "        pm.expect(e).to.be.null;",
+                  "        const to = pm.collectionVariables.get(\"email\");",
+                  "        pm.expect(res.json().messages.filter(m => m.To.some(t => t.Address === to)).length).to.eql(1);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "202 · unknown email: same answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email/resend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"nobody.{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 202\", () => pm.response.to.have.status(202));",
+                  "",
+                  "pm.test(\"same message as for a real account\", () => pm.expect(pm.response.json().message).to.eql(\"Si un compte non vérifié existe pour cet e-mail, un nouveau lien a été envoyé.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · invalid email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email/resend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"not-an-email\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"details.email\", () => pm.expect(pm.response.json().details.email).to.eql(\"L'adresse e-mail n'est pas valide.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · empty body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email/resend",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"details.email\", () => pm.expect(pm.response.json().details).to.have.key(\"email\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · no X-XSRF-TOKEN header",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email/resend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "4 · Verify email (endpoint 3)",
+      "description": "The React page /verifier-email POSTs the token from the link.",
+      "item": [
+        {
+          "name": "400 · unknown token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"this-token-does-not-exist\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code INVALID_TOKEN\", () => pm.expect(err.code).to.eql(\"INVALID_TOKEN\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · blank token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"details.token\", () => pm.expect(pm.response.json().details).to.have.key(\"token\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · no token field",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · no X-XSRF-TOKEN header (the link stays usable)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{verifyToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "204 · the token from the mail verifies the account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{verifyToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "410 · the same link a second time",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{verifyToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 410\", () => pm.response.to.have.status(410));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code TOKEN_EXPIRED\", () => pm.expect(err.code).to.eql(\"TOKEN_EXPIRED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
+                  "",
+                  "pm.test(\"message\", () => pm.expect(pm.response.json().message).to.eql(\"Ce lien a expiré ou a déjà été utilisé. Demandez-en un nouveau.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "202 · resend after verification: same answer, no mail",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email/resend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 202\", () => pm.response.to.have.status(202));",
+                  "",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/search?query=to:\" + pm.collectionVariables.get(\"email\"), (e, res) => {",
+                  "    pm.test(\"still one mail: a verified account gets none\", () => {",
+                  "        pm.expect(e).to.be.null;",
+                  "        const to = pm.collectionVariables.get(\"email\");",
+                  "        pm.expect(res.json().messages.filter(m => m.To.some(t => t.Address === to)).length).to.eql(1);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Keycloak (dev admin): admin token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{keycloakUrl}}/realms/master/protocol/openid-connect/token",
+            "description": "Dev only: admin / admin from compose.yaml. Used to check what the API did in Keycloak.",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "admin-cli"
+                },
+                {
+                  "key": "username",
+                  "value": "{{kcAdminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{kcAdminPassword}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.collectionVariables.set(\"kcToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Keycloak: the patient is enabled and emailVerified",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users?email={{email}}&exact=true"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const u = pm.response.json()[0];",
+                  "pm.test(\"username is the email\", () => pm.expect(u.username).to.eql(pm.collectionVariables.get(\"email\")));",
+                  "pm.test(\"emailVerified\", () => pm.expect(u.emailVerified).to.be.true);",
+                  "pm.test(\"enabled\", () => pm.expect(u.enabled).to.be.true);",
+                  "pm.collectionVariables.set(\"kcUserId\", u.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Keycloak: the patient is in the patients group only",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{kcUserId}}/groups"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test(\"groups = [/patients]\", () => pm.expect(pm.response.json().map(g => g.path)).to.eql([\"/patients\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Keycloak: the id and role sent in the body were ignored",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users?email={{emailRole}}&exact=true"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const u = pm.response.json()[0];",
+                  "pm.test(\"Keycloak gave its own id\", () => pm.expect(u.id).to.not.eql(\"11111111-1111-1111-1111-111111111111\"));",
+                  "pm.sendRequest({",
+                  "    url: pm.collectionVariables.get(\"keycloakUrl\") + \"/admin/realms/medlink/users/\" + u.id + \"/groups\",",
+                  "    header: { Authorization: \"Bearer \" + pm.collectionVariables.get(\"kcToken\") }",
+                  "}, (e, res) => pm.test(\"still a patient, not staff\", () => pm.expect(res.json().map(g => g.path)).to.eql([\"/patients\"])));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "5 · Slow: a new link after one minute (waits 61 s)",
+      "description": "Skip this folder for a quick run. A resend more than a minute after the last mail sends a new link; the older link stops working.",
+      "item": [
+        {
+          "name": "201 · register a second patient",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{emailSlow}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Youssef\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mailpit: keep the token of the first mail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{emailSlow}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const to = pm.collectionVariables.get(\"emailSlow\");",
+                  "const m = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to));",
+                  "pm.test(\"one mail\", () => pm.expect(m.length).to.eql(1));",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + m[0].ID, (e, res) => {",
+                  "    const token = res.json().Text.match(/verifier-email\\?token=([A-Za-z0-9_-]+)/)[1];",
+                  "    pm.collectionVariables.set(\"firstSlowToken\", token);",
+                  "    pm.test(\"first token kept\", () => pm.expect(token).to.have.lengthOf(43));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "202 · resend after 61 s: a new mail is sent",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email/resend",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{emailSlow}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The API sends at most one mail a minute per account",
+                  "setTimeout(() => {}, 61000);"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 202\", () => pm.response.to.have.status(202));",
+                  "",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/search?query=to:\" + pm.collectionVariables.get(\"emailSlow\"), (e, res) => {",
+                  "    pm.test(\"two mails now\", () => {",
+                  "        pm.expect(e).to.be.null;",
+                  "        const to = pm.collectionVariables.get(\"emailSlow\");",
+                  "        pm.expect(res.json().messages.filter(m => m.To.some(t => t.Address === to)).length).to.eql(2);",
+                  "    });",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mailpit: keep the token of the newest mail",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{emailSlow}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const to = pm.collectionVariables.get(\"emailSlow\");",
+                  "const newest = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to))[0]; // newest first",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + newest.ID, (e, res) => {",
+                  "    const token = res.json().Text.match(/verifier-email\\?token=([A-Za-z0-9_-]+)/)[1];",
+                  "    pm.collectionVariables.set(\"newSlowToken\", token);",
+                  "    pm.test(\"a different token\", () => pm.expect(token).to.not.eql(pm.collectionVariables.get(\"firstSlowToken\")));",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "410 · the first link no longer works",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{firstSlowToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 410\", () => pm.response.to.have.status(410));",
+                  "",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code TOKEN_EXPIRED\", () => pm.expect(err.code).to.eql(\"TOKEN_EXPIRED\"));",
+                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
+                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "204 · the new link verifies the account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{newSlowToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8080"
+    },
+    {
+      "key": "mailpitUrl",
+      "value": "http://localhost:8025"
+    },
+    {
+      "key": "keycloakUrl",
+      "value": "http://localhost:8180"
+    },
+    {
+      "key": "kcAdminUser",
+      "value": "admin"
+    },
+    {
+      "key": "kcAdminPassword",
+      "value": "admin"
+    },
+    {
+      "key": "password",
+      "value": "Sel-De-Mer-2026!"
+    },
+    {
+      "key": "email",
+      "value": ""
+    },
+    {
+      "key": "emailUpper",
+      "value": ""
+    },
+    {
+      "key": "emailRole",
+      "value": ""
+    },
+    {
+      "key": "emailSlow",
+      "value": ""
+    },
+    {
+      "key": "tomorrow",
+      "value": ""
+    },
+    {
+      "key": "longName",
+      "value": ""
+    },
+    {
+      "key": "longPassword",
+      "value": ""
+    },
+    {
+      "key": "xsrf",
+      "value": ""
+    },
+    {
+      "key": "mailId",
+      "value": ""
+    },
+    {
+      "key": "verifyToken",
+      "value": ""
+    },
+    {
+      "key": "kcToken",
+      "value": ""
+    },
+    {
+      "key": "kcUserId",
+      "value": ""
+    },
+    {
+      "key": "firstSlowToken",
+      "value": ""
+    },
+    {
+      "key": "newSlowToken",
+      "value": ""
+    }
+  ]
+}

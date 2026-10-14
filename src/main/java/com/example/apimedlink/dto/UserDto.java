@@ -8,5 +8,5 @@ import java.util.UUID;
 /** {@code id} is the Keycloak user id. */
 public record UserDto(
         UUID id,
-        @NotBlank @Size(max = 50) String username,
+        @NotBlank @Size(max = 254) String username,
         @NotBlank @Email @Size(max = 254) String email) {}

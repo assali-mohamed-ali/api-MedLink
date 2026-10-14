@@ -31,7 +31,8 @@ public class User implements Persistable<UUID> {
     @Id
     private UUID id;
 
-    @Column(nullable = false, unique = true, length = 50)
+    /** The login name in Keycloak: the email for patients. */
+    @Column(nullable = false, unique = true, length = 254)
     private String username;
 
     @Column(nullable = false, unique = true, length = 254)

@@ -276,18 +276,31 @@ if [ -f .env ]; then
 else
     tr -d '\r' < .env.example | awk \
         -v pg="$(new_secret)" -v kcdb="$(new_secret)" -v kcadmin="$(new_secret)" \
-        -v bff="$(new_secret)" -v users="$DEV_USERS_PASSWORD" '
+        -v bff="$(new_secret)" -v kcapi="$(new_secret)" -v users="$DEV_USERS_PASSWORD" '
         /^POSTGRES_PASSWORD=/       { print "POSTGRES_PASSWORD=" pg; next }
         /^KEYCLOAK_DB_PASSWORD=/    { print "KEYCLOAK_DB_PASSWORD=" kcdb; next }
         /^KEYCLOAK_ADMIN_PASSWORD=/ { print "KEYCLOAK_ADMIN_PASSWORD=" kcadmin; next }
         /^KC_BFF_CLIENT_SECRET=/    { print "KC_BFF_CLIENT_SECRET=" bff; next }
+        /^KC_ADMIN_CLIENT_SECRET=/  { print "KC_ADMIN_CLIENT_SECRET=" kcapi; next }
         /^KC_DEV_USERS_PASSWORD=/   { print "KC_DEV_USERS_PASSWORD=" users; next }
         { print }' > .env
     chmod 600 .env
     ok '.env created with random secrets (git-ignored, never commit it)'
 fi
+# Keys added to .env.example after this .env was created: appended, secrets generated.
+ADDED=''
+for key in $(tr -d '\r' < .env.example | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do
+    grep -q "^$key=" .env && continue
+    case "$key" in
+        *SECRET* | *PASSWORD*) value="$(new_secret)" ;;
+        *) value="$(tr -d '\r' < .env.example | sed -n "s/^$key=//p" | head -n 1)" ;;
+    esac
+    printf '\n%s=%s' "$key" "$value" >> .env
+    ADDED="$ADDED $key"
+done
+[ -n "$ADDED" ] && ok "added to .env:$ADDED"
 if [ "$FULL_STACK" -eq 1 ]; then
-    for key in KC_BFF_CLIENT_SECRET KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD; do
+    for key in KC_BFF_CLIENT_SECRET KC_ADMIN_CLIENT_SECRET KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD; do
         value="$(read_env "$key")"
         case "$value" in
             '' | change-me*) abort "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." ;;
@@ -324,7 +337,7 @@ else
     stop_containers
 fi
 
-PORTS='8080 8180'
+PORTS='8080 8180 1025 8025'   # API, Keycloak, Mailpit SMTP and inbox
 if [ "$FULL_STACK" -eq 1 ]; then
     # Host side only: inside the compose network the API still reaches postgres:5432.
     PG_PORT=5432
@@ -346,12 +359,14 @@ if [ "$FULL_STACK" -eq 1 ]; then
     KC_ADMIN_USER="${KC_ADMIN_USER:-admin}"
     KC_ADMIN_PASS="$(read_env KEYCLOAK_ADMIN_PASSWORD)"
     EXPECTED_SECRET="$(read_env KC_BFF_CLIENT_SECRET)"
+    EXPECTED_ADMIN_SECRET="$(read_env KC_ADMIN_CLIENT_SECRET)"
     USERS_PASSWORD="$(read_env KC_DEV_USERS_PASSWORD)"
     docker compose -f "$COMPOSE_FILE" up -d --build || abort "docker compose -f $COMPOSE_FILE up failed."
 else
     KC_ADMIN_USER='admin'
     KC_ADMIN_PASS='admin'                          # fixed dev values in compose.yaml
     EXPECTED_SECRET='dev-only-medlink-bff-secret'  # compose.yaml + application-dev.yml
+    EXPECTED_ADMIN_SECRET='dev-only-medlink-admin-secret'  # compose.yaml + application-dev.yml
     USERS_PASSWORD="$DEV_USERS_PASSWORD"
     docker compose -f "$COMPOSE_FILE" up -d || abort "docker compose -f $COMPOSE_FILE up failed."
 fi
@@ -418,6 +433,27 @@ else
             *'${'*) bad 'client secret is an unresolved placeholder: KC_BFF_CLIENT_SECRET was not passed to Keycloak' ;;
             *) bad 'client secret differs from what the API uses (realm imported earlier with another secret? re-run with --reset)' ;;
         esac
+    fi
+
+    # Service account of the API: can manage users, nothing more (least rights).
+    ADMIN_CLIENT_ID="$(admin_get '/clients?clientId=medlink-admin' | sed -n 's/^\[{"id":"\([^"]*\)".*/\1/p')"
+    if [ -z "$ADMIN_CLIENT_ID" ]; then
+        bad 'client medlink-admin not found'
+    else
+        ADMIN_SECRET="$(admin_get "/clients/$ADMIN_CLIENT_ID/client-secret" | sed -n 's/.*"value":"\([^"]*\)".*/\1/p')"
+        if [ "$ADMIN_SECRET" != "$EXPECTED_ADMIN_SECRET" ]; then
+            bad 'client medlink-admin: secret differs from what the API uses (KC_ADMIN_CLIENT_SECRET; re-run with --reset)'
+        else
+            SA_TOKEN="$(curl -s --max-time 15 -d grant_type=client_credentials -d client_id=medlink-admin \
+                --data-urlencode "client_secret=$ADMIN_SECRET" \
+                "$KEYCLOAK_URL/realms/medlink/protocol/openid-connect/token" |
+                sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+            LIST_USERS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Authorization: Bearer $SA_TOKEN" "$KEYCLOAK_URL/admin/realms/medlink/users?max=1")"
+            # GET on the realm itself answers 200 with a short summary to any admin: ask for its clients instead.
+            REALM_SETTINGS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -H "Authorization: Bearer $SA_TOKEN" "$KEYCLOAK_URL/admin/realms/medlink/clients")"
+            if [ "$LIST_USERS" = 200 ] && [ "$REALM_SETTINGS" = 403 ]; then ok 'service account medlink-admin: can list users, refused on realm settings (clients)'
+            else bad "service account medlink-admin: list users $LIST_USERS (expected 200), realm clients $REALM_SETTINGS (expected 403)"; fi
+        fi
     fi
 
     MISSING="$(missing_values "$(admin_get '/users?briefRepresentation=true&max=50')" username staff.dev practitioner.dev patient.dev)"
@@ -494,6 +530,45 @@ else
 fi
 rm -f "$COOKIES"
 
+# Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
+# The smoke account is deleted afterwards (Keycloak user, then our rows).
+MAILPIT_URL='http://localhost:8025'
+SMOKE_EMAIL="smoke.$(date +%Y%m%d%H%M%S)@medlink.local"
+COOKIES="$LOG_DIR/signup-cookies.txt"
+rm -f "$COOKIES"
+curl -s -o /dev/null --max-time 10 -c "$COOKIES" -b "$COOKIES" "$APP_URL/api/auth/csrf"
+XSRF="$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$COOKIES" | head -n 1)"
+STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -c "$COOKIES" -b "$COOKIES" \
+    -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"Smoke-Test-2026!\",\"firstName\":\"Smoke\",\"lastName\":\"Test\",\"birthDate\":\"1990-01-01\"}" \
+    "$APP_URL/api/auth/register")"
+if [ "$STATUS" != 201 ]; then
+    bad "signup: POST /api/auth/register returned $STATUS, expected 201 (log: $LOG_DIR/app.log)"
+else
+    MAIL_ID="$(curl -s --max-time 10 "$MAILPIT_URL/api/v1/search?query=to:%22$SMOKE_EMAIL%22" | sed -n 's/.*"ID":"\([^"]*\)".*/\1/p' | head -n 1)"
+    LINK_TOKEN=''
+    [ -n "$MAIL_ID" ] && LINK_TOKEN="$(curl -s --max-time 10 "$MAILPIT_URL/api/v1/message/$MAIL_ID" |
+        grep -o 'verifier-email?token=[A-Za-z0-9_-]*' | head -n 1 | sed 's/.*token=//')"
+    if [ -z "$LINK_TOKEN" ]; then
+        bad "signup: no verification mail with a link in Mailpit ($MAILPIT_URL) for $SMOKE_EMAIL"
+    else
+        STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -c "$COOKIES" -b "$COOKIES" \
+            -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' -d "{\"token\":\"$LINK_TOKEN\"}" \
+            "$APP_URL/api/auth/verify-email")"
+        if [ "$STATUS" = 204 ]; then ok 'signup works end to end: register, mail in Mailpit, its link verifies the account'
+        else bad "signup: the link from the mail returned $STATUS on /api/auth/verify-email, expected 204"; fi
+    fi
+fi
+TOKEN="$(curl -s --max-time 15 -d grant_type=password -d client_id=admin-cli \
+    --data-urlencode "username=$KC_ADMIN_USER" --data-urlencode "password=$KC_ADMIN_PASS" \
+    "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+SMOKE_ID="$(admin_get "/users?email=$SMOKE_EMAIL&exact=true" | sed -n 's/^\[{"id":"\([^"]*\)".*/\1/p')"
+[ -n "$SMOKE_ID" ] && curl -s -o /dev/null --max-time 15 -X DELETE -H "Authorization: Bearer $TOKEN" "$KEYCLOAK_URL/admin/realms/medlink/users/$SMOKE_ID"
+if [ "$FULL_STACK" -eq 1 ]; then DB_USER="$(read_env POSTGRES_USER)"; DB_NAME="$(read_env POSTGRES_DB)"; else DB_USER='myuser'; DB_NAME='mydatabase'; fi
+docker compose -f "$COMPOSE_FILE" exec -T postgres psql -q -U "${DB_USER:-myuser}" -d "${DB_NAME:-mydatabase}" \
+    -c "delete from users where email = '$SMOKE_EMAIL'" >/dev/null 2>&1 || warn "signup: smoke account rows for $SMOKE_EMAIL not deleted"
+rm -f "$COOKIES"
+
 # ---------------------------------------------------------------------------------------------
 printf '\n%s------------------------------------------------------------%s\n' "$C_STEP" "$C_OFF"
 if [ "$FAILURES" -eq 0 ]; then
@@ -513,6 +588,7 @@ cat <<EOF
   API             $APP_URL
   Login           $APP_URL/oauth2/authorization/keycloak
   Swagger UI      $APP_URL/swagger-ui.html
+  Mail inbox      http://localhost:8025   (every mail the API sends, Mailpit)
   Keycloak admin  $KEYCLOAK_URL   (user: $KC_ADMIN_USER, password: $ADMIN_PASSWORD_HINT)
   Test users      staff.dev / practitioner.dev / patient.dev   (password: $USERS_PASSWORD_HINT)
   Logs            $LOG_DIR

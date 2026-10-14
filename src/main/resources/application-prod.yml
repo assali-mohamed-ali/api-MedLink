@@ -10,6 +10,12 @@ spring:
       ddl-auto: validate
     show-sql: false
     open-in-view: false
+  mail:
+    # Real SMTP server: authenticated, TLS required (host and credentials from MAIL_* env)
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.starttls.required: true
   flyway:
     enabled: true
     locations: classpath:db/migration
@@ -19,6 +25,9 @@ spring:
 keycloak:
   # Client secret of the medlink-bff client (keycloak/realm-medlink.json)
   client-secret: ${KEYCLOAK_CLIENT_SECRET}
+  admin:
+    # Service account medlink-admin: no default outside dev
+    client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET}
 
 app:
   cors:

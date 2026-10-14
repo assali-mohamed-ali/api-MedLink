@@ -283,6 +283,7 @@ if (Test-Path '.env') {
         KEYCLOAK_DB_PASSWORD    = New-Secret
         KEYCLOAK_ADMIN_PASSWORD = New-Secret
         KC_BFF_CLIENT_SECRET    = New-Secret
+        KC_ADMIN_CLIENT_SECRET  = New-Secret
         KC_DEV_USERS_PASSWORD   = $DevUsersPassword
     }
     foreach ($key in $generated.Keys) {
@@ -292,8 +293,19 @@ if (Test-Path '.env') {
     [System.IO.File]::WriteAllText((Join-Path $Repo '.env'), $content, (New-Object System.Text.UTF8Encoding($false)))
     Write-Ok '.env created with random secrets (git-ignored, never commit it)'
 }
+# Keys added to .env.example after this .env was created: appended, secrets generated.
 $envValues = Read-DotEnv '.env'
-foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD') {
+$added = @()
+foreach ($key in (Read-DotEnv '.env.example').Keys) {
+    if ($envValues.ContainsKey($key)) { continue }
+    $value = (Read-DotEnv '.env.example')[$key]
+    if ($key -like '*SECRET*' -or $key -like '*PASSWORD*') { $value = New-Secret }
+    [System.IO.File]::AppendAllText((Join-Path $Repo '.env'), "`n$key=$value", (New-Object System.Text.UTF8Encoding($false)))
+    $added += $key
+}
+if ($added) { Write-Ok "added to .env: $($added -join ', ')" }
+$envValues = Read-DotEnv '.env'
+foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KC_ADMIN_CLIENT_SECRET', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD') {
     if (-not $envValues[$key] -or $envValues[$key] -like 'change-me*') {
         if ($FullStack) { Stop-Setup "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." }
     }
@@ -321,7 +333,7 @@ Stop-Containers -Volumes:$Reset
 if ($Reset) { Write-Ok 'volumes deleted: Keycloak will import the realm from scratch' }
 
 $busy = @()
-$ports = @(8080, 8180)
+$ports = @(8080, 8180, 1025, 8025)   # API, Keycloak, Mailpit SMTP and inbox
 if ($FullStack) {
     # Host side only: inside the compose network the API still reaches postgres:5432.
     $pgPort = 5432
@@ -341,11 +353,13 @@ if ($FullStack) {
     $kcAdminUser = $envValues['KEYCLOAK_ADMIN']; if (-not $kcAdminUser) { $kcAdminUser = 'admin' }
     $kcAdminPass = $envValues['KEYCLOAK_ADMIN_PASSWORD']
     $expectedSecret = $envValues['KC_BFF_CLIENT_SECRET']
+    $expectedAdminSecret = $envValues['KC_ADMIN_CLIENT_SECRET']
     $usersPassword = $envValues['KC_DEV_USERS_PASSWORD']
     Invoke-Native docker @('compose', '-f', $composeFile, 'up', '-d', '--build')
 } else {
     $kcAdminUser = 'admin'; $kcAdminPass = 'admin'               # fixed dev values in compose.yaml
     $expectedSecret = 'dev-only-medlink-bff-secret'              # compose.yaml + application-dev.yml
+    $expectedAdminSecret = 'dev-only-medlink-admin-secret'       # compose.yaml + application-dev.yml
     $usersPassword = $DevUsersPassword
     Invoke-Native docker @('compose', '-f', $composeFile, 'up', '-d')
 }
@@ -396,6 +410,27 @@ try {
         if ($secret -eq $expectedSecret) { Write-Ok 'client secret matches what the API uses' }
         elseif ($secret -match '\$\{') { Write-Bad 'client secret is an unresolved placeholder: KC_BFF_CLIENT_SECRET was not passed to Keycloak' }
         else { Write-Bad 'client secret differs from what the API uses (realm imported earlier with another secret? re-run with -Reset)' }
+    }
+
+    # Service account of the API: can manage users, nothing more (least rights).
+    $adminClient = @(Invoke-RestMethod "$admin/clients?clientId=medlink-admin" -Headers $auth)
+    if ($adminClient.Count -ne 1) {
+        Write-Bad 'client medlink-admin not found'
+    } else {
+        $adminSecret = (Invoke-RestMethod "$admin/clients/$($adminClient[0].id)/client-secret" -Headers $auth).value
+        if ($adminSecret -ne $expectedAdminSecret) {
+            Write-Bad 'client medlink-admin: secret differs from what the API uses (KC_ADMIN_CLIENT_SECRET; re-run with -Reset)'
+        } else {
+            $saToken = Invoke-RestMethod -Method Post -Uri "$KeycloakUrl/realms/medlink/protocol/openid-connect/token" `
+                -ContentType 'application/x-www-form-urlencoded' `
+                -Body @{ grant_type = 'client_credentials'; client_id = 'medlink-admin'; client_secret = $adminSecret }
+            $saAuth = "Authorization: Bearer $($saToken.access_token)"
+            $listUsers = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -H $saAuth "$admin/users?max=1")
+            # GET on the realm itself answers 200 with a short summary to any admin: ask for its clients instead.
+            $realmSettings = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -H $saAuth "$admin/clients")
+            if ($listUsers -eq 200 -and $realmSettings -eq 403) { Write-Ok 'service account medlink-admin: can list users, refused on realm settings (clients)' }
+            else { Write-Bad "service account medlink-admin: list users $listUsers (expected 200), realm clients $realmSettings (expected 403)" }
+        }
     }
 
     $userNames = (Invoke-RestMethod "$admin/users?briefRepresentation=true&max=50" -Headers $auth).username
@@ -474,6 +509,62 @@ if ($loginPage -match 'action="([^"]*login-actions/authenticate[^"]*)"') {
 }
 Remove-Item $cookies -Force -ErrorAction SilentlyContinue
 
+# Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
+# The smoke account is deleted afterwards (Keycloak user, then our rows). JSON bodies go through
+# files: Windows PowerShell 5.1 strips the double quotes of native command arguments.
+$MailpitUrl = 'http://localhost:8025'
+$smokeEmail = "smoke.$(Get-Date -Format 'yyyyMMddHHmmss')@medlink.local"
+$jar = Join-Path $LogDir 'signup-cookies.txt'
+$bodyFile = Join-Path $LogDir 'signup-body.json'
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+Remove-Item $jar -Force -ErrorAction SilentlyContinue
+& curl.exe -s -o NUL --max-time 10 -c $jar -b $jar "$AppUrl/api/auth/csrf"
+$xsrf = Get-Content $jar | Where-Object { $_ -match "`tXSRF-TOKEN`t" } | ForEach-Object { ($_ -split "`t")[6] } | Select-Object -First 1
+$signup = @{ email = $smokeEmail; password = 'Smoke-Test-2026!'; firstName = 'Smoke'; lastName = 'Test'; birthDate = '1990-01-01' }
+[System.IO.File]::WriteAllText($bodyFile, ($signup | ConvertTo-Json -Compress), $utf8)
+$status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $jar -b $jar -H "X-XSRF-TOKEN: $xsrf" `
+    -H 'Content-Type: application/json' --data-binary "@$bodyFile" "$AppUrl/api/auth/register")
+if ($status -ne 201) {
+    Write-Bad "signup: POST /api/auth/register returned $status, expected 201 (log: $(Join-Path $LogDir 'app.log'))"
+} else {
+    $linkToken = $null
+    try {
+        $query = [uri]::EscapeDataString('to:"' + $smokeEmail + '"')
+        $found = Invoke-RestMethod "$MailpitUrl/api/v1/search?query=$query"
+        if ($found.messages) {
+            $mailText = (Invoke-RestMethod "$MailpitUrl/api/v1/message/$($found.messages[0].ID)").Text
+            if ($mailText -match 'verifier-email\?token=([A-Za-z0-9_-]+)') { $linkToken = $Matches[1] }
+        }
+    } catch { }
+    if (-not $linkToken) {
+        Write-Bad "signup: no verification mail with a link in Mailpit ($MailpitUrl) for $smokeEmail"
+    } else {
+        [System.IO.File]::WriteAllText($bodyFile, (@{ token = $linkToken } | ConvertTo-Json -Compress), $utf8)
+        $status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $jar -b $jar -H "X-XSRF-TOKEN: $xsrf" `
+            -H 'Content-Type: application/json' --data-binary "@$bodyFile" "$AppUrl/api/auth/verify-email")
+        if ($status -eq 204) { Write-Ok 'signup works end to end: register, mail in Mailpit, its link verifies the account' }
+        else { Write-Bad "signup: the link from the mail returned $status on /api/auth/verify-email, expected 204" }
+    }
+}
+try {
+    $token = Invoke-RestMethod -Method Post -Uri "$KeycloakUrl/realms/master/protocol/openid-connect/token" `
+        -ContentType 'application/x-www-form-urlencoded' `
+        -Body @{ grant_type = 'password'; client_id = 'admin-cli'; username = $kcAdminUser; password = $kcAdminPass }
+    $auth = @{ Authorization = "Bearer $($token.access_token)" }
+    foreach ($u in @(Invoke-RestMethod "$KeycloakUrl/admin/realms/medlink/users?email=$([uri]::EscapeDataString($smokeEmail))&exact=true" -Headers $auth)) {
+        Invoke-RestMethod -Method Delete "$KeycloakUrl/admin/realms/medlink/users/$($u.id)" -Headers $auth | Out-Null
+    }
+} catch { Write-Warn "signup: smoke user $smokeEmail not deleted in Keycloak" }
+$dbUser = 'myuser'; $dbName = 'mydatabase'
+if ($FullStack) {
+    if ($envValues['POSTGRES_USER']) { $dbUser = $envValues['POSTGRES_USER'] }
+    if ($envValues['POSTGRES_DB']) { $dbName = $envValues['POSTGRES_DB'] }
+}
+if (-not (Test-Quiet "docker compose -f $composeFile exec -T postgres psql -q -U $dbUser -d $dbName -c `"delete from users where email = '$smokeEmail'`"")) {
+    Write-Warn "signup: smoke account rows for $smokeEmail not deleted"
+}
+Remove-Item $jar, $bodyFile -Force -ErrorAction SilentlyContinue
+
 # ---------------------------------------------------------------------------------------------
 Write-Host "`n------------------------------------------------------------" -ForegroundColor Cyan
 if ($script:Failures -eq 0) {
@@ -486,6 +577,7 @@ Write-Host @"
   API             $AppUrl
   Login           $AppUrl/oauth2/authorization/keycloak
   Swagger UI      $AppUrl/swagger-ui.html
+  Mail inbox      http://localhost:8025   (every mail the API sends, Mailpit)
   Keycloak admin  $KeycloakUrl   (user: $kcAdminUser, password: $(if ($FullStack) { 'KEYCLOAK_ADMIN_PASSWORD in .env' } else { 'admin' }))
   Test users      staff.dev / practitioner.dev / patient.dev   (password: $(if ($FullStack) { 'KC_DEV_USERS_PASSWORD in .env' } else { $DevUsersPassword }))
   Logs            $LogDir
