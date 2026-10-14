@@ -68,9 +68,7 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      # BLOCKING GATE: fail_action fails the job on rule violations.
-      # Tune only via security/zap-rules.tsv with a justification comment.
-      # BLOCKING GATE: fail_action fails the job on rule violations.
+      # BLOCKING GATE: fail_action fails the job on any WARN or FAIL alert.
       # Tune only via security/zap-rules.tsv with a justification comment.
       - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.15.0
