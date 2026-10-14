@@ -8,6 +8,7 @@ import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
 
 /**
@@ -19,9 +20,12 @@ public class SecurityConfig {
 
     @Bean
     SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+        // Same cookie as csrf.spa() (readable by the SPA), plus SameSite like the session cookie
+        CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
+        csrfTokens.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
         http
                 .cors(Customizer.withDefaults())
-                .csrf(csrf -> csrf.spa())
+                .csrf(csrf -> csrf.spa().csrfTokenRepository(csrfTokens))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(
                                 "/actuator/health",

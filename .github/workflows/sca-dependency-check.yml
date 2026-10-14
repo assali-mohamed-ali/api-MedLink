@@ -11,10 +11,18 @@ on:
 permissions:
   contents: read
   security-events: write
+  actions: read
 
 jobs:
   dependency-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Free key: https://nvd.nist.gov/developers/request-an-api-key
+      # Without it the NVD download fails on a fresh runner (empty database),
+      # so OWASP Dependency-Check cannot run and Trivy scans instead.
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+      DC_DATA: ${{ github.workspace }}/.dependency-check-data
     steps:
       - uses: actions/checkout@v7
 
@@ -25,37 +33,82 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Today
+        id: today
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      # NVD database: full download once, then one cache per day with the delta.
+      - name: Restore NVD database
+        if: env.NVD_API_KEY != ''
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.DC_DATA }}
+          key: dependency-check-data-${{ steps.today.outputs.date }}
+          restore-keys: dependency-check-data-
+
       # BLOCKING GATE: fails on CVSS >= 7. No `|| true` — see
       # security/owasp-suppressions.xml for the only allowed exceptions
-      # (each needs expiry + ticket reference). Without NVD_API_KEY the
-      # scan still runs with the local mirror (-Dautoupdate=false).
+      # (each needs expiry + ticket reference). OSS Index needs Sonatype
+      # credentials this repo does not have, so it is off; NVD stays the source.
       - name: OWASP Dependency-Check
+        if: env.NVD_API_KEY != ''
         run: |
-          if [ -n "${NVD_API_KEY:-}" ]; then
-            NVD_ARG="-DnvdApiKey=${NVD_API_KEY}"
-          else
-            NVD_ARG="-Dautoupdate=false"
-          fi
           ./mvnw -B org.owasp:dependency-check-maven:check \
-            ${NVD_ARG} \
+            -DnvdApiKeyEnvironmentVariable=NVD_API_KEY \
+            -DdataDirectory="$DC_DATA" \
+            -DossIndexAnalyzerEnabled=false \
             -DsuppressionFile=security/owasp-suppressions.xml \
-            -DfailBuildOnCVSS=7 \
-            -Dformat=SARIF
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+            -DfailBuildOnCVSS=7
 
+      # BLOCKING GATE (fallback): fails on CRITICAL/HIGH with a fix available,
+      # on every dependency packed in the jar.
+      - name: Package (fallback)
+        if: env.NVD_API_KEY == ''
+        run: |
+          echo "::warning::NVD_API_KEY secret is not set: Trivy replaces OWASP Dependency-Check for this run."
+          ./mvnw -B -DskipTests package
+
+      - name: Trivy dependency scan (fallback)
+        if: env.NVD_API_KEY == ''
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: 'rootfs'
+          scan-ref: 'target'
+          scanners: 'vuln'
+          format: 'sarif'
+          output: 'target/trivy-sca.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Show fallback findings
+        if: always() && hashFiles('target/trivy-sca.sarif') != ''
+        run: scripts/ci/sarif-gate.sh 11 target/trivy-sca.sarif
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: dependency-check-report
+          path: |
+            target/dependency-check-report.html
+            target/dependency-check-report.sarif
+            target/trivy-sca.sarif
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Code scanning needs a public repo or GitHub Advanced Security:
+      # set the repo variable CODE_SCANNING_ENABLED=true once it is on.
       - name: Upload SARIF
-        if: always() && hashFiles('target/dependency-check-report.sarif') != ''
+        if: always() && vars.CODE_SCANNING_ENABLED == 'true' && hashFiles('target/dependency-check-report.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: target/dependency-check-report.sarif
           category: owasp-dependency-check
 
-      - name: Upload HTML report
-        if: always()
-        uses: actions/upload-artifact@v7
+      - name: Upload fallback SARIF
+        if: always() && vars.CODE_SCANNING_ENABLED == 'true' && hashFiles('target/trivy-sca.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
         with:
-          name: dependency-check-report
-          path: target/dependency-check-report.html
-          if-no-files-found: error
-          retention-days: 14
+          sarif_file: target/trivy-sca.sarif
+          category: trivy-sca

@@ -68,14 +68,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      # BLOCKING GATE: fail_action fails the job on rule violations.
+      # BLOCKING GATE: fail_action fails the job on any WARN or FAIL alert.
       # Tune only via security/zap-rules.tsv with a justification comment.
-      # BLOCKING GATE: fail_action fails the job on rule violations.
-      # Tune only via security/zap-rules.tsv with a justification comment.
+      # The action passes rules_file_name to ZAP only when the file has an
+      # IGNORE line, so the file is also given explicitly with -c.
       - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.15.0
         with:
           target: 'http://localhost:8080'
           rules_file_name: 'security/zap-rules.tsv'
+          cmd_options: '-c security/zap-rules.tsv'
           allow_issue_writing: false
           fail_action: true
