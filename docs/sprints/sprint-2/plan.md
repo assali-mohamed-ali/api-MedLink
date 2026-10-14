@@ -33,18 +33,19 @@ Stories (YouTrack project `MLink`, sprint `sprint2`):
 | **Our mails, our tokens.** The API sends verification and activation mails (Spring Mail; Mailpit in dev). Tokens: 32 random bytes, stored as SHA-256, single use, 24 h. The link opens a React page that POSTs the token. | Keycloak stays hidden; mail scanners that pre-open links cannot use the token. |
 | **Staff code (TOTP) lives in the API**, secret encrypted (AES-256-GCM, key from env). | Keycloak cannot enrol a code without its own page. |
 | **One id per person: Keycloak's.** `users.id` = Keycloak id; `patients.id` = `users.id`. The API creates the Keycloak user first, then our rows, in the same request; if our insert fails it deletes the Keycloak user. Users created outside the API (dev import, console) get their row at first login. | Nothing to map; ownership checks are a plain comparison. |
-| **Errors** keep today's shape `{timestamp, status, error, message, details}` and gain a stable machine `code` (e.g. `EMAIL_TAKEN`). `message` is French, for the user. | React reacts to `code`, shows `message`. |
-| **No account enumeration where it costs nothing:** resend-verification always answers 202; login failures share one message. Register answers 409 on a known email because the story asks for it. | Fewer hints for attackers, same experience for users. |
+| **Errors** keep today's shape `{timestamp, status, error, message, details}` and gain a stable machine `code` (e.g. `PASSWORD_POLICY`). `message` is French, for the user. | React reacts to `code`, shows `message`. |
+| **No account enumeration, anywhere public:** register answers 201 with the same message whether or not the email is taken (the owner gets a warning mail instead, at most one per 15 minutes); resend-verification always answers 202; login failures share one message. Changed 2026-10-14 after the code owner's review on #32: the story's "409 on a known email" is dropped. | A stranger cannot learn which emails have an account; the real owner is still told. |
 | **Simple first:** one API instance, in-memory sessions, no Redis. | Spring Session JDBC can replace it when we run two instances. |
 
 ## 3. The flows
 
 **Registration and verification (sub-sprint 1)**
 1. React `GET /api/auth/csrf`, then `POST /api/auth/register`.
-2. API: email lower-cased; refused with 409 if already in `users`.
+2. API: email lower-cased. Already in `users`, or Keycloak answers 409 at step 3: nothing is created, the owner gets a
+   "someone tried to sign up with your address" mail (at most one per 15 min), and the caller gets the normal 201.
 3. API → Keycloak: create user (username = email, enabled, `emailVerified=false`, group `/patients`) → id.
 4. API → Keycloak: set password (policy refusal → 400, Keycloak user deleted).
-5. API, one transaction: `users` + `patients` rows with that id + an `email_tokens` row (`VERIFY_EMAIL`). On failure: Keycloak user deleted.
+5. API, one transaction: one `Patient` (`users` + `patients` rows, JOINED inheritance) with that id + an `email_tokens` row (`VERIFY_EMAIL`). On failure: Keycloak user deleted.
 6. API sends the mail: link `${app.frontend-url}/verifier-email?token=…`. A mail failure is logged only; the user can ask for a new link.
 7. React page → `POST /api/auth/verify-email {token}` → API → Keycloak `emailVerified=true` → 204.
 
@@ -127,9 +128,9 @@ its first write (register, login).
 Validation: email ≤ 254 and valid (spaces around it trimmed); password not blank, ≤ 128 (the
 policy is Keycloak's); names required, ≤ 100; `birthDate` required, in the past; phone optional,
 ≤ 30 (digits, spaces, leading `+`); address optional, ≤ 255.
-- **201** `{ "message": "Vérifiez votre boîte mail pour activer votre compte." }`
+- **201** `{ "message": "Vérifiez votre boîte mail pour activer votre compte." }`, also when the email already has
+  an account (nothing is created, the owner is warned by mail): the answer never tells whether an email is registered
 - **400** `VALIDATION_FAILED` (one entry per field in `details`) · `PASSWORD_POLICY` (French rule)
-- **409** `EMAIL_TAKEN` "Un compte existe déjà avec cet e-mail."
 - **503** `IDENTITY_UNAVAILABLE` (Keycloak unreachable)
 Steps: section 3. Never log or return the password.
 
