@@ -59,8 +59,37 @@ Stories (YouTrack project `MLink`, sprint `sprint2`):
    security context saved, tokens kept in the session → 200 with the user.
 
 **Any authenticated call**
-Cookie + `X-XSRF-TOKEN` → session found (else 401) → role check (else 403) → ownership check
-where the data belongs to someone (else 403) → parameterized SQL only.
+Cookie + `X-XSRF-TOKEN` → session found (else 401) → **session still valid** (below, else 401
+`SESSION_EXPIRED`) → role check (else 403) → ownership check where the data belongs to someone
+(else 403) → parameterized SQL only.
+
+**Session still valid: a disabled user is out (GitHub #28)**
+The session keeps the Keycloak access token (5 min) and refresh token. A filter after the
+security context runs on every authenticated call:
+1. Access token still valid → go on. No call to Keycloak.
+2. Expired → refresh it with Keycloak (`refresh_token` grant, as `medlink-bff`). Keycloak refuses
+   when the account is disabled, its sessions were ended, its password was reset, or the SSO
+   idle (15 min) or max (10 h) lifetime is over. Refused → invalidate our session → 401
+   `SESSION_EXPIRED`. Accepted → store the new tokens and refresh roles from the new token.
+3. Keycloak unreachable → 503 `IDENTITY_UNAVAILABLE`, session kept (an outage is not a logout).
+
+So a disabled user loses access within 5 minutes at most, with no extra call while the token
+is fresh. Account actions end the user's API sessions **at once** (sub-sprint 5): a Spring
+Security `SessionRegistry` (in memory, one instance; `FindByIndexNameSessionRepository` once
+Spring Session JDBC arrives) indexed by user id; disable (16), role change (15) and forced
+password reset (11) call `expireNow()` on every session of that user, and end the Keycloak ones.
+
+**Users created outside the API (GitHub #29)**
+Users exist in Keycloak without a row of ours only when created outside the API: the realm
+import (dev users) or the Keycloak console. No background sync: the row is created **at first
+successful login** (endpoint 5), from the token's `sub` and `email`:
+- `sub` known → update `email`/`username` if they changed in Keycloak, nothing else.
+- `sub` unknown, email unused → insert. Two first logins at once: the primary key lets one
+  insert win; the other catches the duplicate-key error and reads the row back. Never two rows.
+- `sub` unknown but the email belongs to another id (the account was recreated in Keycloak) →
+  refuse the login with 409 `ACCOUNT_CONFLICT`, log it; staff resolve it. Never overwrite.
+Accounts made by staff (endpoint 13) and by signup (endpoint 2) get their row in the same
+request, so only the console path depends on this.
 
 ## 4. Endpoint contracts
 
@@ -172,8 +201,8 @@ Sets the first password and `emailVerified=true`. The code is enrolled at first 
 
 ### 16 · `PATCH /api/admin/users/{id}/status` (staff)
 `{ "enabled": false }` → **204** · **404** · **409** when staff disable themselves.
-Disabling ends the user's Keycloak sessions. Known limit: their current API session lives
-until its 15-minute idle timeout (closing it needs a session registry).
+Disabling ends the user's Keycloak sessions **and their API sessions at once** (session
+registry, §3 "Session still valid"); their next call answers 401 `SESSION_EXPIRED`.
 
 Existing `/api/users` endpoints become staff-only in sub-sprint 5.
 
@@ -206,10 +235,13 @@ green; setup script green.
 
 ### Sub-sprint 2 — Login and session
 Endpoints 5 (patient path), 6, 7. Replace `oauth2Login`; roles from the token claims
-(reuse `KeycloakRolesMapper` logic); session hardening; `users` row ensured at login for users
-created outside the API. Tasks: MLink-55, 53, 54, 58, 66, 67, 68, 83, 84, 86, 65 (login check
+(reuse `KeycloakRolesMapper` logic); session hardening; the session-validity filter with token
+refresh (§3, GitHub #28: MLink-83, tests in MLink-86); `users` row ensured at first login for
+users created outside the API (§3, GitHub #29: MLink-55). Tasks: MLink-55, 53, 54, 58, 66, 67, 68, 83, 84, 86, 65 (login check
 in the setup scripts). React: MLink-52 (login page), 56, 85.
-Exit: patient logs in and out; unverified → 403; 5 wrong passwords → 423; idle session → 401.
+Exit: patient logs in and out; unverified → 403; 5 wrong passwords → 423; idle session → 401;
+a user disabled in the Keycloak console is refused at the next token refresh (≤ 5 min); a user
+created in the console gets exactly one `users` row at first login.
 
 ### Sub-sprint 3 — Staff code (TOTP)
 Endpoints 8–9 and the staff branch of endpoint 5. Tasks: MLink-62, 63, 65 (staff code check in
@@ -222,7 +254,8 @@ Endpoints 10–11 and the forced-change branch of endpoint 5. Tasks: MLink-87, 8
 React: MLink-89. Exit: weak password refused with a French message; forced change asked at next login.
 
 ### Sub-sprint 5 — Accounts and access
-Endpoints 12–16; `/api/users` staff-only; role × route test matrix; audit trail.
+Endpoints 12–16; `/api/users` staff-only; role × route test matrix; audit trail; disable, role
+change and forced reset end the user's API sessions at once (session registry, GitHub #28).
 Tasks: MLink-57, 59, 60, 69, 70, 71, 72, 74. React: MLink-61, 73.
 Exit: staff create a practitioner who activates by mail, enrols a code and logs in; the matrix
 proves every route; every account action and every refusal is audited.
