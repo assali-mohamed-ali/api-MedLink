@@ -9,6 +9,8 @@ import com.example.apimedlink.service.EmailVerificationService;
 import com.example.apimedlink.service.RegistrationService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.web.csrf.CsrfToken;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -33,6 +35,16 @@ public class AuthBffController {
     public AuthBffController(RegistrationService registration, EmailVerificationService verification) {
         this.registration = registration;
         this.verification = verification;
+    }
+
+    /**
+     * Endpoint 1: React calls it once before its first write. Reading the token makes Spring
+     * Security write the {@code XSRF-TOKEN} cookie; React echoes it in {@code X-XSRF-TOKEN}.
+     */
+    @GetMapping("/csrf")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void csrf(CsrfToken token) {
+        token.getToken();
     }
 
     /** Endpoint 2: a visitor creates their patient account; the verification mail follows. */

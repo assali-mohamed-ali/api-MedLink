@@ -37,6 +37,8 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/actuator/prometheus")
                         .permitAll()
                         // Public auth endpoints (plan.md §4); CSRF still applies to these POSTs
+                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf")
+                        .permitAll()
                         .requestMatchers(HttpMethod.POST,
                                 "/api/auth/register",
                                 "/api/auth/verify-email",
