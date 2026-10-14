@@ -530,6 +530,45 @@ else
 fi
 rm -f "$COOKIES"
 
+# Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
+# The smoke account is deleted afterwards (Keycloak user, then our rows).
+MAILPIT_URL='http://localhost:8025'
+SMOKE_EMAIL="smoke.$(date +%Y%m%d%H%M%S)@medlink.local"
+COOKIES="$LOG_DIR/signup-cookies.txt"
+rm -f "$COOKIES"
+curl -s -o /dev/null --max-time 10 -c "$COOKIES" -b "$COOKIES" "$APP_URL/api/auth/csrf"
+XSRF="$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$COOKIES" | head -n 1)"
+STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -c "$COOKIES" -b "$COOKIES" \
+    -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"Smoke-Test-2026!\",\"firstName\":\"Smoke\",\"lastName\":\"Test\",\"birthDate\":\"1990-01-01\"}" \
+    "$APP_URL/api/auth/register")"
+if [ "$STATUS" != 201 ]; then
+    bad "signup: POST /api/auth/register returned $STATUS, expected 201 (log: $LOG_DIR/app.log)"
+else
+    MAIL_ID="$(curl -s --max-time 10 "$MAILPIT_URL/api/v1/search?query=to:%22$SMOKE_EMAIL%22" | sed -n 's/.*"ID":"\([^"]*\)".*/\1/p' | head -n 1)"
+    LINK_TOKEN=''
+    [ -n "$MAIL_ID" ] && LINK_TOKEN="$(curl -s --max-time 10 "$MAILPIT_URL/api/v1/message/$MAIL_ID" |
+        grep -o 'verifier-email?token=[A-Za-z0-9_-]*' | head -n 1 | sed 's/.*token=//')"
+    if [ -z "$LINK_TOKEN" ]; then
+        bad "signup: no verification mail with a link in Mailpit ($MAILPIT_URL) for $SMOKE_EMAIL"
+    else
+        STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -c "$COOKIES" -b "$COOKIES" \
+            -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' -d "{\"token\":\"$LINK_TOKEN\"}" \
+            "$APP_URL/api/auth/verify-email")"
+        if [ "$STATUS" = 204 ]; then ok 'signup works end to end: register, mail in Mailpit, its link verifies the account'
+        else bad "signup: the link from the mail returned $STATUS on /api/auth/verify-email, expected 204"; fi
+    fi
+fi
+TOKEN="$(curl -s --max-time 15 -d grant_type=password -d client_id=admin-cli \
+    --data-urlencode "username=$KC_ADMIN_USER" --data-urlencode "password=$KC_ADMIN_PASS" \
+    "$KEYCLOAK_URL/realms/master/protocol/openid-connect/token" | sed -n 's/.*"access_token":"\([^"]*\)".*/\1/p')"
+SMOKE_ID="$(admin_get "/users?email=$SMOKE_EMAIL&exact=true" | sed -n 's/^\[{"id":"\([^"]*\)".*/\1/p')"
+[ -n "$SMOKE_ID" ] && curl -s -o /dev/null --max-time 15 -X DELETE -H "Authorization: Bearer $TOKEN" "$KEYCLOAK_URL/admin/realms/medlink/users/$SMOKE_ID"
+if [ "$FULL_STACK" -eq 1 ]; then DB_USER="$(read_env POSTGRES_USER)"; DB_NAME="$(read_env POSTGRES_DB)"; else DB_USER='myuser'; DB_NAME='mydatabase'; fi
+docker compose -f "$COMPOSE_FILE" exec -T postgres psql -q -U "${DB_USER:-myuser}" -d "${DB_NAME:-mydatabase}" \
+    -c "delete from users where email = '$SMOKE_EMAIL'" >/dev/null 2>&1 || warn "signup: smoke account rows for $SMOKE_EMAIL not deleted"
+rm -f "$COOKIES"
+
 # ---------------------------------------------------------------------------------------------
 printf '\n%s------------------------------------------------------------%s\n' "$C_STEP" "$C_OFF"
 if [ "$FAILURES" -eq 0 ]; then

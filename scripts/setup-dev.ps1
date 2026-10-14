@@ -509,6 +509,62 @@ if ($loginPage -match 'action="([^"]*login-actions/authenticate[^"]*)"') {
 }
 Remove-Item $cookies -Force -ErrorAction SilentlyContinue
 
+# Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
+# The smoke account is deleted afterwards (Keycloak user, then our rows). JSON bodies go through
+# files: Windows PowerShell 5.1 strips the double quotes of native command arguments.
+$MailpitUrl = 'http://localhost:8025'
+$smokeEmail = "smoke.$(Get-Date -Format 'yyyyMMddHHmmss')@medlink.local"
+$jar = Join-Path $LogDir 'signup-cookies.txt'
+$bodyFile = Join-Path $LogDir 'signup-body.json'
+$utf8 = New-Object System.Text.UTF8Encoding($false)
+Remove-Item $jar -Force -ErrorAction SilentlyContinue
+& curl.exe -s -o NUL --max-time 10 -c $jar -b $jar "$AppUrl/api/auth/csrf"
+$xsrf = Get-Content $jar | Where-Object { $_ -match "`tXSRF-TOKEN`t" } | ForEach-Object { ($_ -split "`t")[6] } | Select-Object -First 1
+$signup = @{ email = $smokeEmail; password = 'Smoke-Test-2026!'; firstName = 'Smoke'; lastName = 'Test'; birthDate = '1990-01-01' }
+[System.IO.File]::WriteAllText($bodyFile, ($signup | ConvertTo-Json -Compress), $utf8)
+$status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $jar -b $jar -H "X-XSRF-TOKEN: $xsrf" `
+    -H 'Content-Type: application/json' --data-binary "@$bodyFile" "$AppUrl/api/auth/register")
+if ($status -ne 201) {
+    Write-Bad "signup: POST /api/auth/register returned $status, expected 201 (log: $(Join-Path $LogDir 'app.log'))"
+} else {
+    $linkToken = $null
+    try {
+        $query = [uri]::EscapeDataString('to:"' + $smokeEmail + '"')
+        $found = Invoke-RestMethod "$MailpitUrl/api/v1/search?query=$query"
+        if ($found.messages) {
+            $mailText = (Invoke-RestMethod "$MailpitUrl/api/v1/message/$($found.messages[0].ID)").Text
+            if ($mailText -match 'verifier-email\?token=([A-Za-z0-9_-]+)') { $linkToken = $Matches[1] }
+        }
+    } catch { }
+    if (-not $linkToken) {
+        Write-Bad "signup: no verification mail with a link in Mailpit ($MailpitUrl) for $smokeEmail"
+    } else {
+        [System.IO.File]::WriteAllText($bodyFile, (@{ token = $linkToken } | ConvertTo-Json -Compress), $utf8)
+        $status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $jar -b $jar -H "X-XSRF-TOKEN: $xsrf" `
+            -H 'Content-Type: application/json' --data-binary "@$bodyFile" "$AppUrl/api/auth/verify-email")
+        if ($status -eq 204) { Write-Ok 'signup works end to end: register, mail in Mailpit, its link verifies the account' }
+        else { Write-Bad "signup: the link from the mail returned $status on /api/auth/verify-email, expected 204" }
+    }
+}
+try {
+    $token = Invoke-RestMethod -Method Post -Uri "$KeycloakUrl/realms/master/protocol/openid-connect/token" `
+        -ContentType 'application/x-www-form-urlencoded' `
+        -Body @{ grant_type = 'password'; client_id = 'admin-cli'; username = $kcAdminUser; password = $kcAdminPass }
+    $auth = @{ Authorization = "Bearer $($token.access_token)" }
+    foreach ($u in @(Invoke-RestMethod "$KeycloakUrl/admin/realms/medlink/users?email=$([uri]::EscapeDataString($smokeEmail))&exact=true" -Headers $auth)) {
+        Invoke-RestMethod -Method Delete "$KeycloakUrl/admin/realms/medlink/users/$($u.id)" -Headers $auth | Out-Null
+    }
+} catch { Write-Warn "signup: smoke user $smokeEmail not deleted in Keycloak" }
+$dbUser = 'myuser'; $dbName = 'mydatabase'
+if ($FullStack) {
+    if ($envValues['POSTGRES_USER']) { $dbUser = $envValues['POSTGRES_USER'] }
+    if ($envValues['POSTGRES_DB']) { $dbName = $envValues['POSTGRES_DB'] }
+}
+if (-not (Test-Quiet "docker compose -f $composeFile exec -T postgres psql -q -U $dbUser -d $dbName -c `"delete from users where email = '$smokeEmail'`"")) {
+    Write-Warn "signup: smoke account rows for $smokeEmail not deleted"
+}
+Remove-Item $jar, $bodyFile -Force -ErrorAction SilentlyContinue
+
 # ---------------------------------------------------------------------------------------------
 Write-Host "`n------------------------------------------------------------" -ForegroundColor Cyan
 if ($script:Failures -eq 0) {
