@@ -337,7 +337,7 @@ else
     stop_containers
 fi
 
-PORTS='8080 8180'
+PORTS='8080 8180 1025 8025'   # API, Keycloak, Mailpit SMTP and inbox
 if [ "$FULL_STACK" -eq 1 ]; then
     # Host side only: inside the compose network the API still reaches postgres:5432.
     PG_PORT=5432
@@ -549,6 +549,7 @@ cat <<EOF
   API             $APP_URL
   Login           $APP_URL/oauth2/authorization/keycloak
   Swagger UI      $APP_URL/swagger-ui.html
+  Mail inbox      http://localhost:8025   (every mail the API sends, Mailpit)
   Keycloak admin  $KEYCLOAK_URL   (user: $KC_ADMIN_USER, password: $ADMIN_PASSWORD_HINT)
   Test users      staff.dev / practitioner.dev / patient.dev   (password: $USERS_PASSWORD_HINT)
   Logs            $LOG_DIR

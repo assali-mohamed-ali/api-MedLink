@@ -333,7 +333,7 @@ Stop-Containers -Volumes:$Reset
 if ($Reset) { Write-Ok 'volumes deleted: Keycloak will import the realm from scratch' }
 
 $busy = @()
-$ports = @(8080, 8180)
+$ports = @(8080, 8180, 1025, 8025)   # API, Keycloak, Mailpit SMTP and inbox
 if ($FullStack) {
     # Host side only: inside the compose network the API still reaches postgres:5432.
     $pgPort = 5432
@@ -521,6 +521,7 @@ Write-Host @"
   API             $AppUrl
   Login           $AppUrl/oauth2/authorization/keycloak
   Swagger UI      $AppUrl/swagger-ui.html
+  Mail inbox      http://localhost:8025   (every mail the API sends, Mailpit)
   Keycloak admin  $KeycloakUrl   (user: $kcAdminUser, password: $(if ($FullStack) { 'KEYCLOAK_ADMIN_PASSWORD in .env' } else { 'admin' }))
   Test users      staff.dev / practitioner.dev / patient.dev   (password: $(if ($FullStack) { 'KC_DEV_USERS_PASSWORD in .env' } else { $DevUsersPassword }))
   Logs            $LogDir
