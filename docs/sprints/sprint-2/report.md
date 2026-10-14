@@ -42,7 +42,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | MLink-53 | Endpoint 1 `GET /api/auth/csrf`; `X-XSRF-TOKEN` added to the CORS allowed headers. `/me` is sub-sprint 2 |
 
 **Proof**
-- `./mvnw -B verify` through the setup script: **65 tests, 0 failures** (16 Keycloak client with
+- `./mvnw -B verify` through the setup script: **69 tests, 0 failures** (16 Keycloak client with
   `MockRestServiceServer`, 6 tokens, 2 patients, 12 verify/resend, 13 register, 3 CSRF/CORS, plus the existing ones).
 - `scripts/setup-dev.ps1`: **0 failures, 0 warnings**, including two new checks:
   `service account medlink-admin: can list users, refused on realm settings (clients)` and
@@ -58,6 +58,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
   a real bug the MockMvc tests could not see: a refused CSRF token (or a 415) answered **401** to a real client,
   because the forward to `/error` needed a login. Fixed (ERROR dispatch permitted) with a regression test through
   a real port.
+- GitHub issue #31 (cross-origin signup): `CrossOriginSignupTest` proves signup from the configured origin
+  (201, CORS headers), CSRF still required from it (403), and another origin refused on the preflight and
+  on the request itself, even with a valid CSRF token (403, nothing created). Mutation check: allowing the
+  other origin turns the two refusal tests red.
 - The realm backup before a wipe ran for real (first run of this branch re-imported the realm):
   `.dev/realm-backups/realm-backup-20261014-163344.json` holds the previous realm.
 
@@ -83,6 +87,12 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 - No per-IP rate limit on register or resend (resend is limited per account, one mail a minute).
 - The verification mail is sent in the request (synchronous): simple, but a slow SMTP slows the
   signup answer. Revisit if production SMTP is slow.
+
+- **Open question (issue #31): how production serves React and the API.** React reads the `XSRF-TOKEN`
+  cookie, so it must run on the same host as the API (a proxy sending `/api` to Spring: recommended for a
+  BFF, no CORS in production) or the cookie needs a parent domain. `.env.prod.example` shows two hosts
+  (`medlink.example.com`, `api.medlink.example.com`): with them as they are, signup would fail in
+  production. Dev works (cookies ignore the port). To decide before the first deployment.
 
 **Next step:** sub-sprint 2 (login and session) in a new session, once this PR is merged.
 
