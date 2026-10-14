@@ -524,9 +524,9 @@ else
     # After login Spring redirects to "/", which has no page (404): expected, the session is what matters.
     curl -s -L -o /dev/null --max-time 30 -c "$COOKIES" -b "$COOKIES" \
         --data-urlencode 'username=practitioner.dev' --data-urlencode "password=$USERS_PASSWORD" -d 'credentialId=' "$ACTION"
-    STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/users")"
-    if [ "$STATUS" = 200 ]; then ok 'end-to-end login as practitioner.dev works: /api/users returns 200 with the session'
-    else bad "after login /api/users returned $STATUS"; fi
+    STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/users/_health")"
+    if [ "$STATUS" = 200 ]; then ok 'end-to-end login as practitioner.dev works: /api/users/_health returns 200 with the session'
+    else bad "after login /api/users/_health returned $STATUS"; fi
 fi
 rm -f "$COOKIES"
 

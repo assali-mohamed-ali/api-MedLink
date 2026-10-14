@@ -11,12 +11,14 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 
 /**
  * BFF security: Keycloak handles login and passwords, the backend keeps the tokens
  * server-side and the browser only gets a session cookie (+ CSRF cookie for the SPA).
  */
 @Configuration
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Bean
