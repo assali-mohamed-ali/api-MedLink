@@ -42,7 +42,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | MLink-53 | Endpoint 1 `GET /api/auth/csrf`; `X-XSRF-TOKEN` added to the CORS allowed headers. `/me` is sub-sprint 2 |
 
 **Proof**
-- `./mvnw -B verify` through the setup script: **63 tests, 0 failures** (16 Keycloak client with
+- `./mvnw -B verify` through the setup script: **65 tests, 0 failures** (16 Keycloak client with
   `MockRestServiceServer`, 6 tokens, 2 patients, 12 verify/resend, 13 register, 3 CSRF/CORS, plus the existing ones).
 - `scripts/setup-dev.ps1`: **0 failures, 0 warnings**, including two new checks:
   `service account medlink-admin: can list users, refused on realm settings (clients)` and
@@ -53,6 +53,11 @@ Updated by every sub-sprint PR. Newest information first inside each section.
   Keycloak user deleted) → French mail in Mailpit → link 204, again 410 → Keycloak
   `emailVerified: true` → `users` and `patients` rows under the Keycloak id, token stored as 64 hex
   characters → the password appears 0 times in the app log.
+- Postman collection `docs/postman/MedLink-sprint2-ss1.postman_collection.json` (endpoints 1–4 and their edge
+  cases, 45 requests) run with Newman against the dev stack: **154 assertions, 0 failures**. Its first run found
+  a real bug the MockMvc tests could not see: a refused CSRF token (or a 415) answered **401** to a real client,
+  because the forward to `/error` needed a login. Fixed (ERROR dispatch permitted) with a regression test through
+  a real port.
 - The realm backup before a wipe ran for real (first run of this branch re-imported the realm):
   `.dev/realm-backups/realm-backup-20261014-163344.json` holds the previous realm.
 
