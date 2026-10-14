@@ -1,5 +1,6 @@
 package com.example.apimedlink.config;
 
+import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -27,6 +28,9 @@ public class SecurityConfig {
                 .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.spa().csrfTokenRepository(csrfTokens))
                 .authorizeHttpRequests(auth -> auth
+                        // sendError (CSRF refused, 415...) forwards to /error: keep that status, not a 401
+                        .dispatcherTypeMatchers(DispatcherType.ERROR)
+                        .permitAll()
                         .requestMatchers(
                                 "/actuator/health",
                                 "/actuator/info",
