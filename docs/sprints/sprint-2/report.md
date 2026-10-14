@@ -53,13 +53,18 @@ assertions, 0 failures.
 (no Keycloak call): a timing difference, not an answer difference; per-IP rate limits at the proxy (decision page
 Q8) blunt it.
 
-## Sub-sprint 2 — realm: lockout, event log, password grant (2026-10-14)
+## Sub-sprint 2 — realm: lockout, event log, idle timeout, password grant (2026-10-14)
 
 **Built** (branch `feat/MLink-66-67-realm`, realm file + both setup scripts):
 - MLink-66: 5 failed logins lock the account for **15 minutes** (`waitIncrementSeconds` 60 → 900, `permanentLockout`
   false); during the lock even the right password is refused.
 - MLink-67: Keycloak's event log on for 30 days (`LOGIN`, `LOGIN_ERROR`, `LOGOUT`, `USER_DISABLED_BY_TEMPORARY_LOCKOUT`,
   `UPDATE_PASSWORD`, `UPDATE_TOTP`, `VERIFY_EMAIL`), each line with user and IP; admin events with details.
+- MLink-83: a session is over after **15 minutes without a call**, on both sides: `server.servlet.session.timeout=15m`
+  (every profile, each call counts as activity) and the realm's `ssoSessionIdleTimeout` 1800 → 900 (max stays 10 h).
+  The expiry test itself is MLink-86. **Story MLink-22 says "le jeton JWT est renouvelé": the browser holds no JWT.**
+  The rolling server session does that job, and the API renews Keycloak's token itself (#28). The criterion should be
+  reworded to "la session est prolongée à chaque action".
 - For MLink-55 (asked by Youssef): `medlink-bff` may do the **password grant** (direct grants ON). The redirect flow
   stays ON until MLink-55 removes `oauth2Login` in the same PR.
 

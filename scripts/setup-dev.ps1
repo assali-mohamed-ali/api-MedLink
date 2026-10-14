@@ -417,6 +417,8 @@ try {
     if ($realmSettings.bruteForceProtected -and $realmSettings.failureFactor -eq 5 -and $realmSettings.waitIncrementSeconds -eq 900 -and -not $realmSettings.permanentLockout) {
         Write-Ok 'lockout: 15 minutes after 5 failed logins'
     } else { Write-Bad "lockout: failureFactor $($realmSettings.failureFactor), waitIncrementSeconds $($realmSettings.waitIncrementSeconds) (expected 5 and 900)" }
+    if ($realmSettings.ssoSessionIdleTimeout -eq 900 -and $realmSettings.ssoSessionMaxLifespan -eq 36000) { Write-Ok 'Keycloak sessions: 15 minutes idle, 10 hours max' }
+    else { Write-Bad "Keycloak sessions: idle $($realmSettings.ssoSessionIdleTimeout) s, max $($realmSettings.ssoSessionMaxLifespan) s (expected 900 and 36000)" }
     $eventsConfig = Invoke-RestMethod "$admin/events/config" -Headers $auth
     if ($eventsConfig.eventsEnabled -and $eventsConfig.adminEventsEnabled -and ($eventsConfig.enabledEventTypes -contains 'LOGIN_ERROR')) {
         Write-Ok 'event log on: login failures, lockouts and admin changes are kept'

@@ -442,6 +442,9 @@ else
         && printf '%s' "$REALM_JSON" | grep -q '"waitIncrementSeconds":900[,}]' \
         && printf '%s' "$REALM_JSON" | grep -q '"permanentLockout":false'; then ok 'lockout: 15 minutes after 5 failed logins'
     else bad 'lockout settings differ from 5 failures / 900 s / not permanent'; fi
+    if printf '%s' "$REALM_JSON" | grep -q '"ssoSessionIdleTimeout":900[,}]' \
+        && printf '%s' "$REALM_JSON" | grep -q '"ssoSessionMaxLifespan":36000[,}]'; then ok 'Keycloak sessions: 15 minutes idle, 10 hours max'
+    else bad 'Keycloak sessions differ from 15 minutes idle / 10 hours max'; fi
     EVENTS_JSON="$(admin_get '/events/config')"
     if printf '%s' "$EVENTS_JSON" | grep -q '"eventsEnabled":true' \
         && printf '%s' "$EVENTS_JSON" | grep -q '"adminEventsEnabled":true' \
