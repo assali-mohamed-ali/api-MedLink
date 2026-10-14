@@ -15,19 +15,58 @@ Profiles: `dev` (local) → `staging` (`application-staging.yml`) →
 
 ## 1. Setup (once)
 
-Windows shortcut: [`scripts/setup-dev.ps1`](scripts/setup-dev.ps1) clones the repo, creates `.env`,
-starts Postgres + Keycloak, verifies the realm, runs the tests, starts the API and logs in as
-`doctor.dev` to prove the whole chain works:
-
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1            # or -SkipTests, -FullStack, -Reset, -Stop
-```
+Install Git and Docker Desktop, clone, then run one script. It is the same on every machine and
+needs no configuration:
 
 ```bash
 git clone https://github.com/assali-mohamed-ali/api-MedLink.git
 cd api-MedLink
+```
+
+```powershell
+# Windows
+powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1     # or -SkipTests, -FullStack, -Reset, -KeepData, -Stop
+```
+
+```bash
+# macOS / Linux
+./scripts/setup-dev.sh                                               # or --skip-tests, --full-stack, --reset, --keep-data, --stop
+```
+
+The script ([`setup-dev.ps1`](scripts/setup-dev.ps1) / [`setup-dev.sh`](scripts/setup-dev.sh)) creates
+`.env` with random secrets, starts Postgres + Keycloak, verifies the realm, runs the tests, starts the
+API and logs in as `practitioner.dev` to prove the whole chain works. What it handles for you:
+
+- **JDK:** it finds a JDK 17+ on the machine and uses it for this run only (no `JAVA_HOME` to set).
+  With no JDK 17+ it switches to full-stack mode, where Docker builds and runs the API. In that
+  mode, if a local PostgreSQL already uses port 5432, the database is published on the next free port.
+- **Realm changes:** when `keycloak/realm-medlink.json` changed since your last run (after a `git pull`),
+  it deletes the dev volumes and re-imports the realm, so everyone has the same roles, groups and
+  users. Dev data is lost on that run; pass `-KeepData` / `--keep-data` to skip it.
+  Safety net: before any wipe it saves the realm as it is in your Keycloak to
+  `.dev/realm-backups/realm-backup-<date>.json` (flows, roles, groups, clients; no users, secrets
+  masked; the 10 latest are kept). Console work you forgot to export is there. It is a backup,
+  not sharing: teammates still get a change only when it is in `keycloak/realm-medlink.json`.
+- **Line endings and images:** `.gitattributes` and pinned image versions (Postgres 16, Keycloak
+  26.7.5) keep the files and containers identical on Windows, macOS and Linux.
+
+| Option (Windows / macOS-Linux) | What it does |
+|---|---|
+| none | Full run: containers, realm check, `./mvnw verify`, API, login check |
+| `-SkipTests` / `--skip-tests` | Same without `./mvnw verify` (fastest way to get a running stack) |
+| `-FullStack` / `--full-stack` | Everything in containers, API included, plus Prometheus (no JDK needed) |
+| `-Reset` / `--reset` | Delete the dev volumes first: fresh Keycloak and database |
+| `-KeepData` / `--keep-data` | Never delete the dev volumes, even when the realm file changed |
+| `-Stop` / `--stop` | Stop the API and the containers (volumes kept) |
+
+Day to day: after every `git pull`, re-run the script (with `-SkipTests` / `--skip-tests` when you are
+in a hurry). It is safe to re-run, and it is what keeps your Keycloak in step with the team's realm
+file. Logs of the last run are in `%TEMP%\medlink-setup` (Windows) or `$TMPDIR/medlink-setup`.
+
+By hand instead (JDK 17 + Docker required, tests use Testcontainers/Postgres):
+
+```bash
 cp .env.example .env        # then edit secrets inside, never commit .env
-# Java 17 + Docker Desktop required (tests use Testcontainers/Postgres)
 ./mvnw -B -DskipTests compile
 ```
 
@@ -54,24 +93,28 @@ Keycloak `http://localhost:8180` (admin console: `KEYCLOAK_ADMIN` / `KEYCLOAK_AD
 
 - Keycloak owns logins, passwords and roles. The backend stores **no password and no role**.
 - Realm `medlink` is created from `keycloak/realm-medlink.json` on the first start
-  (`--import-realm`). If the realm already exists the file is ignored, so changes made in the
-  admin console are kept (data lives in the `keycloak-db-data` volume, separate `keycloak-db` Postgres).
-  To re-import from the file: `docker compose down -v` (deletes Keycloak data).
-- Access management: realm roles `ADMIN`, `DOCTOR`, `PATIENT`, given through groups
-  `/admins`, `/doctors`, `/patients` (new users land in `/patients`). To add a role: create the
+  (`--import-realm`). If the realm already exists Keycloak ignores the file (data lives in the
+  `keycloak-db-data` volume, separate `keycloak-db` Postgres). In local dev the setup script closes
+  that gap: it re-imports the file whenever it changed. So change the realm through the JSON file in a
+  PR, not only in your admin console, or your change is lost at the next re-import and nobody else gets it.
+  By hand: `docker compose -f compose.yaml down -v` (deletes Keycloak data), then start again.
+- Access management: realm roles `ADMINISTRATIVE_STAFF`, `PRACTITIONER`, `PATIENT` (same names as
+  the `Role` enum of the class diagram), given through groups `/administrative-staff`,
+  `/practitioners`, `/patients` (new users land in `/patients`). To add a role: create the
   role + a group holding it (console or JSON) — no backend change, `KeycloakRolesMapper` turns
   every realm role from the `roles` claim into `ROLE_<NAME>`.
 - Client `medlink-bff`: confidential, authorization code + PKCE. The browser only gets a session
   cookie; tokens stay in the backend (BFF). Login starts at `/oauth2/authorization/keycloak`.
-- Test users (dev): `admin.dev`, `doctor.dev`, `patient.dev`, password = `KC_DEV_USERS_PASSWORD`
+- Test users (dev): `staff.dev`, `practitioner.dev`, `patient.dev`, password = `KC_DEV_USERS_PASSWORD`
   (`MedLink-Dev-2026!` with `compose.yaml`). Delete them in staging/prod after the first start.
 
 ## 2. Where to code
 
 ```text
 src/main/java/com/example/apimedlink/
-  controller/   REST endpoints (thin, validation only)
-  service/      business logic
+  controller/   REST endpoints (thin: validation, then entity <-> DTO through a mapper)
+  mapper/       entity <-> DTO conversion, called by controllers only
+  service/      business logic on entities and plain values (never a DTO)
   repository/   Spring Data JPA interfaces
   model/        JPA entities
   dto/          records for API in/out (never expose password hashes)
@@ -82,16 +125,26 @@ src/main/resources/
   application.properties        base (name + Keycloak client registration)
   application-dev.yml           local (localhost Postgres, show-sql)
   application-prod.yml          docker/prod (strict, needs KEYCLOAK_CLIENT_SECRET env)
-  db/migration/V1__init.sql     Flyway migrations — see below
+  db/migration/V1..V3__*.sql    Flyway migrations — see below
 keycloak/realm-medlink.json     Keycloak realm import (roles, groups, client, dev users)
+scripts/setup-dev.ps1 / .sh     one-command dev setup (Windows / macOS-Linux): keep both in step
 src/test/java/.../              mirror packages: controller/, service/, security/, integration/
 ```
 
 Rules:
 
-- New table/column → new Flyway file `V<N>__description.sql`, never edit an old `V*.sql`.
-  Prod uses `ddl-auto: validate`, so the migration IS the schema.
-- New endpoint → DTO + service method + controller method + test.
+- Names follow the class diagram: roles `PATIENT`, `PRACTITIONER`, `ADMINISTRATIVE_STAFF`.
+  The diagram's `passwordHash`, `mfaSecret`, `failedAttempts`, `lockedUntil` and `Session` live in
+  Keycloak, not in our tables.
+- One id per person, and it comes from Keycloak: `users.id` is the Keycloak user id (the `sub`
+  claim). We never generate it: create the Keycloak account first, then save the row with that id.
+  Profile tables (`patients`, later `practitioners`) reuse the same id as their own primary key
+  (`@MapsId`), so one login can hold several profiles. Every other entity generates its own UUID
+  (`@GeneratedValue(strategy = GenerationType.UUID)`); no auto-increment numbers.
+- New table/column → new Flyway file `V<N>__description.sql` (next free number: `V4`), never edit
+  an old `V*.sql`. Prod uses `ddl-auto: validate`, so the migration IS the schema.
+- New endpoint → DTO + mapper + service method + controller method + test. The controller maps;
+  the service takes and returns entities or plain values, so it never depends on the API's shape.
 - Passwords and roles: Keycloak only. Never store or accept a password in the backend.
 - Roles: assign them through Keycloak groups, never from request data.
 - Secrets (`KC_BFF_CLIENT_SECRET`, DB/admin passwords) come from env. No hardcoded secrets anywhere.
@@ -99,7 +152,7 @@ Rules:
 ## 3. Before you commit (local gates — same as CI)
 
 ```bash
-./mvnw -B verify                    # build + all tests + jacoco (needs Docker for Testcontainers)
+./mvnw -B verify                    # build + all tests + jacoco (needs JDK 17+ and Docker for Testcontainers)
 # If Docker is off, at least:
 ./mvnw -B clean compile
 ./mvnw -B -DskipTests test-compile
@@ -178,12 +231,23 @@ include version/commit, repro steps, impact. Threat overview: `security/threat-m
 
 ## 7. Troubleshooting
 
-- `mvnw.cmd` shows fully modified after pull → line endings. It's normalized
-  via `.gitattributes` (`*.cmd eol=crlf`); a `chore: normalize` commit is fine.
+- `Free these ports first` from the setup script → something else uses 8080 (API) or 8180
+  (Keycloak). Stop it, or run the script with `-Stop` / `--stop` if it is an earlier run of ours.
+- `release version 17 not supported` / `invalid target release: 17` when you run `./mvnw` yourself →
+  your default Java is older than 17. The setup script picks a JDK 17+ by itself; for your own
+  commands point `JAVA_HOME` at a JDK 17, or set the project SDK to 17 in your IDE.
+- Login works but roles look wrong (`ADMIN`/`DOCTOR` instead of `ADMINISTRATIVE_STAFF`/`PRACTITIONER`),
+  or `staff.dev` / `practitioner.dev` cannot log in → your Keycloak still holds an old realm. Re-run
+  the setup script (it re-imports a changed realm file), or force it with `-Reset` / `--reset`.
+- `permission denied: ./scripts/setup-dev.sh` → `chmod +x scripts/setup-dev.sh` (the executable bit
+  is stored in git; this only happens after copying the files by hand).
+- A file shows as fully modified after pull → line endings. They are normalized via
+  `.gitattributes` (`*.sh` and `mvnw` LF, `*.cmd` and `*.ps1` CRLF); a `chore: normalize` commit is fine.
 - Tests need Docker (Testcontainers). Start Docker Desktop before `./mvnw verify`.
 - Spring Boot 4 moved test classes: `AutoConfigureMockMvc` is now in
   `org.springframework.boot.webmvc.test.autoconfigure`, `TestRestTemplate` in
   `org.springframework.boot.resttestclient`. Don't "fix" by downgrading Boot.
-- `KC_BFF_CLIENT_SECRET must be set` (or another `... must be set`) in compose → fill `.env` from `.env.example`.
+- `KC_BFF_CLIENT_SECRET must be set` (or another `... must be set`) in compose → `.env` is missing or incomplete. Run the setup script (it creates `.env` with random
+  secrets), or fill `.env` from `.env.example` by hand.
 - Actuator exposes only `health,info,prometheus` — intentional, don't open more
   without a security review.

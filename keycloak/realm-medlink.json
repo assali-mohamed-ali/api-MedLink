@@ -20,8 +20,8 @@
   "roles": {
     "realm": [
       {
-        "name": "ADMIN",
-        "description": "MedLink administrator: manages users and their roles in this realm",
+        "name": "ADMINISTRATIVE_STAFF",
+        "description": "MedLink administrative staff: manages users and their roles in this realm",
         "composite": true,
         "composites": {
           "client": {
@@ -30,8 +30,8 @@
         }
       },
       {
-        "name": "DOCTOR",
-        "description": "Doctor"
+        "name": "PRACTITIONER",
+        "description": "Practitioner"
       },
       {
         "name": "PATIENT",
@@ -40,8 +40,8 @@
     ]
   },
   "groups": [
-    { "name": "admins", "path": "/admins", "realmRoles": ["ADMIN"] },
-    { "name": "doctors", "path": "/doctors", "realmRoles": ["DOCTOR"] },
+    { "name": "administrative-staff", "path": "/administrative-staff", "realmRoles": ["ADMINISTRATIVE_STAFF"] },
+    { "name": "practitioners", "path": "/practitioners", "realmRoles": ["PRACTITIONER"] },
     { "name": "patients", "path": "/patients", "realmRoles": ["PATIENT"] }
   ],
   "defaultGroups": ["/patients"],
@@ -89,23 +89,23 @@
   ],
   "users": [
     {
-      "username": "admin.dev",
-      "email": "admin.dev@medlink.local",
-      "firstName": "Admin",
+      "username": "staff.dev",
+      "email": "staff.dev@medlink.local",
+      "firstName": "Staff",
       "lastName": "Dev",
       "enabled": true,
       "emailVerified": true,
-      "groups": ["/admins"],
+      "groups": ["/administrative-staff"],
       "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
     },
     {
-      "username": "doctor.dev",
-      "email": "doctor.dev@medlink.local",
-      "firstName": "Doctor",
+      "username": "practitioner.dev",
+      "email": "practitioner.dev@medlink.local",
+      "firstName": "Practitioner",
       "lastName": "Dev",
       "enabled": true,
       "emailVerified": true,
-      "groups": ["/doctors"],
+      "groups": ["/practitioners"],
       "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
     },
     {

@@ -22,13 +22,13 @@ class KeycloakRolesMapperTest {
 
     @Test
     void realmRolesBecomeSpringRoles() {
-        var authority = authorityWithClaims(Map.of("sub", "u1", "roles", List.of("DOCTOR", "ADMIN")));
+        var authority = authorityWithClaims(Map.of("sub", "u1", "roles", List.of("PRACTITIONER", "ADMINISTRATIVE_STAFF")));
 
         var mapped = mapper.mapAuthorities(List.of(authority)).stream()
                 .map(GrantedAuthority::getAuthority)
                 .toList();
 
-        assertThat(mapped).contains("ROLE_DOCTOR", "ROLE_ADMIN");
+        assertThat(mapped).contains("ROLE_PRACTITIONER", "ROLE_ADMINISTRATIVE_STAFF");
     }
 
     @Test
