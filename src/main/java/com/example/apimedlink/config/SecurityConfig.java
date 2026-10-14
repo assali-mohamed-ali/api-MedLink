@@ -1,17 +1,23 @@
 package com.example.apimedlink.config;
 
+import com.example.apimedlink.security.ProvisioningOidcUserService;
+import com.example.apimedlink.security.SessionValidityFilter;
+import com.example.apimedlink.service.UserProvisioningService;
 import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import org.springframework.security.web.servlet.util.matcher.PathPatternRequestMatcher;
-import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
+import tools.jackson.databind.json.JsonMapper;
 
 /**
  * BFF security: Keycloak handles login and passwords, the backend keeps the tokens
@@ -22,7 +28,11 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 public class SecurityConfig {
 
     @Bean
-    SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
+    SecurityFilterChain filterChain(
+            HttpSecurity http,
+            UserProvisioningService provisioning,
+            OAuth2AuthorizedClientManager authorizedClients,
+            JsonMapper json) throws Exception {
         // Same cookie as csrf.spa() (readable by the SPA), plus SameSite like the session cookie
         CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
         csrfTokens.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
@@ -52,7 +62,11 @@ public class SecurityConfig {
                         .permitAll()
                         .anyRequest()
                         .authenticated())
-                .oauth2Login(Customizer.withDefaults())
+                // Every login ensures the account's row in our database (GitHub #29)
+                .oauth2Login(login -> login.userInfoEndpoint(info -> info
+                        .oidcUserService(new ProvisioningOidcUserService(provisioning))))
+                // Every logged-in call checks Keycloak still accepts the account (GitHub #28)
+                .addFilterBefore(new SessionValidityFilter(authorizedClients, json), AuthorizationFilter.class)
                 // API calls get a 401 instead of a redirect to the Keycloak login page
                 .exceptionHandling(ex -> ex.defaultAuthenticationEntryPointFor(
                         new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED),

@@ -27,6 +27,41 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## GitHub issues #28 and #29 — done ahead of sub-sprint 2 (2026-10-14)
+
+**Built** (branch `fix/issues-28-29`, on top of sub-sprint 1):
+- **#29** `service/UserProvisioningService`: exactly one `users` row per Keycloak account, created at first
+  login for accounts made outside the API (console, realm import); follows an email or username changed in
+  Keycloak; two first logins at once still make one row; an email held by another account is refused (409
+  `ACCOUNT_CONFLICT`, nothing overwritten). Today's redirect login calls it through
+  `security/ProvisioningOidcUserService`; **sub-sprint 2's login endpoint must call `provision(...)` too.**
+- **#28** Keycloak tokens moved into the HTTP session; `security/SessionValidityFilter` renews the access token
+  when it expires and ends our session (401 `SESSION_EXPIRED`) when Keycloak refuses: account disabled, signed
+  out in Keycloak, password reset, SSO session over. Keycloak unreachable: 503, session kept. A disabled user is
+  out within 5 minutes; no session outlives the 10-hour SSO maximum. **Sub-sprint 2 keeps this as long as the
+  new login stores its tokens as an `OAuth2AuthorizedClient` in the session** (the filter reads them there).
+- `exception/ErrorBody`: the one error shape, shared by the exception handler and the filter.
+
+**Proof**
+- Functional tests (`src/test/java/.../functional/`): the real API on a real port, a real Keycloak (same image
+  and realm file as dev), a real database; the test logs in through the Keycloak form like a browser and acts in
+  the Keycloak console through its admin API. Committed red first (6bdea0d), green after: console user gets one
+  row, email change followed, email conflict refused; disabled user and signed-out user lose their open session,
+  an active user keeps it across renewals.
+- `UserProvisioningServiceTest` (real database): concurrent first logins make one row (mutation check: without
+  the duplicate-key handling it fails); `SessionValidityFilterTest`: the branches a shared Keycloak cannot give on
+  demand (unreachable → 503, no tokens → 401).
+- `./mvnw test`: **83 tests, 0 failures**. Setup script: 0 failures (practitioner.dev now gets its row at the
+  setup login). Postman collection: 154/154.
+
+**Limits**
+- Ending sessions **at once** when staff disable an account is still sub-sprint 5 (MLink-70, session registry);
+  today it takes up to 5 minutes.
+- The 15-minute idle timeout (MLink-83) is still sub-sprint 2: it needs the realm change and the cookie work.
+- The functional tests start a Keycloak container (about 30 s, once per run); CI's `build-test` pulls the image.
+- The test browser uses its own cookie jar: Java's `CookieManager` files `localhost` cookies under
+  `localhost.local` and never sends them back (Keycloak then refuses its login form with 400).
+
 ## Sub-sprint 1 — registration and email verification (2026-10-14)
 
 **Built** (branch `feat/ss1-registration`, one commit per task):
@@ -130,6 +165,9 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-14 | #28 and #29 fixed now on the redirect login, through pieces sub-sprint 2 reuses (provisioning service, tokens as an `OAuth2AuthorizedClient` in the session) | Open security issues; the reusable parts are most of the work | Waiting for sub-sprint 2; a background sync from Keycloak |
+| 2026-10-14 | Session validity by token renewal: a refused renewal ends the session | No extra call while the token is fresh; Keycloak decides (disabled, signed out, reset, SSO over) | Calling Keycloak on every request; a status column of our own |
+| 2026-10-14 | Functional tests against a real Keycloak container for login-related work | Asked by the team: prove the behaviour end to end, not a mock | Mocked Keycloak only |
 | 2026-10-14 | Signup: phone and address optional; first name, last name, birth date required | A patient can complete the profile later; identity fields are needed from the start | Every field required |
 | 2026-10-14 | Keycloak admin token: our own small client-credentials cache in `RestKeycloakAdminService` | The task asked for a cache testable with `MockRestServiceServer` (two calls, one token) | Spring Security's `OAuth2ClientHttpRequestInterceptor` |
 | 2026-10-14 | Service account check probes `GET /admin/realms/medlink/clients` (403) | `GET` on the realm answers 200 with a short summary to any admin, so it proves nothing | Probing the realm itself |
