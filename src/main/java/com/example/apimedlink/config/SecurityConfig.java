@@ -9,6 +9,7 @@ import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.Customizer;
+import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.web.SecurityFilterChain;
@@ -23,6 +24,7 @@ import tools.jackson.databind.json.JsonMapper;
  * server-side and the browser only gets a session cookie (+ CSRF cookie for the SPA).
  */
 @Configuration
+@EnableMethodSecurity
 public class SecurityConfig {
 
     @Bean
