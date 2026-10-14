@@ -7,14 +7,14 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | Sub-sprint | Scope | State | PR | Date |
 |---|---|---|---|---|
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
-| 1 | Registration and email verification (endpoints 1–4) | **Next** | — | — |
-| 2 | Login and session (endpoints 5–7) | To do | — | — |
+| 1 | Registration and email verification (endpoints 1–4) | In review | PR_LINK | 2026-10-14 |
+| 2 | Login and session (endpoints 5–7) | **Next** | — | — |
 | 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
 | 4 | Passwords (endpoints 10–11) | To do | — | — |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
-**Next step:** start sub-sprint 1 in a new session: read `README.md` in this folder, then
-section 6 "Sub-sprint 1" of `plan.md`.
+**Next step:** once the sub-sprint 1 PR is merged, start sub-sprint 2 in a new session: read
+`README.md` in this folder, then section 6 "Sub-sprint 2" of `plan.md`.
 
 ## Where the code stands (start of sprint 2)
 
@@ -24,10 +24,62 @@ section 6 "Sub-sprint 1" of `plan.md`.
   re-import and realm backup; Postgres pinned to 16.
 - Still from the earlier design, replaced in sub-sprint 2: login by redirect to Keycloak
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
-- Not tested end to end yet: the realm backup before a wipe (written while Docker was off on
-  2026-10-13). First real run: the next time the setup script re-imports the realm.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## Sub-sprint 1 — registration and email verification (2026-10-14)
+
+**Built** (branch `feat/ss1-registration`, one commit per task):
+
+| Task | What |
+|---|---|
+| MLink-75 | Client `medlink-admin` (service account, no login flow) with only `manage-users`, `view-users`, `query-users`, `query-groups`; secret `KC_ADMIN_CLIENT_SECRET` in compose, the three `.env` examples, `keycloak.admin.*`. Setup scripts generate it, **append keys missing from an existing `.env`**, and check the account |
+| MLink-76 | `service/KeycloakAdminService` (interface) + `RestKeycloakAdminService`: `createUser`, `setPassword`, `deleteUser`, `setEmailVerified`, `getUser`; token cached until 30 s before expiry, a 401 retries once; 5 s / 10 s timeouts. `ApiException` and its subclasses carry status, `code`, French message |
+| MLink-78 | V4 `patients` (id = `users.id`), `model/Patient` with `@OneToOne @MapsId User`, `PatientRepository` |
+| MLink-77 | V5 `email_tokens` (SHA-256 only, 24 h, single use), `EmailTokenService`, `MailService` (French text + HTML), `EmailVerificationService`; endpoints 3 and 4; Spring Mail; Mailpit `v1.27.10` in both compose files |
+| MLink-82 | `RegistrationControllerTest`, committed red before the code (401, username too short), green after |
+| MLink-79 | V6 `users.username` → 254; `RegisterRequest`, `PatientMapper`, `RegistrationService`; endpoint 2 |
+| MLink-53 | Endpoint 1 `GET /api/auth/csrf`; `X-XSRF-TOKEN` added to the CORS allowed headers. `/me` is sub-sprint 2 |
+
+**Proof**
+- `./mvnw -B verify` through the setup script: **63 tests, 0 failures** (16 Keycloak client with
+  `MockRestServiceServer`, 6 tokens, 2 patients, 12 verify/resend, 13 register, 3 CSRF/CORS, plus the existing ones).
+- `scripts/setup-dev.ps1`: **0 failures, 0 warnings**, including two new checks:
+  `service account medlink-admin: can list users, refused on realm settings (clients)` and
+  `signup works end to end: register, mail in Mailpit, its link verifies the account` (the smoke
+  account is deleted afterwards).
+- By hand against the dev stack: CSRF 204 → register 201 → same email 409 `EMAIL_TAKEN` → weak
+  password 400 `PASSWORD_POLICY` "Le mot de passe doit contenir au moins 1 caractère spécial…" (its
+  Keycloak user deleted) → French mail in Mailpit → link 204, again 410 → Keycloak
+  `emailVerified: true` → `users` and `patients` rows under the Keycloak id, token stored as 64 hex
+  characters → the password appears 0 times in the app log.
+- The realm backup before a wipe ran for real (first run of this branch re-imported the realm):
+  `.dev/realm-backups/realm-backup-20261014-163344.json` holds the previous realm.
+
+**Decisions** (also in the log below)
+- Phone and address are optional at signup; names and birth date are required.
+- Errors: `details` is one entry per field; a database error answers 500 `INTERNAL_ERROR` (logged
+  server-side, no SQL to the client); malformed JSON answers 400 `VALIDATION_FAILED`.
+- `spring.jpa.hibernate.ddl-auto=validate` in `application.properties`: tests now check the
+  entities against the migrations too.
+- Verify-email consumes the token and calls Keycloak in one transaction, so a Keycloak failure
+  leaves the link usable.
+
+**Limits**
+- `scripts/setup-dev.sh` got the same changes as the PowerShell script but was only checked with
+  `bash -n`: it cannot run on the lead's Windows machine (no `lsof`/`ss` in Git Bash). First real
+  run: a teammate on macOS/Linux.
+- `-FullStack` mode (`docker-compose.yml`: app image, Mailpit as `mailpit`, the new secret) was not
+  run; `docker compose config` resolves it.
+- "Add the route to the matrix of task 16.4" (MLink-82) is not done: that matrix arrives with
+  MLink-16 in sub-sprint 5.
+- MLink-82 is Ahlem's task; the tests were written in this session. Worth a read by her.
+- Patient fields are plain columns: encryption at rest is MLink-14 / MLink-24.
+- No per-IP rate limit on register or resend (resend is limited per account, one mail a minute).
+- The verification mail is sent in the request (synchronous): simple, but a slow SMTP slows the
+  signup answer. Revisit if production SMTP is slow.
+
+**Next step:** sub-sprint 2 (login and session) in a new session, once this PR is merged.
 
 ## Sub-sprint 0 — the plan (2026-10-14)
 
@@ -45,6 +97,11 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-14 | Signup: phone and address optional; first name, last name, birth date required | A patient can complete the profile later; identity fields are needed from the start | Every field required |
+| 2026-10-14 | Keycloak admin token: our own small client-credentials cache in `RestKeycloakAdminService` | The task asked for a cache testable with `MockRestServiceServer` (two calls, one token) | Spring Security's `OAuth2ClientHttpRequestInterceptor` |
+| 2026-10-14 | Service account check probes `GET /admin/realms/medlink/clients` (403) | `GET` on the realm answers 200 with a short summary to any admin, so it proves nothing | Probing the realm itself |
+| 2026-10-14 | The verification mail is sent synchronously after the commit; a failure is only logged | Simple first; the user can ask for a new link | A queue or `@Async` |
+| 2026-10-14 | Database errors answer 500 `INTERNAL_ERROR` in our error shape | Same body for React everywhere; no SQL or values leak | Spring's default error page |
 | 2026-10-14 | The frontend never talks to Keycloak: register, verify, login, code, logout, passwords, accounts all go through the API | Users never see Keycloak; one place to secure | Skinned Keycloak pages (decided 2026-10-11, now superseded) |
 | 2026-10-14 | Login = API → Keycloak password grant, server to server, confidential client | Only way to log in without a Keycloak page; tokens never leave the API | Browser redirect to Keycloak |
 | 2026-10-14 | Email verification: our token (hashed, 24 h, single use) and our mail; the link opens a React page that POSTs the token | Keycloak's mail links point at Keycloak; POST stops mail scanners from consuming the token | Keycloak's verification mail; a GET link to the API |

@@ -95,8 +95,9 @@ its first write (register, login).
 { "email": "amel@example.com", "password": "…", "firstName": "Amel", "lastName": "Ben Salah",
   "birthDate": "1990-04-12", "phone": "+216 22 123 456", "address": "12 rue de Carthage, Sousse" }
 ```
-Validation: email ≤ 254 and valid; password not blank (the policy is Keycloak's); names ≤ 100;
-`birthDate` in the past; phone ≤ 30 (digits, spaces, leading `+`); address ≤ 255.
+Validation: email ≤ 254 and valid (spaces around it trimmed); password not blank, ≤ 128 (the
+policy is Keycloak's); names required, ≤ 100; `birthDate` required, in the past; phone optional,
+≤ 30 (digits, spaces, leading `+`); address optional, ≤ 255.
 - **201** `{ "message": "Vérifiez votre boîte mail pour activer votre compte." }`
 - **400** `VALIDATION_FAILED` (one entry per field in `details`) · `PASSWORD_POLICY` (French rule)
 - **409** `EMAIL_TAKEN` "Un compte existe déjà avec cet e-mail."
