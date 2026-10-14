@@ -56,6 +56,11 @@ each task.
 
 ## Known traps
 
+- **Test classes run in another order on CI.** Windows runs them alphabetically, Linux (CI) does not,
+  and classes with the same annotations share one Spring context. Before a PR, run the suite once with
+  `./mvnw -B test -Dsurefire.runOrder=reversealphabetical`. Example: MockMvc's `csrf()` helper swaps
+  the CSRF repository of the shared filter for a session-based one, so a cookie check in a MockMvc
+  class broke only on CI. Test cookies and headers through a real port (`integration/` tests).
 - **Realm file is imported only into an empty Keycloak.** Change `keycloak/realm-medlink.json`,
   then re-run the setup script: it detects the change, backs up the current realm to
   `.dev/realm-backups/` and re-imports. A change made only in the Keycloak console is not shared.
