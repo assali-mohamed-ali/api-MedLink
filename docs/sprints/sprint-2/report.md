@@ -7,7 +7,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | Sub-sprint | Scope | State | PR | Date |
 |---|---|---|---|---|
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
-| 1 | Registration and email verification (endpoints 1–4) | In review | PR_LINK | 2026-10-14 |
+| 1 | Registration and email verification (endpoints 1–4) | In review | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **Next** | — | — |
 | 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
 | 4 | Passwords (endpoints 10–11) | To do | — | — |
