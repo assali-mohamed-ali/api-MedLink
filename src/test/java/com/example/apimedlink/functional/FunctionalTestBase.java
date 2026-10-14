@@ -60,8 +60,14 @@ public abstract class FunctionalTestBase {
             .withExposedPorts(8080)
             .waitingFor(Wait.forHttp("/realms/medlink").forPort(8080).withStartupTimeout(Duration.ofMinutes(4)));
 
+    /** Catches every mail the API sends, like Mailpit in dev (same image). */
+    static final GenericContainer<?> MAILPIT = new GenericContainer<>("axllent/mailpit:v1.27.10")
+            .withExposedPorts(1025, 8025)
+            .waitingFor(Wait.forHttp("/api/v1/info").forPort(8025));
+
     static {
         KEYCLOAK.start();
+        MAILPIT.start();
     }
 
     @DynamicPropertySource
@@ -71,6 +77,8 @@ public abstract class FunctionalTestBase {
         registry.add("keycloak.internal-url", FunctionalTestBase::keycloakUrl);
         registry.add("keycloak.client-secret", () -> BFF_SECRET);
         registry.add("keycloak.admin.client-secret", () -> ADMIN_CLIENT_SECRET);
+        registry.add("spring.mail.host", () -> "localhost");
+        registry.add("spring.mail.port", () -> MAILPIT.getMappedPort(1025));
         // Renew the access token on every call (any skew above its 5-minute life), so a test sees
         // at its next call what production sees within 5 minutes
         registry.add("app.session.token-renewal-skew", () -> "10m");
@@ -99,8 +107,10 @@ public abstract class FunctionalTestBase {
 
         private static final Pattern LOGIN_FORM = Pattern.compile("action=\"([^\"]*login-actions/authenticate[^\"]*)\"");
 
+        private final LocalhostCookieJar cookies = new LocalhostCookieJar();
+
         final HttpClient http = HttpClient.newBuilder()
-                .cookieHandler(new LocalhostCookieJar())
+                .cookieHandler(cookies)
                 .followRedirects(HttpClient.Redirect.NORMAL)
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
@@ -125,6 +135,18 @@ public abstract class FunctionalTestBase {
             return http.send(get(appUrl(path)), HttpResponse.BodyHandlers.ofString());
         }
 
+        /** A write from React: fetches the CSRF cookie once, then echoes it in X-XSRF-TOKEN. */
+        HttpResponse<String> postJson(String path, String json) throws Exception {
+            if (cookies.value("XSRF-TOKEN") == null) {
+                call("/api/auth/csrf");
+            }
+            return http.send(HttpRequest.newBuilder(URI.create(appUrl(path)))
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .header("X-XSRF-TOKEN", cookies.value("XSRF-TOKEN"))
+                    .POST(HttpRequest.BodyPublishers.ofString(json))
+                    .build(), HttpResponse.BodyHandlers.ofString());
+        }
+
         private static HttpRequest get(String url) {
             return HttpRequest.newBuilder(URI.create(url)).GET().build();
         }
@@ -142,6 +164,10 @@ public abstract class FunctionalTestBase {
     static final class LocalhostCookieJar extends CookieHandler {
 
         private final Map<String, String> cookies = new ConcurrentHashMap<>();
+
+        String value(String name) {
+            return cookies.get(name);
+        }
 
         @Override
         public Map<String, List<String>> get(URI uri, Map<String, List<String>> requestHeaders) {
@@ -267,6 +293,49 @@ public abstract class FunctionalTestBase {
 
     private static String enc(String value) {
         return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    // ---- the mailbox ---------------------------------------------------------------------------
+
+    /** The mails the API sent, read through Mailpit's API. */
+    static final class Mailbox {
+
+        private static final Pattern VERIFY_LINK = Pattern.compile("verifier-email[?]token=([A-Za-z0-9_-]+)");
+
+        private final RestClient http =
+                RestClient.builder().baseUrl("http://localhost:" + MAILPIT.getMappedPort(8025)).build();
+
+        /** Mails sent to exactly this address (Mailpit's search also matches longer addresses), newest first. */
+        List<Map<?, ?>> to(String email) {
+            Map<?, ?> found = http.get().uri("/api/v1/search?query={q}", "to:\"" + email + "\"")
+                    .retrieve().body(Map.class);
+            return ((List<?>) found.get("messages")).stream()
+                    .<Map<?, ?>>map(m -> (Map<?, ?>) m)
+                    .filter(m -> ((List<?>) m.get("To")).stream()
+                            .anyMatch(to -> email.equalsIgnoreCase((String) ((Map<?, ?>) to).get("Address"))))
+                    .toList();
+        }
+
+        List<Map<?, ?>> to(String email, String subject) {
+            return to(email).stream().filter(m -> subject.equals(m.get("Subject"))).toList();
+        }
+
+        String text(Map<?, ?> mail) {
+            return (String) http.get().uri("/api/v1/message/{id}", mail.get("ID")).retrieve().body(Map.class).get("Text");
+        }
+
+        /** The token in the newest verification mail to this address. */
+        String verificationToken(String email) {
+            List<Map<?, ?>> mails = to(email, "Confirmez votre adresse e-mail MedLink");
+            if (mails.isEmpty()) {
+                throw new AssertionError("no verification mail to " + email);
+            }
+            Matcher link = VERIFY_LINK.matcher(text(mails.get(0)));
+            if (!link.find()) {
+                throw new AssertionError("no verification link in the mail to " + email);
+            }
+            return link.group(1);
+        }
     }
 
     static String uniqueEmail(String prefix) {
