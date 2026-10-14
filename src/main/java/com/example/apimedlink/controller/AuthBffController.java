@@ -1,9 +1,12 @@
 package com.example.apimedlink.controller;
 
 import com.example.apimedlink.dto.MessageResponse;
+import com.example.apimedlink.dto.RegisterRequest;
 import com.example.apimedlink.dto.ResendVerificationRequest;
 import com.example.apimedlink.dto.VerifyEmailRequest;
+import com.example.apimedlink.mapper.PatientMapper;
 import com.example.apimedlink.service.EmailVerificationService;
+import com.example.apimedlink.service.RegistrationService;
 import jakarta.validation.Valid;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -20,13 +23,24 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/auth")
 public class AuthBffController {
 
+    static final String REGISTERED_MESSAGE = "Vérifiez votre boîte mail pour activer votre compte.";
     static final String RESEND_MESSAGE =
             "Si un compte non vérifié existe pour cet e-mail, un nouveau lien a été envoyé.";
 
+    private final RegistrationService registration;
     private final EmailVerificationService verification;
 
-    public AuthBffController(EmailVerificationService verification) {
+    public AuthBffController(RegistrationService registration, EmailVerificationService verification) {
+        this.registration = registration;
         this.verification = verification;
+    }
+
+    /** Endpoint 2: a visitor creates their patient account; the verification mail follows. */
+    @PostMapping("/register")
+    @ResponseStatus(HttpStatus.CREATED)
+    public MessageResponse register(@Valid @RequestBody RegisterRequest request) {
+        registration.register(request.email(), request.password(), PatientMapper.toNewPatient(request));
+        return new MessageResponse(REGISTERED_MESSAGE);
     }
 
     /** Endpoint 3: the React page {@code /verifier-email} posts the token from the mail. */

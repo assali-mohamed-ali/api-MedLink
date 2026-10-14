@@ -38,6 +38,7 @@ public class SecurityConfig {
                         .permitAll()
                         // Public auth endpoints (plan.md §4); CSRF still applies to these POSTs
                         .requestMatchers(HttpMethod.POST,
+                                "/api/auth/register",
                                 "/api/auth/verify-email",
                                 "/api/auth/verify-email/resend")
                         .permitAll()
