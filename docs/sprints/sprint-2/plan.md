@@ -52,8 +52,11 @@ Stories (YouTrack project `MLink`, sprint `sprint2`):
 1. React `POST /api/auth/login {email, password}` → API → Keycloak token endpoint (password grant).
 2. Keycloak refuses → 401 (wrong credentials), 423 (locked), 403 `ACCOUNT_DISABLED`, or the
    "account not fully set up" answer → `passwordChangeRequired` (sub-sprint 4).
-3. Keycloak accepts → API checks the token signature (JWKS) and reads `sub`, email, names,
-   `email_verified`, `roles`. Not verified → 403 `EMAIL_NOT_VERIFIED`, no session.
+3. Keycloak accepts → API checks the tokens (signature through JWKS, issuer, issued for
+   `medlink-bff`) and reads `sub`, email, names, `email_verified`, `roles`; only our three roles are
+   kept (Keycloak adds `offline_access`, `default-roles-medlink`, `uma_authorization`). Keycloak
+   accepts an unverified email: the API refuses it → 403 `EMAIL_NOT_VERIFIED`, no session, and it
+   ends the Keycloak session the grant opened (also when `users` provisioning refuses, 409).
 4. Practitioner or staff → no session yet: a 5-minute "pending code" state in the session,
    answer `mfaRequired` (sub-sprint 3). Patient → `users` row ensured, new session id,
    security context saved, tokens kept in the session → 200 with the user.
@@ -151,11 +154,21 @@ one is mailed. At most one mail per minute per account.
 - **403** `EMAIL_NOT_VERIFIED` (React offers endpoint 4) · `ACCOUNT_DISABLED`
 - **423** `ACCOUNT_LOCKED` "Compte verrouillé pendant 15 minutes."
 - **503** `IDENTITY_UNAVAILABLE`
-Notes for the implementer: verify against the real Keycloak how a locked account answers the
-password grant; if Keycloak hides the lock behind "invalid credentials", ask its
-`attack-detection` admin endpoint for that user before answering 401 or 423. No token refresh
-is needed: the API does not call Keycloak with the user's token, it only keeps the refresh
-token to end the Keycloak session at logout.
+How Keycloak 26.7.5 answers the password grant (checked on the dev stack, 2026-10-15):
+
+| Case | Keycloak | API |
+|---|---|---|
+| Right password | 200, tokens | 200 `{ user }` |
+| Wrong password · unknown email | 400 `invalid_grant` "Invalid user credentials", identical | 401 `INVALID_CREDENTIALS`, identical |
+| Email not verified, right password | **200, accepted** (`email_verified: false`) | 403 `EMAIL_NOT_VERIFIED`; the Keycloak session is ended |
+| Disabled, right password | 400 "Account disabled" | 403 `ACCOUNT_DISABLED` |
+| Disabled, wrong password | 400 "Invalid user credentials" | 401: only the password's owner learns the account is disabled |
+| Locked (right or wrong password) | 400 "Invalid user credentials" | 401 today. 423 needs `attack-detection` (readable by `medlink-admin`), but would tell anyone that the email has an account: **decision pending on MLink-55** |
+| Keycloak down, 5xx, or the API refused as a client | — | 503 `IDENTITY_UNAVAILABLE` |
+
+The session keeps the tokens as an `OAuth2AuthorizedClient`: `SessionValidityFilter` renews the
+access token with the refresh token and ends the session when Keycloak refuses (§3 "Session still
+valid", GitHub #28). Logout (endpoint 7) uses the same refresh token to end the Keycloak session.
 
 ### 6 · `GET /api/auth/me`
 → **200** `{ "user": {…} }` from the session · **401**.

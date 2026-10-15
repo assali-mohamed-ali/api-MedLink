@@ -15,7 +15,7 @@
        Before any wipe, the current realm is saved to .dev\realm-backups\ (no users, no secrets).
     5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
     6. Runs ./mvnw verify (unless -SkipTests).
-    7. Starts the API and runs smoke tests, including a real login as practitioner.dev.
+    7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login.
 
     Run from PowerShell (5.1 or 7):
         powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1
@@ -80,10 +80,6 @@ function Test-Quiet([string]$CommandLine) {
 function Get-HttpStatus([string]$Url) {
     $code = & curl.exe -s -o NUL -w '%{http_code}' --max-time 10 $Url
     return [int]$code
-}
-
-function Get-RedirectTarget([string]$Url) {
-    return (& curl.exe -s -o NUL -w '%{redirect_url}' --max-time 10 $Url)
 }
 
 function Wait-Until([scriptblock]$Condition, [string]$What, [int]$TimeoutSec) {
@@ -497,31 +493,32 @@ if ($health -match '"status":"UP"') { Write-Ok "health: $health" } else { Write-
 $status = Get-HttpStatus "$AppUrl/api/users"
 if ($status -eq 401) { Write-Ok '/api/users without a session returns 401' } else { Write-Bad "/api/users without a session returned $status, expected 401" }
 
-$location = Get-RedirectTarget "$AppUrl/oauth2/authorization/keycloak"
-if ($location -like "$KeycloakUrl/realms/medlink/protocol/openid-connect/auth*" -and $location -match 'code_challenge_method=S256') {
-    Write-Ok 'login redirects to Keycloak with PKCE S256'
-} else { Write-Bad "login redirect is wrong: '$location'" }
-
 $swagger = Get-HttpStatus "$AppUrl/swagger-ui.html"
 if ($swagger -in 200, 302) { Write-Ok 'Swagger UI reachable' } else { Write-Warn "Swagger UI returned $swagger" }
 
-# End-to-end: log in as practitioner.dev through the Keycloak login form, then call the API with the session.
-# curl.exe with a cookie jar, like setup-dev.sh: Invoke-WebRequest loses the session cookie on the redirects.
+# End-to-end: log in as patient.dev through our login endpoint, as React does (CSRF cookie, then
+# the JSON post), then call the API with the session. A wrong password first: a successful login
+# resets Keycloak's failure count, so repeated runs never lock patient.dev.
+# JSON bodies go through files: Windows PowerShell 5.1 strips the double quotes of native command arguments.
 $cookies = Join-Path $LogDir 'cookies.txt'
+$loginFile = Join-Path $LogDir 'login-body.json'
+$utf8 = New-Object System.Text.UTF8Encoding($false)
 Remove-Item $cookies -Force -ErrorAction SilentlyContinue
-$loginPage = (& curl.exe -s -L --max-time 30 -c $cookies -b $cookies "$AppUrl/oauth2/authorization/keycloak") -join "`n"
-if ($loginPage -match 'action="([^"]*login-actions/authenticate[^"]*)"') {
-    $action = [System.Net.WebUtility]::HtmlDecode($Matches[1])
-    # After login Spring redirects to "/", which has no page (404): expected, the session is what matters.
-    & curl.exe -s -L -o NUL --max-time 30 -c $cookies -b $cookies `
-        --data-urlencode 'username=practitioner.dev' --data-urlencode "password=$usersPassword" -d 'credentialId=' $action
-    $apiStatus = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -b $cookies "$AppUrl/api/users/_health")
-    if ($apiStatus -eq 200) { Write-Ok 'end-to-end login as practitioner.dev works: /api/users/_health returns 200 with the session' }
-    else { Write-Bad "after login /api/users/_health returned $apiStatus" }
-} else {
-    Write-Warn "automated login check did not complete (Keycloak login form not found). Test it in a browser: $AppUrl/oauth2/authorization/keycloak"
-}
-Remove-Item $cookies -Force -ErrorAction SilentlyContinue
+& curl.exe -s -o NUL --max-time 10 -c $cookies -b $cookies "$AppUrl/api/auth/csrf"
+$loginXsrf = Get-Content $cookies | Where-Object { $_ -match "`tXSRF-TOKEN`t" } | ForEach-Object { ($_ -split "`t")[6] } | Select-Object -First 1
+
+[System.IO.File]::WriteAllText($loginFile, (@{ email = 'patient.dev@medlink.local'; password = 'Not-The-Password-1!' } | ConvertTo-Json -Compress), $utf8)
+$status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $cookies -b $cookies -H "X-XSRF-TOKEN: $loginXsrf" `
+    -H 'Content-Type: application/json' --data-binary "@$loginFile" "$AppUrl/api/auth/login")
+if ($status -eq 401) { Write-Ok 'login with a wrong password returns 401' } else { Write-Bad "login with a wrong password returned $status, expected 401" }
+
+[System.IO.File]::WriteAllText($loginFile, (@{ email = 'patient.dev@medlink.local'; password = $usersPassword } | ConvertTo-Json -Compress), $utf8)
+$status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $cookies -b $cookies -H "X-XSRF-TOKEN: $loginXsrf" `
+    -H 'Content-Type: application/json' --data-binary "@$loginFile" "$AppUrl/api/auth/login")
+$apiStatus = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -b $cookies "$AppUrl/api/users/_health")
+if ($status -eq 200 -and $apiStatus -eq 200) { Write-Ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/users/_health 200 with the session' }
+else { Write-Bad "login as patient.dev: POST /api/auth/login returned $status (expected 200), then /api/users/_health $apiStatus (expected 200)" }
+Remove-Item $cookies, $loginFile -Force -ErrorAction SilentlyContinue
 
 # Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
 # The smoke account is deleted afterwards (Keycloak user, then our rows). JSON bodies go through
@@ -589,7 +586,7 @@ if ($script:Failures -eq 0) {
 Write-Host @"
 
   API             $AppUrl
-  Login           $AppUrl/oauth2/authorization/keycloak
+  Login           POST $AppUrl/api/auth/login   (JSON email + password, X-XSRF-TOKEN header)
   Swagger UI      $AppUrl/swagger-ui.html
   Mail inbox      http://localhost:8025   (every mail the API sends, Mailpit)
   Keycloak admin  $KeycloakUrl   (user: $kcAdminUser, password: $(if ($FullStack) { 'KEYCLOAK_ADMIN_PASSWORD in .env' } else { 'admin' }))
