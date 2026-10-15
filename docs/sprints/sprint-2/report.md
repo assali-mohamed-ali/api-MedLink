@@ -27,6 +27,44 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## MLink-55 — login through the API, and MLink-65 (sub-sprint 2 part) (2026-10-15)
+
+**Built** (branch `feat/ss2-login`, on top of #38):
+- `POST /api/auth/login` (endpoint 5): `controller/LoginController` → `service/LoginService` →
+  `service/KeycloakLoginClient` (password grant as `medlink-bff`; tokens checked: JWKS signature,
+  issuer, `azp`) → `security/LoginSessions` (new session id, `ROLE_*` from our three roles only,
+  tokens stored as an `OAuth2AuthorizedClient` so `SessionValidityFilter` keeps working, #28).
+  `UserProvisioningService.provision(...)` runs at every login (#29).
+- An unverified email is refused (403) and the Keycloak session the grant opened is ended; same
+  when provisioning refuses (409 `ACCOUNT_CONFLICT`).
+- The redirect login is gone: `oauth2Login`, `ProvisioningOidcUserService` and
+  `KeycloakRolesMapper` removed; `medlink-bff` standard flow OFF in the realm; not logged in →
+  401 everywhere. `Browser.login` in the functional tests uses the endpoint.
+- MLink-65 (sub-sprint 2 part): both setup scripts log in as `patient.dev` through the endpoint
+  (wrong password 401 first, then 200 and a call with the session); the PKCE redirect check is gone.
+
+**Proof**
+- `LoginFunctionalTest` (real Keycloak), committed red first (be2c1f8): verified patient 200 with
+  only `PATIENT`, no token in the body or cookies, new session id at each login, wrong password
+  and unknown email identical 401, unverified 403 with no API or Keycloak session left, disabled
+  403, no CSRF header 403. Mutation checks: accepting unverified emails, skipping the Keycloak
+  logout, keeping Keycloak's built-in roles: each turns a test red.
+- `KeycloakLoginClientTest` (Keycloak faked): no answer, 5xx, `invalid_client`, incomplete token
+  answer → 503; a failed Keycloak logout is only logged.
+- The #28/#29 functional tests and the lockout tests pass through the new login.
+- `./mvnw -B clean test -Dsurefire.runOrder=reversealphabetical`: **109 tests, 0 failures**.
+  Setup script (Windows): 0 warnings; the bash login block run alone against the dev stack: same result.
+- Keycloak refuses the old redirect for `medlink-bff` ("Standard flow is disabled for the client").
+
+**Limits**
+- Locked account answers 401 like a wrong password: 423 is a pending decision (see plan.md §4,
+  endpoint 5). `attack-detection` works with `medlink-admin` if 423 is kept.
+- Practitioner and staff get a session at login for now: the code step (`mfaRequired`) is sub-sprint 3.
+- The setup scripts check the session with `/api/users/_health`: `/api/auth/me` (MLink-53) is not built yet.
+- The realm checks "redirect URI" and "PKCE S256 enforced" still pass but no longer mean anything
+  (standard flow is off): to remove with Mohamed, with `redirectUris`/PKCE in the realm file.
+- `setup-dev.sh` was not run as a whole (Windows); its login block was.
+
 ## Sub-sprint 2 — realm: lockout, event log, idle timeout, password grant (2026-10-14)
 
 **Built** (branch `feat/MLink-66-67-realm`, realm file + both setup scripts):
@@ -197,6 +235,10 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-15 | Login: a separate `LoginController` at `/api/auth` | No conflict with the sign-up changes in `AuthBffController` (#39) | Adding the endpoint to `AuthBffController` |
+| 2026-10-15 | Keep only `PATIENT`, `PRACTITIONER`, `ADMINISTRATIVE_STAFF` from the `roles` claim | Keycloak adds built-in roles that mean nothing to MedLink | Every claimed role as `ROLE_*` (the old `KeycloakRolesMapper`) |
+| 2026-10-15 | An unverified login ends the Keycloak session it opened | Keycloak accepts unverified emails; no session anywhere for a refused login | Leaving it to expire |
+| 2026-10-15 | Setup scripts: wrong password first, then the right one | A successful login resets Keycloak's failure count, so repeated runs never lock `patient.dev` | Only the right password; the right one first |
 | 2026-10-14 | #28 and #29 fixed now on the redirect login, through pieces sub-sprint 2 reuses (provisioning service, tokens as an `OAuth2AuthorizedClient` in the session) | Open security issues; the reusable parts are most of the work | Waiting for sub-sprint 2; a background sync from Keycloak |
 | 2026-10-14 | Session validity by token renewal: a refused renewal ends the session | No extra call while the token is fresh; Keycloak decides (disabled, signed out, reset, SSO over) | Calling Keycloak on every request; a status column of our own |
 | 2026-10-14 | Functional tests against a real Keycloak container for login-related work | Asked by the team: prove the behaviour end to end, not a mock | Mocked Keycloak only |
