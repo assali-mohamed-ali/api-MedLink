@@ -8,15 +8,14 @@ public final class PatientMapper {
 
     private PatientMapper() {}
 
-    /** The profile part of a signup; its user is attached by the registration service. */
+    /** The profile part of a sign-up; the registration service sets the account's id and email. */
     public static Patient toNewPatient(RegisterRequest request) {
-        return Patient.builder()
-                .firstName(request.firstName().trim())
-                .lastName(request.lastName().trim())
-                .birthDate(request.birthDate())
-                .phone(blankToNull(request.phone()))
-                .address(blankToNull(request.address()))
-                .build();
+        return new Patient(
+                request.firstName().trim(),
+                request.lastName().trim(),
+                request.birthDate(),
+                blankToNull(request.phone()),
+                blankToNull(request.address()));
     }
 
     private static String blankToNull(String value) {

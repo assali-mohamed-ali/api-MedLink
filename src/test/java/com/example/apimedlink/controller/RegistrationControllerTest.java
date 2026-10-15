@@ -118,7 +118,7 @@ class RegistrationControllerTest {
         assertThat(user.getUsername()).isEqualTo(email);
         tx.executeWithoutResult(s -> {
             Patient patient = patients.findById(keycloakId).orElseThrow();
-            assertThat(patient.getUser().getId()).isEqualTo(keycloakId);
+            assertThat(patient.getEmail()).isEqualTo(email);
             assertThat(patient.getFirstName()).isEqualTo("Amel");
             assertThat(patient.getBirthDate()).isEqualTo(LocalDate.of(1990, 4, 12));
             assertThat(patient.getPhone()).isEqualTo("+216 22 123 456");
@@ -151,27 +151,34 @@ class RegistrationControllerTest {
         assertThat(users.findById(keycloakId)).isPresent();
     }
 
-    // 2. email already known
-    @Test
-    void anEmailAlreadyInOurDatabaseIsTakenWithoutCallingKeycloak() throws Exception {
-        users.save(User.builder().id(UUID.randomUUID()).username(email).email(email).build());
-
-        registerValid().andExpect(status().isConflict())
-                .andExpect(jsonPath("$.code").value("EMAIL_TAKEN"))
-                .andExpect(jsonPath("$.message").value("Un compte existe déjà avec cet e-mail."));
-
-        verify(keycloak, never()).createUser(anyString(), anyString(), anyString(), anyString(), anyString());
+    // 2. email already known: same answer as a new account (no enumeration), the owner is warned
+    private String onlySentSubject() throws Exception {
+        ArgumentCaptor<MimeMessage> mail = ArgumentCaptor.forClass(MimeMessage.class);
+        verify(mailSender).send(mail.capture());
+        assertThat(mail.getValue().getAllRecipients()[0].toString()).isEqualTo(email);
+        return mail.getValue().getSubject();
     }
 
     @Test
-    void anEmailKnownToKeycloakIsTakenAndNothingIsCreated() throws Exception {
+    void anEmailAlreadyInOurDatabaseGetsTheSameAnswerAndOnlyTheOwnerIsWarned() throws Exception {
+        users.save(User.builder().id(UUID.randomUUID()).username(email).email(email).build());
+
+        registerValid().andExpect(status().isCreated()).andExpect(jsonPath("$.message").value(CREATED_MESSAGE));
+
+        verify(keycloak, never()).createUser(anyString(), anyString(), anyString(), anyString(), anyString());
+        assertThat(onlySentSubject()).isEqualTo("Tentative d'inscription avec votre adresse e-mail MedLink");
+    }
+
+    @Test
+    void anEmailKnownOnlyToKeycloakGetsTheSameAnswerAndNothingIsCreated() throws Exception {
         when(keycloak.createUser(anyString(), anyString(), anyString(), anyString(), anyString()))
                 .thenThrow(new EmailTakenException());
 
-        registerValid().andExpect(status().isConflict()).andExpect(jsonPath("$.code").value("EMAIL_TAKEN"));
+        registerValid().andExpect(status().isCreated()).andExpect(jsonPath("$.message").value(CREATED_MESSAGE));
 
         assertThat(users.findByEmail(email)).isEmpty();
-        verify(mailSender, never()).send(any(MimeMessage.class));
+        verify(keycloak, never()).setPassword(any(), anyString());
+        assertThat(onlySentSubject()).isEqualTo("Tentative d'inscription avec votre adresse e-mail MedLink");
     }
 
     // 3. invalid body

@@ -27,6 +27,32 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## Code owner's review on #32 — fixes (2026-10-14)
+
+**Built** (branch `fix/MLink-79-78-review`):
+- **No account enumeration (MLink-79):** register answers 201 with the same message whether or not the email is
+  taken; a taken email (in our database or only in Keycloak) creates nothing and the owner gets a French warning
+  mail, at most one per address per 15 minutes (`MailThrottle`, `app.mail.warning-interval`). `EmailTakenException`
+  is internal, no longer an `ApiException`. The contract in plan.md §2 and §4 is updated.
+- **A patient is a user (MLink-78):** `Patient extends User`, JPA `JOINED` inheritance; same tables, no migration.
+- **Race fixed** in `UserProvisioningService` (#29 code): a first login racing with itself no longer reads as an
+  email conflict (found by the suite in CI's order under load).
+- **Functional tests get a mail server:** Mailpit next to Keycloak; `SignupFunctionalTest` proves sign-up → mail →
+  link → `emailVerified` in Keycloak (the answer to review comment 3, no code change needed).
+- Postman collection updated: the three former 409 requests now expect the normal 201; folder 2 checks one
+  verification mail and one warning.
+
+**Review comments:** 1 (enumeration) and 4 (extend User) agreed and done; 3 (verify for real) answered with the
+proof; 2 (disable instead of delete for a failed sign-up) waits for the code owner's answer on the trade-off.
+
+**Proof:** functional tests red first (33d5f6e), then green; mutation check: without the throttle, 3 retries send 3
+warnings. `./mvnw test`: **102 tests, 0 failures** in both class orders. Setup script: 0 failures. Newman: 147
+assertions, 0 failures.
+
+**Limits:** the throttle is in memory (one API instance). A taken email answers a little faster than a new one
+(no Keycloak call): a timing difference, not an answer difference; per-IP rate limits at the proxy (decision page
+Q8) blunt it.
+
 ## Sub-sprint 2 — realm: lockout, event log, idle timeout, password grant (2026-10-14)
 
 **Built** (branch `feat/MLink-66-67-realm`, realm file + both setup scripts):
@@ -197,6 +223,8 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-14 | Register never reveals a taken email: same 201, the owner is warned by mail (one per 15 min) | Code owner's review: never expose users' data; a stranger cannot test which emails have an account | 409 `EMAIL_TAKEN` (the story's original wording) |
+| 2026-10-14 | `Patient extends User` (JPA JOINED), same tables | Code owner's review; the lead confirmed a person holds one role only | A patient *has* a user (`@MapsId`), kept for "one login, several profiles", which will not happen |
 | 2026-10-14 | #28 and #29 fixed now on the redirect login, through pieces sub-sprint 2 reuses (provisioning service, tokens as an `OAuth2AuthorizedClient` in the session) | Open security issues; the reusable parts are most of the work | Waiting for sub-sprint 2; a background sync from Keycloak |
 | 2026-10-14 | Session validity by token renewal: a refused renewal ends the session | No extra call while the token is fresh; Keycloak decides (disabled, signed out, reset, SSO over) | Calling Keycloak on every request; a status column of our own |
 | 2026-10-14 | Functional tests against a real Keycloak container for login-related work | Asked by the team: prove the behaviour end to end, not a mock | Mocked Keycloak only |
@@ -214,7 +242,7 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 | 2026-10-14 | Staff code (TOTP) handled by the API, secret encrypted | Keycloak cannot enrol a code without its own page | Keycloak OTP flow |
 | 2026-10-14 | User row created in the same request as the Keycloak user; first-login creation only as a fallback for users made outside the API | The app knows every user at once | Waiting for first login |
 | 2026-10-14 | Each sub-sprint runs in a fresh session; these files are the handoff | Keep sessions short and focused | One long session |
-| 2026-10-13 | `users.id` is the Keycloak id; `patients.id` = `users.id` (`@MapsId`, a patient *has* a user) | One id per person; one login may hold several profiles later | Our own generated id + `keycloak_id` column; JPA inheritance |
+| 2026-10-13 | `users.id` is the Keycloak id; `patients.id` = `users.id` (a patient *has* a user, `@MapsId`). **Replaced 2026-10-14**, see above | One id per person | Our own generated id + `keycloak_id` column |
 | 2026-10-13 | `users` keeps `id`, `username`, `email`, `created_at` | Asked by the lead | Dropping `username` |
 | 2026-10-13 | Controller maps entities to DTOs through `mapper/`; services never see a DTO | Review feedback on PR #22 | Mapping inside services |
 | 2026-10-11 | Roles and names follow the class diagram; ids are UUIDs | One vocabulary across diagram, code and report | `ADMIN` / `DOCTOR`, numeric ids |
