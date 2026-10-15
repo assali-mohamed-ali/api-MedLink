@@ -14,7 +14,7 @@
 #      Before any wipe, the current realm is saved to .dev/realm-backups/ (no users, no secrets).
 #   5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
 #   6. Runs ./mvnw verify (unless --skip-tests).
-#   7. Starts the API and runs smoke tests, including a real login as practitioner.dev.
+#   7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login.
 #
 # Usage: ./scripts/setup-dev.sh [--skip-tests] [--full-stack] [--reset] [--keep-data] [--stop]
 #
@@ -519,32 +519,33 @@ esac
 STATUS="$(http_status "$APP_URL/api/users")"
 if [ "$STATUS" = 401 ]; then ok '/api/users without a session returns 401'; else bad "/api/users without a session returned $STATUS, expected 401"; fi
 
-LOCATION="$(curl -s -o /dev/null -w '%{redirect_url}' --max-time 10 "$APP_URL/oauth2/authorization/keycloak")"
-case "$LOCATION" in
-    "$KEYCLOAK_URL/realms/medlink/protocol/openid-connect/auth"*code_challenge_method=S256*) ok 'login redirects to Keycloak with PKCE S256' ;;
-    *) bad "login redirect is wrong: '$LOCATION'" ;;
-esac
-
 SWAGGER="$(http_status "$APP_URL/swagger-ui.html")"
 case "$SWAGGER" in
     200 | 302) ok 'Swagger UI reachable' ;;
     *) warn "Swagger UI returned $SWAGGER" ;;
 esac
 
-# End-to-end: log in as practitioner.dev through the Keycloak login form, then call the API with the session.
+# End-to-end: log in as patient.dev through our login endpoint, as React does (CSRF cookie, then
+# the JSON post), then call the API with the session. A wrong password first: a successful login
+# resets Keycloak's failure count, so repeated runs never lock patient.dev.
 COOKIES="$LOG_DIR/cookies.txt"
 rm -f "$COOKIES"
-ACTION="$(curl -s -L --max-time 30 -c "$COOKIES" -b "$COOKIES" "$APP_URL/oauth2/authorization/keycloak" |
-    sed -n 's/.*action="\([^"]*login-actions\/authenticate[^"]*\)".*/\1/p' | head -n 1 | sed 's/&amp;/\&/g')"
-if [ -z "$ACTION" ]; then
-    warn "automated login check did not complete (Keycloak login form not found). Test it in a browser: $APP_URL/oauth2/authorization/keycloak"
+curl -s -o /dev/null --max-time 10 -c "$COOKIES" -b "$COOKIES" "$APP_URL/api/auth/csrf"
+XSRF="$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$COOKIES" | head -n 1)"
+api_login() { # $1 = password -> HTTP status of POST /api/auth/login as patient.dev
+    curl -s -o /dev/null -w '%{http_code}' --max-time 30 -c "$COOKIES" -b "$COOKIES" \
+        -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' \
+        -d "{\"email\":\"patient.dev@medlink.local\",\"password\":\"$1\"}" \
+        "$APP_URL/api/auth/login"
+}
+STATUS="$(api_login 'Not-The-Password-1!')"
+if [ "$STATUS" = 401 ]; then ok 'login with a wrong password returns 401'; else bad "login with a wrong password returned $STATUS, expected 401"; fi
+STATUS="$(api_login "$USERS_PASSWORD")"
+API_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/users/_health")"
+if [ "$STATUS" = 200 ] && [ "$API_STATUS" = 200 ]; then
+    ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/users/_health 200 with the session'
 else
-    # After login Spring redirects to "/", which has no page (404): expected, the session is what matters.
-    curl -s -L -o /dev/null --max-time 30 -c "$COOKIES" -b "$COOKIES" \
-        --data-urlencode 'username=practitioner.dev' --data-urlencode "password=$USERS_PASSWORD" -d 'credentialId=' "$ACTION"
-    STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/users/_health")"
-    if [ "$STATUS" = 200 ]; then ok 'end-to-end login as practitioner.dev works: /api/users/_health returns 200 with the session'
-    else bad "after login /api/users/_health returned $STATUS"; fi
+    bad "login as patient.dev: POST /api/auth/login returned $STATUS (expected 200), then /api/users/_health $API_STATUS (expected 200)"
 fi
 rm -f "$COOKIES"
 
@@ -604,7 +605,7 @@ fi
 cat <<EOF
 
   API             $APP_URL
-  Login           $APP_URL/oauth2/authorization/keycloak
+  Login           POST $APP_URL/api/auth/login   (JSON email + password, X-XSRF-TOKEN header)
   Swagger UI      $APP_URL/swagger-ui.html
   Mail inbox      http://localhost:8025   (every mail the API sends, Mailpit)
   Keycloak admin  $KEYCLOAK_URL   (user: $KC_ADMIN_USER, password: $ADMIN_PASSWORD_HINT)
