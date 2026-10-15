@@ -169,7 +169,7 @@
           ]
         },
         {
-          "name": "409 · same email again",
+          "name": "201 · same email again: same answer, nothing created, the owner is warned",
           "request": {
             "method": "POST",
             "header": [
@@ -183,6 +183,7 @@
               }
             ],
             "url": "{{baseUrl}}/api/auth/register",
+            "description": "No account enumeration (code owner's review on #32): the caller cannot tell the email is taken. The owner gets one warning mail (checked in folder 2).",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
@@ -199,21 +200,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
                   "",
-                  "const err = pm.response.json();",
-                  "pm.test(\"error code EMAIL_TAKEN\", () => pm.expect(err.code).to.eql(\"EMAIL_TAKEN\"));",
-                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
-                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);",
-                  "",
-                  "pm.test(\"message\", () => pm.expect(pm.response.json().message).to.eql(\"Un compte existe déjà avec cet e-mail.\"));"
+                  "pm.test(\"same answer as a new account (nothing tells the email is taken)\", () => pm.expect(pm.response.json()).to.eql({ message: \"Vérifiez votre boîte mail pour activer votre compte.\" }));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "409 · same email in upper case with spaces (normalised)",
+          "name": "201 · same email in upper case with spaces: same answer (normalised)",
           "request": {
             "method": "POST",
             "header": [
@@ -252,19 +248,16 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
                   "",
-                  "const err = pm.response.json();",
-                  "pm.test(\"error code EMAIL_TAKEN\", () => pm.expect(err.code).to.eql(\"EMAIL_TAKEN\"));",
-                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
-                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);"
+                  "pm.test(\"same answer as a new account (nothing tells the email is taken)\", () => pm.expect(pm.response.json()).to.eql({ message: \"Vérifiez votre boîte mail pour activer votre compte.\" }));"
                 ]
               }
             }
           ]
         },
         {
-          "name": "409 · email known only to Keycloak (dev user, no row of ours)",
+          "name": "201 · email known only to Keycloak (dev user): same answer, nothing created",
           "request": {
             "method": "POST",
             "header": [
@@ -278,7 +271,7 @@
               }
             ],
             "url": "{{baseUrl}}/api/auth/register",
-            "description": "patient.dev exists in the realm import but has no users row: Keycloak's 409 is mapped to EMAIL_TAKEN.",
+            "description": "patient.dev exists in the realm import: Keycloak refuses the duplicate, the API answers as for a new account and warns the owner.",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"patient.dev@medlink.local\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Amel\",\n  \"lastName\": \"Ben Salah\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
@@ -295,12 +288,9 @@
               "script": {
                 "type": "text/javascript",
                 "exec": [
-                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
                   "",
-                  "const err = pm.response.json();",
-                  "pm.test(\"error code EMAIL_TAKEN\", () => pm.expect(err.code).to.eql(\"EMAIL_TAKEN\"));",
-                  "pm.test(\"error body shape\", () => pm.expect(err).to.include.keys(\"timestamp\", \"status\", \"error\", \"code\", \"message\", \"details\"));",
-                  "pm.test(\"French message for the user\", () => pm.expect(err.message).to.be.a(\"string\").and.not.empty);"
+                  "pm.test(\"same answer as a new account (nothing tells the email is taken)\", () => pm.expect(pm.response.json()).to.eql({ message: \"Vérifiez votre boîte mail pour activer votre compte.\" }));"
                 ]
               }
             }
@@ -901,7 +891,7 @@
       "description": "Reads the mail the API sent, from Mailpit's API (dev only), and keeps the token of its link.",
       "item": [
         {
-          "name": "Mailpit: exactly one mail for the new patient",
+          "name": "Mailpit: one verification mail and one warning for the two duplicate tries",
           "request": {
             "method": "GET",
             "header": [],
@@ -917,10 +907,12 @@
                   "",
                   "// Mailpit's to: search matches substrings (weak.postman... too): keep the exact recipient",
                   "const to = pm.collectionVariables.get(\"email\");",
-                  "const m = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to));",
-                  "pm.test(\"one mail (the duplicate attempts sent none)\", () => pm.expect(m.length).to.eql(1));",
-                  "pm.collectionVariables.set(\"mailId\", m[0].ID);",
-                  "pm.test(\"subject\", () => pm.expect(m[0].Subject).to.eql(\"Confirmez votre adresse e-mail MedLink\"));"
+                  "const mine = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to));",
+                  "const verification = mine.filter(x => x.Subject === \"Confirmez votre adresse e-mail MedLink\");",
+                  "const warnings = mine.filter(x => x.Subject === \"Tentative d'inscription avec votre adresse e-mail MedLink\");",
+                  "pm.test(\"one verification mail (the duplicates created nothing)\", () => pm.expect(verification.length).to.eql(1));",
+                  "pm.test(\"one warning to the owner (two tries, at most one warning per 15 min)\", () => pm.expect(warnings.length).to.eql(1));",
+                  "pm.collectionVariables.set(\"mailId\", verification[0].ID);"
                 ]
               }
             }
@@ -1000,10 +992,10 @@
                   "pm.test(\"message\", () => pm.expect(pm.response.json().message).to.eql(\"Si un compte non vérifié existe pour cet e-mail, un nouveau lien a été envoyé.\"));",
                   "",
                   "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/search?query=to:\" + pm.collectionVariables.get(\"email\"), (e, res) => {",
-                  "    pm.test(\"still one mail (at most one per minute)\", () => {",
+                  "    pm.test(\"still one verification mail (at most one per minute)\", () => {",
                   "        pm.expect(e).to.be.null;",
                   "        const to = pm.collectionVariables.get(\"email\");",
-                  "        pm.expect(res.json().messages.filter(m => m.To.some(t => t.Address === to)).length).to.eql(1);",
+                  "        pm.expect(res.json().messages.filter(m => m.Subject === \"Confirmez votre adresse e-mail MedLink\" && m.To.some(t => t.Address === to)).length).to.eql(1);",
                   "    });",
                   "});"
                 ]
@@ -1453,10 +1445,10 @@
                   "pm.test(\"status 202\", () => pm.response.to.have.status(202));",
                   "",
                   "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/search?query=to:\" + pm.collectionVariables.get(\"email\"), (e, res) => {",
-                  "    pm.test(\"still one mail: a verified account gets none\", () => {",
+                  "    pm.test(\"still one verification mail: a verified account gets none\", () => {",
                   "        pm.expect(e).to.be.null;",
                   "        const to = pm.collectionVariables.get(\"email\");",
-                  "        pm.expect(res.json().messages.filter(m => m.To.some(t => t.Address === to)).length).to.eql(1);",
+                  "        pm.expect(res.json().messages.filter(m => m.Subject === \"Confirmez votre adresse e-mail MedLink\" && m.To.some(t => t.Address === to)).length).to.eql(1);",
                   "    });",
                   "});"
                 ]
@@ -1717,7 +1709,7 @@
                   "    pm.test(\"two mails now\", () => {",
                   "        pm.expect(e).to.be.null;",
                   "        const to = pm.collectionVariables.get(\"emailSlow\");",
-                  "        pm.expect(res.json().messages.filter(m => m.To.some(t => t.Address === to)).length).to.eql(2);",
+                  "        pm.expect(res.json().messages.filter(m => m.Subject === \"Confirmez votre adresse e-mail MedLink\" && m.To.some(t => t.Address === to)).length).to.eql(2);",
                   "    });",
                   "});"
                 ]

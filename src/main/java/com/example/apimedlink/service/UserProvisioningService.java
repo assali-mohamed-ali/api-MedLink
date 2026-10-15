@@ -57,7 +57,9 @@ public class UserProvisioningService {
 
     private User create(UUID id, String email, String username) {
         if (users.existsByEmail(email) || users.existsByUsername(username)) {
-            throw conflict(id);
+            // A first login of this same account may have committed its row since we looked it up:
+            // then the email is ours, not another account's. Read again by id before refusing.
+            return users.findById(id).orElseThrow(() -> conflict(id));
         }
         return users.saveAndFlush(User.builder().id(id).username(username).email(email).build());
     }
