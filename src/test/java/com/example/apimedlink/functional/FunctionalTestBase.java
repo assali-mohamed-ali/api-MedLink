@@ -228,6 +228,45 @@ public abstract class FunctionalTestBase {
                     .retrieve()
                     .toBodilessEntity();
         }
+
+        /** A read in the admin API, as JSON (an object or a list). */
+        Object read(String path, Object... uriVariables) {
+            return http.get().uri("/admin/realms/medlink" + path, uriVariables)
+                    .header(HttpHeaders.AUTHORIZATION, token())
+                    .retrieve()
+                    .body(Object.class);
+        }
+
+        /** The realm's settings, as the console shows them. */
+        Map<?, ?> realm() {
+            return (Map<?, ?>) read("");
+        }
+
+        /** The console's Events tab for one user and one type, newest first. */
+        List<?> events(UUID user, String type) {
+            return (List<?>) read("/events?user={user}&type={type}&max=50", user, type);
+        }
+
+        /** Brute-force status of a user: {@code disabled} is true while locked out. */
+        Map<?, ?> lockout(UUID user) {
+            return (Map<?, ?>) read("/attack-detection/brute-force/users/{id}", user);
+        }
+    }
+
+    /** The token endpoint, called server to server as the API's login will (password grant). */
+    static HttpResponse<String> passwordGrant(String clientId, String secret, String username, String password)
+            throws Exception {
+        String body = "grant_type=password&client_id=" + enc(clientId) + "&client_secret=" + enc(secret)
+                + "&username=" + enc(username) + "&password=" + enc(password) + "&scope=openid";
+        return HttpClient.newHttpClient().send(HttpRequest.newBuilder(
+                        URI.create(keycloakUrl() + "/realms/medlink/protocol/openid-connect/token"))
+                .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_FORM_URLENCODED_VALUE)
+                .POST(HttpRequest.BodyPublishers.ofString(body))
+                .build(), HttpResponse.BodyHandlers.ofString());
+    }
+
+    private static String enc(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
     }
 
     static String uniqueEmail(String prefix) {

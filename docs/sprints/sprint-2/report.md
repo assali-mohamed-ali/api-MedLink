@@ -27,6 +27,38 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## Sub-sprint 2 — realm: lockout, event log, idle timeout, password grant (2026-10-14)
+
+**Built** (branch `feat/MLink-66-67-realm`, realm file + both setup scripts):
+- MLink-66: 5 failed logins lock the account for **15 minutes** (`waitIncrementSeconds` 60 → 900, `permanentLockout`
+  false); during the lock even the right password is refused.
+- MLink-67: Keycloak's event log on for 30 days (`LOGIN`, `LOGIN_ERROR`, `LOGOUT`, `USER_DISABLED_BY_TEMPORARY_LOCKOUT`,
+  `UPDATE_PASSWORD`, `UPDATE_TOTP`, `VERIFY_EMAIL`), each line with user and IP; admin events with details.
+- MLink-83: a session is over after **15 minutes without a call**, on both sides: `server.servlet.session.timeout=15m`
+  (every profile, each call counts as activity) and the realm's `ssoSessionIdleTimeout` 1800 → 900 (max stays 10 h).
+  The expiry test itself is MLink-86. **Story MLink-22 says "le jeton JWT est renouvelé": the browser holds no JWT.**
+  The rolling server session does that job, and the API renews Keycloak's token itself (#28). The criterion should be
+  reworded to "la session est prolongée à chaque action".
+- For MLink-55 (asked by Youssef): `medlink-bff` may do the **password grant** (direct grants ON). The redirect flow
+  stays ON until MLink-55 removes `oauth2Login` in the same PR.
+
+**Proof**
+- Functional tests against the real Keycloak, red first (4c9ecb2): not locked after 4 wrong passwords, locked at the
+  5th, then the right password refused; realm lockout settings; 5+ `LOGIN_ERROR` lines with the IP and one lockout
+  line; events and admin events configured; password grant works for `medlink-bff`, refused with a wrong secret and
+  for the admin service account. Mutation check: `failureFactor` 6 turns the lockout test red.
+- Dev stack after the automatic re-import: the setup script's 3 new checks pass, 0 failures. By hand: 5 wrong
+  passwords → the right one refused (`invalid_grant`), brute-force status `disabled: true`, event log shows each
+  `LOGIN_ERROR` with IP `172.22.0.1` and the `USER_DISABLED_BY_TEMPORARY_LOCKOUT` line.
+- `./mvnw test`: **97 tests, 0 failures**, in both class orders.
+
+**Limits**
+- Keycloak's quick-login guard also locks an account for **1 minute after 2 failures less than 1 second apart**
+  (scripts, not people). Stricter, not weaker; scripted checks (MLink-68) must wait more than a second between tries.
+- The events live in Keycloak, not in our `audit_entries` table (MLink-59): bringing them over is not planned this
+  sprint.
+- Everyone's dev realm is re-imported once by the setup script (realm backup taken automatically).
+
 ## GitHub issues #28 and #29 — done ahead of sub-sprint 2 (2026-10-14)
 
 **Built** (branch `fix/issues-28-29`, on top of sub-sprint 1):

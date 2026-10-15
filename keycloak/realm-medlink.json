@@ -11,11 +11,21 @@
   "rememberMe": false,
   "bruteForceProtected": true,
   "failureFactor": 5,
-  "waitIncrementSeconds": 60,
+  "permanentLockout": false,
+  "waitIncrementSeconds": 900,
   "maxFailureWaitSeconds": 900,
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "eventsListeners": ["jboss-logging"],
+  "enabledEventTypes": [
+    "LOGIN", "LOGIN_ERROR", "LOGOUT", "USER_DISABLED_BY_TEMPORARY_LOCKOUT",
+    "UPDATE_PASSWORD", "UPDATE_TOTP", "VERIFY_EMAIL"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
   "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and notEmail",
   "accessTokenLifespan": 300,
-  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionIdleTimeout": 900,
   "ssoSessionMaxLifespan": 36000,
   "roles": {
     "realm": [
@@ -49,7 +59,7 @@
     {
       "clientId": "medlink-bff",
       "name": "MedLink BFF",
-      "description": "Spring Boot backend (auth BFF). Confidential client, authorization code + PKCE.",
+      "description": "Spring Boot backend (auth BFF). Confidential client: password grant for the API's login endpoint (server to server); authorization code + PKCE until that endpoint replaces the redirect login.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,
@@ -57,7 +67,7 @@
       "secret": "${KC_BFF_CLIENT_SECRET}",
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "frontchannelLogout": true,
       "rootUrl": "${KC_BFF_BASE_URL}",

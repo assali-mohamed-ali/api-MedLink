@@ -435,6 +435,24 @@ else
         esac
     fi
 
+    # Login protections from the realm file (MLink-66, MLink-67) and the login endpoint's grant (MLink-55).
+    REALM_JSON="$(admin_get '')"
+    if printf '%s' "$REALM_JSON" | grep -q '"bruteForceProtected":true' \
+        && printf '%s' "$REALM_JSON" | grep -q '"failureFactor":5[,}]' \
+        && printf '%s' "$REALM_JSON" | grep -q '"waitIncrementSeconds":900[,}]' \
+        && printf '%s' "$REALM_JSON" | grep -q '"permanentLockout":false'; then ok 'lockout: 15 minutes after 5 failed logins'
+    else bad 'lockout settings differ from 5 failures / 900 s / not permanent'; fi
+    if printf '%s' "$REALM_JSON" | grep -q '"ssoSessionIdleTimeout":900[,}]' \
+        && printf '%s' "$REALM_JSON" | grep -q '"ssoSessionMaxLifespan":36000[,}]'; then ok 'Keycloak sessions: 15 minutes idle, 10 hours max'
+    else bad 'Keycloak sessions differ from 15 minutes idle / 10 hours max'; fi
+    EVENTS_JSON="$(admin_get '/events/config')"
+    if printf '%s' "$EVENTS_JSON" | grep -q '"eventsEnabled":true' \
+        && printf '%s' "$EVENTS_JSON" | grep -q '"adminEventsEnabled":true' \
+        && printf '%s' "$EVENTS_JSON" | grep -q '"LOGIN_ERROR"'; then ok 'event log on: login failures, lockouts and admin changes are kept'
+    else bad 'event log is off (eventsEnabled / adminEventsEnabled / LOGIN_ERROR)'; fi
+    if printf '%s' "$CLIENT" | grep -q '"directAccessGrantsEnabled":true'; then ok 'medlink-bff may exchange a password for tokens (login endpoint)'
+    else bad 'medlink-bff: direct grants are off, the login endpoint cannot work'; fi
+
     # Service account of the API: can manage users, nothing more (least rights).
     ADMIN_CLIENT_ID="$(admin_get '/clients?clientId=medlink-admin' | sed -n 's/^\[{"id":"\([^"]*\)".*/\1/p')"
     if [ -z "$ADMIN_CLIENT_ID" ]; then
