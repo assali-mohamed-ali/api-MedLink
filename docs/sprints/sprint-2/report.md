@@ -7,14 +7,46 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | Sub-sprint | Scope | State | PR | Date |
 |---|---|---|---|---|
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
-| 1 | Registration and email verification (endpoints 1–4) | In review | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
-| 2 | Login and session (endpoints 5–7) | **Next** | — | — |
+| 1 | Registration and email verification (endpoints 1–4) | Done; review fixes in [#39](https://github.com/assali-mohamed-ali/api-MedLink/pull/39) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
+| 2 | Login and session (endpoints 5–7) | **In progress, split** (see below) | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38) | — |
 | 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
 | 4 | Passwords (endpoints 10–11) | To do | — | — |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
-**Next step:** once the sub-sprint 1 PR is merged, start sub-sprint 2 in a new session: read
-`README.md` in this folder, then section 6 "Sub-sprint 2" of `plan.md`.
+### Where we are (handoff, 2026-10-15)
+
+Merged on `master`: sub-sprint 1 (#32), staff-only `/api/users` (#33, MLink-57), GitHub issues
+#28/#29 (#35) and their plan (#34). Issues #27–#31 are closed.
+
+**Open PRs, waiting for the code owner** (merge in this order):
+1. [#37](https://github.com/assali-mohamed-ali/api-MedLink/pull/37): `master` is red on CI (`CsrfEndpointTest`);
+   this fixes it (test only). All checks green.
+2. [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38): realm: lockout 15 min after 5 failures
+   (MLink-66), event log (MLink-67), 15-minute idle (MLink-83), password grant for `medlink-bff` (needed
+   by MLink-55). All checks green. It contains #37's commit too.
+3. [#39](https://github.com/assali-mohamed-ali/api-MedLink/pull/39): the code owner's review on #32: no account
+   enumeration on register (MLink-79), `Patient extends User` (MLink-78), a race fix. Stacked on #38:
+   after #38 merges, change its base to `master` so CI runs fully, then merge.
+- Still open on #32: review comment 2 ("disable instead of delete" for a failed sign-up), waiting for
+  the code owner's answer on the trade-off.
+- Ask the repo admin: make `build-test` a required check in the ruleset; delete merged remote
+  branches and turn on auto-delete.
+
+**Sub-sprint 2 split** (agreed on MLink-55):
+- **Youssef:** MLink-55 login (branch `feat/ss2-login`, in progress), then MLink-54 logout and MLink-86
+  session expiry test. He also removes `oauth2Login`, turns the realm's redirect flow OFF in the same
+  PR, and updates the setup scripts' login check (MLink-65).
+- **Mohamed:** MLink-66, 67, 83 (in #38), MLink-84 cookie hardening (**after MLink-55**: it needs the
+  login to change the session id and the redirect login to be gone).
+- **Ahlem:** React pages, MLink-68 scripted lockout check (attempts more than 1 s apart, see the realm
+  section), MLink-53 `/me`.
+
+**Next tickets for Mohamed** (his own, in this order):
+1. MLink-87 password policy (history + French messages): does not depend on the login. It changes
+   the realm file, so everyone's dev realm is re-imported once.
+2. MLink-84, once MLink-55 is merged.
+3. Sub-sprint 3 (staff code): MLink-62, MLink-63, after MLink-55.
+4. Sub-sprint 4 (passwords): MLink-91, MLink-88, MLink-90, after MLink-55.
 
 ## Where the code stands (start of sprint 2)
 

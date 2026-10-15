@@ -5,10 +5,14 @@ This repository is its Spring Boot API. It is also the only component that talks
 
 ## Start here, every session
 
-1. Read `docs/sprints/sprint-2/README.md`. It says how a session runs and where to look next.
-2. The work to do is in `docs/sprints/sprint-2/plan.md` (design + endpoint contracts) and the
-   progress in `docs/sprints/sprint-2/report.md`. Pick the first sub-sprint not marked done.
+1. **Ask whose tickets you work on** (the YouTrack assignee, e.g. `Mohamed.BenNaima`). Sub-sprints
+   are split between people: you work only on that person's tickets (see "Team rules").
+2. Read the **Status** at the top of `docs/sprints/sprint-2/report.md`: what is merged, which PRs are
+   open, who does what, and the next tickets. Then `docs/sprints/sprint-2/README.md` (how a session
+   runs) and the section of `plan.md` for your ticket (design + endpoint contracts).
 3. Tasks live in YouTrack, project `MLink` (`https://medlink.youtrack.cloud`), sprint `sprint2`.
+   Before touching a shared file, look at the teammates' tickets *In Progress*, their comments, and
+   their branches and PRs on GitHub.
 
 ## Hard rules
 
@@ -18,8 +22,9 @@ This repository is its Spring Boot API. It is also the only component that talks
 - **The browser holds only an HttpOnly session cookie** (+ the readable `XSRF-TOKEN` cookie).
   Keycloak tokens stay in the server session. Every write needs the `X-XSRF-TOKEN` header.
 - **One id per person, and it is Keycloak's.** Create the Keycloak user first; `users.id` is its
-  id (the `sub` claim). Profile tables (`patients`, …) reuse that id as their primary key
-  (`@MapsId`). Never generate a user id. Other entities generate a UUID.
+  id (the `sub` claim). A person holds **one role only**: `Patient extends User` (JPA `JOINED`,
+  `patients.id` = `users.id`, PR #39); a practitioner will be another subclass, never a second
+  profile. Never generate a user id. Other entities generate a UUID.
 - **Roles:** `PATIENT`, `PRACTITIONER`, `ADMINISTRATIVE_STAFF`, given through Keycloak groups.
   Never accept a role or an id from a request body for the caller's own account.
 - **Layers:** controller validates and maps (through `mapper/`); services take and return
@@ -33,7 +38,25 @@ This repository is its Spring Boot API. It is also the only component that talks
   needs the change, and record it in `report.md`.
 - **YouTrack mirrors the work:** a task goes to *In Progress* when work on it starts, *To Verify*
   when its PR opens (with the PR link), *Done* when the PR is merged. One task at a time.
+- **Never reveal whether an account exists** on a public endpoint: same status and body either
+  way (register 201, resend 202, login one message). Tell the real owner by mail instead.
 - Aim: secure, robust, fast, simple to use. Prefer the simplest design that meets the contract.
+
+## Team rules (agreed 2026-10-14)
+
+- **Your tickets only.** Code only tickets assigned to the person you work for. Something on a
+  teammate's ticket (a bug, a gap): comment on their ticket, do not fix it. Exceptions: a red
+  `master` caused by your code, or a change a teammate asks you for on their ticket.
+- **Functional tests first.** Prove behaviour through the real API on a real port, a real Keycloak
+  (same image and realm file), a real database and Mailpit, driven over HTTP like a browser:
+  `src/test/java/.../functional/` (`FunctionalTestBase`). Commit them red, then make them green, and
+  check once that a test fails when the rule it guards is broken. MockMvc or unit tests only for
+  branches a functional test cannot reach on demand (an outage, a race).
+- **Postman stays in step:** `docs/postman/MedLink-sprint2-ss1.postman_collection.json`, run against
+  the dev stack with `npx newman@6.2.1 run <file>` (0 failures) when an endpoint changes.
+- **Coordinate on shared files** (`SecurityConfig`, `AuthBffController`, `FunctionalTestBase`, the
+  realm file, the setup scripts): say on the teammate's ticket which files and methods you change,
+  keep PRs small, and say on their ticket when such a change reaches `master`.
 
 ## Versions (do not downgrade to make code compile)
 
@@ -47,6 +70,19 @@ classes (see README §7). Use only APIs of these versions.
 - Build and all tests: `./mvnw -B verify` — needs JDK 17+ and Docker running (Testcontainers).
   On the lead's Windows machine the default `JAVA_HOME` is JDK 11: point it at a JDK 17 first.
 - Both setup scripts must stay identical in behaviour; `setup-dev.sh` must stay bash 3.2 safe.
+- **Before every PR**, also run the tests in another class order:
+  `./mvnw -B test -Dsurefire.runOrder=reversealphabetical`. CI (Linux) does not run them in the
+  Windows order, and classes with the same annotations share one Spring context.
+
+## Cloud sessions (Claude Code on the web)
+
+- A cloud session starts from a fresh clone: nothing from a local session carries over except
+  what is written in this repository. Read the Status in `report.md` first.
+- The tests need **Docker** (Testcontainers: PostgreSQL, Keycloak, Mailpit). Without it, say so in
+  the PR and in `report.md`; the proof is then CI's `build-test`, which runs fully only on PRs whose
+  base is `master` (a PR stacked on another branch gets the secrets scan only).
+- YouTrack and GitHub must be reachable (connectors / `gh`); without YouTrack, list the ticket moves
+  for a person to do. No production secret is ever needed: dev values come from `compose.yaml`.
 
 ## Git
 
@@ -58,3 +94,5 @@ classes (see README §7). Use only APIs of these versions.
 - One commit per task, message prefixed `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`,
   `test:`; mention the YouTrack id (`MLink-79`) in the body.
 - Open a PR to `master`, fill the template honestly, and update `report.md` in the same PR.
+- `master` is protected (ruleset `mamnou333`): a code-owner review (@assali-mohamed-ali) and CodeQL
+  are required, merge commits only. You cannot merge your own PR; ask for the review.
