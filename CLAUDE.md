@@ -94,5 +94,8 @@ classes (see README §7). Use only APIs of these versions.
 - One commit per task, message prefixed `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`,
   `test:`; mention the YouTrack id (`MLink-79`) in the body.
 - Open a PR to `master`, fill the template honestly, and update `report.md` in the same PR.
+- **No stacked PRs: always base a PR on `master`.** A PR based on another branch merges into that branch;
+  if that branch already reached `master`, the work never arrives (it happened with #39). CI also runs fully
+  only on PRs based on `master`.
 - `master` is protected (ruleset `mamnou333`): a code-owner review (@assali-mohamed-ali) and CodeQL
   are required, merge commits only. You cannot merge your own PR; ask for the review.

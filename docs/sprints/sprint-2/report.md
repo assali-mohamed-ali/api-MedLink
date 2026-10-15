@@ -7,46 +7,44 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | Sub-sprint | Scope | State | PR | Date |
 |---|---|---|---|---|
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
-| 1 | Registration and email verification (endpoints 1–4) | Done; review fixes in [#39](https://github.com/assali-mohamed-ali/api-MedLink/pull/39) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
-| 2 | Login and session (endpoints 5–7) | **In progress, split** (see below) | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38) | — |
+| 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
+| 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
 | 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
 | 4 | Passwords (endpoints 10–11) | To do | — | — |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
-### Where we are (handoff, 2026-10-15)
+### Where we are (handoff, 2026-10-16)
 
-Merged on `master`: sub-sprint 1 (#32), staff-only `/api/users` (#33, MLink-57), GitHub issues
-#28/#29 (#35) and their plan (#34). Issues #27–#31 are closed.
+Merged on `master`: sub-sprint 1 (#32), staff-only `/api/users` (#33, MLink-57), GitHub issues #28/#29
+(#35, #34), CI fix (#37), realm: lockout, event log, 15-minute idle, password grant (#38: MLink-66, 67, 83),
+handoff docs (#40), **login through the API (#41: MLink-55, MLink-65 part)**, Swagger CSRF header (#42).
+Issues #27–#31 are closed.
 
-**Open PRs, waiting for the code owner** (merge in this order):
-1. [#37](https://github.com/assali-mohamed-ali/api-MedLink/pull/37): `master` is red on CI (`CsrfEndpointTest`);
-   this fixes it (test only). All checks green.
-2. [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38): realm: lockout 15 min after 5 failures
-   (MLink-66), event log (MLink-67), 15-minute idle (MLink-83), password grant for `medlink-bff` (needed
-   by MLink-55). All checks green. It contains #37's commit too.
-3. [#39](https://github.com/assali-mohamed-ali/api-MedLink/pull/39): the code owner's review on #32: no account
-   enumeration on register (MLink-79), `Patient extends User` (MLink-78), a race fix. Stacked on #38:
-   after #38 merges, change its base to `master` so CI runs fully, then merge.
-- Still open on #32: review comment 2 ("disable instead of delete" for a failed sign-up), waiting for
-  the code owner's answer on the trade-off.
-- Ask the repo admin: make `build-test` a required check in the ruleset; delete merged remote
-  branches and turn on auto-delete.
+**PR #39 did not reach `master`:** it was stacked on #38's branch and merged into it after #38 had gone to
+`master`. It is landed by the PR `fix/land-pr-39` (code owner's review on #32: no account enumeration on
+register, MLink-79; `Patient extends User`, MLink-78; the provisioning race fix; Mailpit functional tests;
+Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
+
+- Still open on #32: review comment 2 ("disable instead of delete" for a failed sign-up), waiting for the
+  code owner's answer on the trade-off.
+- Ask the repo admin: make `build-test` a required check in the ruleset; delete merged remote branches and
+  turn on auto-delete.
 
 **Sub-sprint 2 split** (agreed on MLink-55):
-- **Youssef:** MLink-55 login (branch `feat/ss2-login`, in progress), then MLink-54 logout and MLink-86
-  session expiry test. He also removes `oauth2Login`, turns the realm's redirect flow OFF in the same
-  PR, and updates the setup scripts' login check (MLink-65).
-- **Mohamed:** MLink-66, 67, 83 (in #38), MLink-84 cookie hardening (**after MLink-55**: it needs the
-  login to change the session id and the redirect login to be gone).
+- **Youssef:** MLink-55 done (#41). In progress: MLink-54 logout, MLink-65 (setup scripts' login check).
+  Then MLink-86 session expiry test.
+- **Mohamed:** MLink-66, 67, 83 done (#38). MLink-78, 79 in review (landing PR). MLink-84 cookie hardening
+  is unblocked now that the redirect login is gone; it touches the session config next to Youssef's
+  MLink-54, so say on MLink-54 which files change before starting.
 - **Ahlem:** React pages, MLink-68 scripted lockout check (attempts more than 1 s apart, see the realm
   section), MLink-53 `/me`.
 
 **Next tickets for Mohamed** (his own, in this order):
-1. MLink-87 password policy (history + French messages): does not depend on the login. It changes
-   the realm file, so everyone's dev realm is re-imported once.
-2. MLink-84, once MLink-55 is merged.
-3. Sub-sprint 3 (staff code): MLink-62, MLink-63, after MLink-55.
-4. Sub-sprint 4 (passwords): MLink-91, MLink-88, MLink-90, after MLink-55.
+1. MLink-87 password policy (history + French messages). It changes the realm file, so everyone's dev
+   realm is re-imported once.
+2. MLink-84 cookie hardening (coordinate with MLink-54).
+3. Sub-sprint 3 (staff code): MLink-62, MLink-63.
+4. Sub-sprint 4 (passwords): MLink-91, MLink-88, MLink-90.
 
 ## Where the code stands (start of sprint 2)
 
@@ -96,6 +94,32 @@ Merged on `master`: sub-sprint 1 (#32), staff-only `/api/users` (#33, MLink-57),
 - The realm checks "redirect URI" and "PKCE S256 enforced" still pass but no longer mean anything
   (standard flow is off): to remove with Mohamed, with `redirectUris`/PKCE in the realm file.
 - `setup-dev.sh` was not run as a whole (Windows); its login block was.
+
+## Code owner's review on #32 — fixes (2026-10-14)
+
+**Built** (branch `fix/MLink-79-78-review`):
+- **No account enumeration (MLink-79):** register answers 201 with the same message whether or not the email is
+  taken; a taken email (in our database or only in Keycloak) creates nothing and the owner gets a French warning
+  mail, at most one per address per 15 minutes (`MailThrottle`, `app.mail.warning-interval`). `EmailTakenException`
+  is internal, no longer an `ApiException`. The contract in plan.md §2 and §4 is updated.
+- **A patient is a user (MLink-78):** `Patient extends User`, JPA `JOINED` inheritance; same tables, no migration.
+- **Race fixed** in `UserProvisioningService` (#29 code): a first login racing with itself no longer reads as an
+  email conflict (found by the suite in CI's order under load).
+- **Functional tests get a mail server:** Mailpit next to Keycloak; `SignupFunctionalTest` proves sign-up → mail →
+  link → `emailVerified` in Keycloak (the answer to review comment 3, no code change needed).
+- Postman collection updated: the three former 409 requests now expect the normal 201; folder 2 checks one
+  verification mail and one warning.
+
+**Review comments:** 1 (enumeration) and 4 (extend User) agreed and done; 3 (verify for real) answered with the
+proof; 2 (disable instead of delete for a failed sign-up) waits for the code owner's answer on the trade-off.
+
+**Proof:** functional tests red first (33d5f6e), then green; mutation check: without the throttle, 3 retries send 3
+warnings. `./mvnw test`: **102 tests, 0 failures** in both class orders. Setup script: 0 failures. Newman: 147
+assertions, 0 failures.
+
+**Limits:** the throttle is in memory (one API instance). A taken email answers a little faster than a new one
+(no Keycloak call): a timing difference, not an answer difference; per-IP rate limits at the proxy (decision page
+Q8) blunt it.
 
 ## Sub-sprint 2 — realm: lockout, event log, idle timeout, password grant (2026-10-14)
 
@@ -271,6 +295,8 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 | 2026-10-15 | Keep only `PATIENT`, `PRACTITIONER`, `ADMINISTRATIVE_STAFF` from the `roles` claim | Keycloak adds built-in roles that mean nothing to MedLink | Every claimed role as `ROLE_*` (the old `KeycloakRolesMapper`) |
 | 2026-10-15 | An unverified login ends the Keycloak session it opened | Keycloak accepts unverified emails; no session anywhere for a refused login | Leaving it to expire |
 | 2026-10-15 | Setup scripts: wrong password first, then the right one | A successful login resets Keycloak's failure count, so repeated runs never lock `patient.dev` | Only the right password; the right one first |
+| 2026-10-14 | Register never reveals a taken email: same 201, the owner is warned by mail (one per 15 min) | Code owner's review: never expose users' data; a stranger cannot test which emails have an account | 409 `EMAIL_TAKEN` (the story's original wording) |
+| 2026-10-14 | `Patient extends User` (JPA JOINED), same tables | Code owner's review; the lead confirmed a person holds one role only | A patient *has* a user (`@MapsId`), kept for "one login, several profiles", which will not happen |
 | 2026-10-14 | #28 and #29 fixed now on the redirect login, through pieces sub-sprint 2 reuses (provisioning service, tokens as an `OAuth2AuthorizedClient` in the session) | Open security issues; the reusable parts are most of the work | Waiting for sub-sprint 2; a background sync from Keycloak |
 | 2026-10-14 | Session validity by token renewal: a refused renewal ends the session | No extra call while the token is fresh; Keycloak decides (disabled, signed out, reset, SSO over) | Calling Keycloak on every request; a status column of our own |
 | 2026-10-14 | Functional tests against a real Keycloak container for login-related work | Asked by the team: prove the behaviour end to end, not a mock | Mocked Keycloak only |
@@ -288,7 +314,7 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 | 2026-10-14 | Staff code (TOTP) handled by the API, secret encrypted | Keycloak cannot enrol a code without its own page | Keycloak OTP flow |
 | 2026-10-14 | User row created in the same request as the Keycloak user; first-login creation only as a fallback for users made outside the API | The app knows every user at once | Waiting for first login |
 | 2026-10-14 | Each sub-sprint runs in a fresh session; these files are the handoff | Keep sessions short and focused | One long session |
-| 2026-10-13 | `users.id` is the Keycloak id; `patients.id` = `users.id` (`@MapsId`, a patient *has* a user) | One id per person; one login may hold several profiles later | Our own generated id + `keycloak_id` column; JPA inheritance |
+| 2026-10-13 | `users.id` is the Keycloak id; `patients.id` = `users.id` (a patient *has* a user, `@MapsId`). **Replaced 2026-10-14**, see above | One id per person | Our own generated id + `keycloak_id` column |
 | 2026-10-13 | `users` keeps `id`, `username`, `email`, `created_at` | Asked by the lead | Dropping `username` |
 | 2026-10-13 | Controller maps entities to DTOs through `mapper/`; services never see a DTO | Review feedback on PR #22 | Mapping inside services |
 | 2026-10-11 | Roles and names follow the class diagram; ids are UUIDs | One vocabulary across diagram, code and report | `ADMIN` / `DOCTOR`, numeric ids |

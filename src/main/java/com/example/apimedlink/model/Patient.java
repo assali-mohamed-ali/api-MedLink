@@ -2,39 +2,25 @@ package com.example.apimedlink.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.FetchType;
-import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.MapsId;
-import jakarta.persistence.OneToOne;
-import jakarta.persistence.PrePersist;
+import jakarta.persistence.PrimaryKeyJoinColumn;
 import jakarta.persistence.Table;
-import java.time.Instant;
 import java.time.LocalDate;
-import java.util.UUID;
-import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 /**
- * A patient HAS a user (it does not extend it), so one login can also get another profile later.
- * Its id is the user's id ({@code @MapsId}): never set it, set {@link #user}.
+ * A patient is a user with a medical profile (and only a patient: a person never holds two
+ * roles). Same id as its {@code users} row, the Keycloak id: {@code patients.id} references
+ * {@code users.id}. Saving a patient writes both rows.
  */
 @Entity
 @Table(name = "patients")
+@PrimaryKeyJoinColumn(name = "id")
 @Getter
 @Setter
 @NoArgsConstructor
-public class Patient {
-
-    @Id
-    private UUID id;
-
-    @MapsId
-    @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "id")
-    private User user;
+public class Patient extends User {
 
     @Column(nullable = false, length = 100)
     private String firstName;
@@ -51,23 +37,12 @@ public class Patient {
     @Column(length = 255)
     private String address;
 
-    @Column(nullable = false, updatable = false)
-    private Instant createdAt;
-
-    @Builder
-    public Patient(User user, String firstName, String lastName, LocalDate birthDate, String phone, String address) {
-        this.user = user;
+    /** The profile of a sign-up; id, username and email are set once Keycloak has the account. */
+    public Patient(String firstName, String lastName, LocalDate birthDate, String phone, String address) {
         this.firstName = firstName;
         this.lastName = lastName;
         this.birthDate = birthDate;
         this.phone = phone;
         this.address = address;
-    }
-
-    @PrePersist
-    void onCreate() {
-        if (createdAt == null) {
-            createdAt = Instant.now();
-        }
     }
 }
