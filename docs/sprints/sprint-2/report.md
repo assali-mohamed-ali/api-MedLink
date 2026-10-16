@@ -57,6 +57,22 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## MLink-86 — session expiry (2026-10-16, epic/MLink-6)
+
+**Built:** the "not logged in" answer is our JSON error: 401 `{code: "UNAUTHENTICATED"}` for no session,
+an unknown or ended session id, and a session Tomcat expired after 15 idle minutes
+(`security/JsonAuthenticationEntryPoint`, one line in `config/SecurityConfig`). It was an empty 401.
+React shows its login page on it (MLink-85); `SESSION_EXPIRED` stays the answer when Keycloak ends an
+open session (#28).
+
+**Proof:** `SessionExpiryFunctionalTest` (real Keycloak), committed red first (3e36d1c): the session the
+login opens has `maxInactiveInterval` 900 s (read from Tomcat); a session expired the way Tomcat does
+after 15 idle minutes (`session.expire()`), an unknown session id and a session ended by logout all get
+401 JSON, never a redirect. No real 15-minute wait, and no shorter timeout in the test: all functional
+tests share one Spring context on a fixed port, and Tomcat sweeps expired sessions once a minute.
+Mutation check: the old empty 401 turns the 3 JSON tests red.
+`./mvnw -B clean test -Dsurefire.runOrder=reversealphabetical`: **126 tests, 0 failures**.
+
 ## MLink-54 — logout (2026-10-16, epic/MLink-6)
 
 **Built:** `POST /api/auth/logout` (endpoint 7): `controller/LogoutController` → `security/LoginSessions.close`
@@ -308,6 +324,8 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-16 | Not logged in → 401 JSON `UNAUTHENTICATED` (our error body), never an empty 401 or a redirect | React needs a code to show its login page; same body shape everywhere | Spring's empty 401 (`HttpStatusEntryPoint`) |
+| 2026-10-16 | Session expiry tested by expiring the real Tomcat session, not by a short timeout | One shared Spring context on a fixed port; Tomcat sweeps expired sessions once a minute | Overriding `server.servlet.session.timeout` to 1 minute in the test |
 | 2026-10-16 | A locked account answers 401 `INVALID_CREDENTIALS`, identical to a wrong password; the message mentions a possible lock | A 423 tells anyone whether an email has an account (Keycloak never locks an unknown one); decided on MLink-55 | 423 `ACCOUNT_LOCKED` |
 | 2026-10-15 | Login: a separate `LoginController` at `/api/auth` | No conflict with the sign-up changes in `AuthBffController` (#39) | Adding the endpoint to `AuthBffController` |
 | 2026-10-15 | Keep only `PATIENT`, `PRACTITIONER`, `ADMINISTRATIVE_STAFF` from the `roles` claim | Keycloak adds built-in roles that mean nothing to MedLink | Every claimed role as `ROLE_*` (the old `KeycloakRolesMapper`) |

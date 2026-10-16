@@ -1,18 +1,17 @@
 package com.example.apimedlink.config;
 
+import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
 import com.example.apimedlink.security.SessionValidityFilter;
 import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
-import org.springframework.http.HttpStatus;
 import org.springframework.security.config.Customizer;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.oauth2.client.OAuth2AuthorizedClientManager;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
-import org.springframework.security.web.authentication.HttpStatusEntryPoint;
 import org.springframework.security.web.csrf.CookieCsrfTokenRepository;
 import tools.jackson.databind.json.JsonMapper;
 
@@ -61,9 +60,8 @@ public class SecurityConfig {
                         .authenticated())
                 // Every logged-in call checks Keycloak still accepts the account (GitHub #28)
                 .addFilterBefore(new SessionValidityFilter(authorizedClients, json), AuthorizationFilter.class)
-                // Not logged in: 401 everywhere (there is no login page to redirect to any more)
-                .exceptionHandling(ex -> ex.authenticationEntryPoint(
-                        new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED)));
+                // Not logged in (no session, unknown, ended or expired): 401 with our JSON error, never a redirect
+                .exceptionHandling(ex -> ex.authenticationEntryPoint(new JsonAuthenticationEntryPoint(json)));
         return http.build();
     }
 }
