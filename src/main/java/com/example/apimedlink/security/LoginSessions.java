@@ -4,7 +4,12 @@ import com.example.apimedlink.service.KeycloakTokens;
 import com.example.apimedlink.service.Login;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import java.util.List;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.ResponseCookie;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContext;
@@ -40,10 +45,14 @@ public class LoginSessions {
     private final OAuth2AuthorizedClientRepository authorizedClients;
     private final SecurityContextRepository contexts = new HttpSessionSecurityContextRepository();
     private final SecurityContextHolderStrategy holder = SecurityContextHolder.getContextHolderStrategy();
+    private final String sessionCookieName;
 
-    public LoginSessions(ClientRegistrationRepository registrations, OAuth2AuthorizedClientRepository authorizedClients) {
+    public LoginSessions(ClientRegistrationRepository registrations,
+                         OAuth2AuthorizedClientRepository authorizedClients,
+                         @Value("${server.servlet.session.cookie.name:JSESSIONID}") String sessionCookieName) {
         this.registrations = registrations;
         this.authorizedClients = authorizedClients;
+        this.sessionCookieName = sessionCookieName;
     }
 
     public void open(Login login, HttpServletRequest request, HttpServletResponse response) {
@@ -75,5 +84,33 @@ public class LoginSessions {
                                 access.getTokenValue(), access.getIssuedAt(), access.getExpiresAt()),
                         new OAuth2RefreshToken(tokens.refreshToken(), access.getIssuedAt(), tokens.refreshExpiresAt())),
                 authentication, request, response);
+    }
+
+    /**
+     * Ends the caller's session (MLink-54): our session is invalidated, the security context
+     * cleared and the browser told to drop the session cookie. Returns the refresh token kept at
+     * login, so Keycloak's session can be ended too; null when there is none.
+     */
+    public String close(HttpServletRequest request, HttpServletResponse response) {
+        String refreshToken = null;
+        Authentication authentication = holder.getContext().getAuthentication();
+        if (authentication instanceof OAuth2AuthenticationToken login) {
+            OAuth2AuthorizedClient client = authorizedClients.loadAuthorizedClient(REGISTRATION, login, request);
+            if (client != null && client.getRefreshToken() != null) {
+                refreshToken = client.getRefreshToken().getTokenValue();
+            }
+        }
+        HttpSession session = request.getSession(false);
+        if (session != null) {
+            session.invalidate();
+        }
+        holder.clearContext();
+        response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from(sessionCookieName, "")
+                .path("/")
+                .maxAge(0)
+                .httpOnly(true)
+                .build()
+                .toString());
+        return refreshToken;
     }
 }
