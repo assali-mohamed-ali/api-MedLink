@@ -59,6 +59,13 @@ public class LoginService {
         }
     }
 
+    /**
+     * Ends the Keycloak session of a logged-out user. Best effort: a Keycloak failure is only logged.
+     */
+    public void logout(String refreshToken) {
+        keycloak.endSession(refreshToken);
+    }
+
     /** Only MedLink's roles; Keycloak's built-in ones (offline_access, default-roles-...) are dropped. */
     private static List<String> ourRoles(Jwt token) {
         List<String> claimed = token.getClaimAsStringList("roles");

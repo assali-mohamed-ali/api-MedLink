@@ -124,6 +124,10 @@ public abstract class FunctionalTestBase {
             call("/api/auth/csrf");
             return post("/api/auth/login", "{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}", true);
         }
+        /** Logs out as React does: a POST with the CSRF header, no body. */
+        HttpResponse<String> logout() throws Exception {
+            return post("/api/auth/logout", "", true);
+        }
 
         /** A JSON post; {@code withCsrf} echoes the XSRF-TOKEN cookie in the X-XSRF-TOKEN header. */
         HttpResponse<String> post(String path, String json, boolean withCsrf) throws Exception {
