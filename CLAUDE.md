@@ -3,6 +3,25 @@
 MedLink is a health portal (patients, practitioners, administrative staff, three clinics).
 This repository is its Spring Boot API. It is also the only component that talks to Keycloak.
 
+## Mandatory AI Contribution Disclosure
+
+Any AI agent working on this repository MUST follow these rules:
+
+1. **Disclose AI usage:** If you generate, modify, refactor, or materially influence any code, tests, configuration, documentation, or other files in a change, you MUST disclose AI assistance in the associated Pull Request.
+2. **Update the PR description:** Ensure the PR description contains the following checklist item and that it is checked when AI assistance was used:
+
+   `- [x] J'ai utilisé des outils d'IA générative pour contribuer à cette PR.`
+
+3. **Human review:** Include the following item and do not mark it as completed on behalf of the human contributor:
+
+   `- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.`
+
+4. **No false declarations:** Never claim that tests passed, security checks were completed, or a human reviewed the code unless this has actually been confirmed.
+5. **Before finishing:** Verify that the PR description accurately discloses AI assistance. If you cannot edit the PR description directly, explicitly tell the user that they must update it before requesting review.
+6. **No exceptions for small changes:** This rule applies to bug fixes, dependency updates, refactoring, tests, documentation, security fixes, and configuration changes.
+
+These requirements are mandatory repository contribution rules, not optional recommendations.
+
 ## Start here, every session
 
 1. **Ask whose tickets you work on** (the YouTrack assignee, e.g. `Mohamed.BenNaima`). Sub-sprints
