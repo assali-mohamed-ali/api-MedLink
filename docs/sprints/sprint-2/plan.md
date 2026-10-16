@@ -51,7 +51,7 @@ Stories (YouTrack project `MLink`, sprint `sprint2`):
 
 **Login (sub-sprints 2–4)**
 1. React `POST /api/auth/login {email, password}` → API → Keycloak token endpoint (password grant).
-2. Keycloak refuses → 401 (wrong credentials), 423 (locked), 403 `ACCOUNT_DISABLED`, or the
+2. Keycloak refuses → 401 (wrong credentials or locked, same answer), 403 `ACCOUNT_DISABLED`, or the
    "account not fully set up" answer → `passwordChangeRequired` (sub-sprint 4).
 3. Keycloak accepts → API checks the tokens (signature through JWKS, issuer, issued for
    `medlink-bff`) and reads `sub`, email, names, `email_verified`, `roles`; only our three roles are
@@ -151,9 +151,8 @@ one is mailed. At most one mail per minute per account.
 - **200** `{ "user": {…} }` + session cookie (patient, or staff after the code step)
 - **200** `{ "mfaRequired": true, "mfaSetupRequired": true|false }` — practitioner or staff (sub-sprint 3)
 - **200** `{ "passwordChangeRequired": true }` — forced change pending (sub-sprint 4)
-- **401** `INVALID_CREDENTIALS` "E-mail ou mot de passe incorrect." (same for unknown email)
+- **401** `INVALID_CREDENTIALS` "E-mail ou mot de passe incorrect, ou compte temporairement verrouillé." (same for an unknown email and a locked account)
 - **403** `EMAIL_NOT_VERIFIED` (React offers endpoint 4) · `ACCOUNT_DISABLED`
-- **423** `ACCOUNT_LOCKED` "Compte verrouillé pendant 15 minutes."
 - **503** `IDENTITY_UNAVAILABLE`
 How Keycloak 26.7.5 answers the password grant (checked on the dev stack, 2026-10-15):
 
@@ -164,7 +163,7 @@ How Keycloak 26.7.5 answers the password grant (checked on the dev stack, 2026-1
 | Email not verified, right password | **200, accepted** (`email_verified: false`) | 403 `EMAIL_NOT_VERIFIED`; the Keycloak session is ended |
 | Disabled, right password | 400 "Account disabled" | 403 `ACCOUNT_DISABLED` |
 | Disabled, wrong password | 400 "Invalid user credentials" | 401: only the password's owner learns the account is disabled |
-| Locked (right or wrong password) | 400 "Invalid user credentials" | 401 today. 423 needs `attack-detection` (readable by `medlink-admin`), but would tell anyone that the email has an account: **decision pending on MLink-55** |
+| Locked (right or wrong password) | 400 "Invalid user credentials" | 401, identical to a wrong password (decided on MLink-55, 2026-10-16): a 423 would tell anyone that the email has an account |
 | Keycloak down, 5xx, or the API refused as a client | — | 503 `IDENTITY_UNAVAILABLE` |
 
 The session keeps the tokens as an `OAuth2AuthorizedClient`: `SessionValidityFilter` renews the
@@ -253,7 +252,7 @@ Endpoints 5 (patient path), 6, 7. Replace `oauth2Login`; roles from the token cl
 refresh (§3, GitHub #28: MLink-83, tests in MLink-86); `users` row ensured at first login for
 users created outside the API (§3, GitHub #29: MLink-55). Tasks: MLink-55, 53, 54, 58, 66, 67, 68, 83, 84, 86, 65 (login check
 in the setup scripts). React: MLink-52 (login page), 56, 85.
-Exit: patient logs in and out; unverified → 403; 5 wrong passwords → 423; idle session → 401;
+Exit: patient logs in and out; unverified → 403; 5 wrong passwords → locked: 401 like a wrong password, the right password included; idle session → 401;
 a user disabled in the Keycloak console is refused at the next token refresh (≤ 5 min); a user
 created in the console gets exactly one `users` row at first login.
 

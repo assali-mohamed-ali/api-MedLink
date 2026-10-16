@@ -157,7 +157,10 @@ public class KeycloakLoginClient {
                         "Ce compte est désactivé. Contactez l'administration.");
             }
             // Sub-sprint 4 (forced password change) adds Keycloak's "account not fully set up" here.
-            return new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", "E-mail ou mot de passe incorrect.");
+            // A locked account answers exactly like a wrong password: a 423 would tell anyone that the
+            // email has an account (Keycloak never locks an unknown email). Decided on MLink-55.
+            return new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS",
+                    "E-mail ou mot de passe incorrect, ou compte temporairement verrouillé.");
         }
         // invalid_client, unauthorized_client...: our configuration is wrong, not the user's input
         log.error("Keycloak refused the API as a client ({})", error == null ? "no body" : error.error());

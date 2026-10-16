@@ -70,9 +70,33 @@ class LoginFunctionalTest extends FunctionalTestBase {
 
         assertThat(wrongPassword.statusCode()).isEqualTo(401);
         assertThat(wrongPassword.body())
-                .contains("\"code\":\"INVALID_CREDENTIALS\"", "E-mail ou mot de passe incorrect.");
+                .contains("\"code\":\"INVALID_CREDENTIALS\"",
+                        "E-mail ou mot de passe incorrect, ou compte temporairement verrouillé.");
         assertThat(unknownEmail.statusCode()).isEqualTo(401);
         assertThat(withoutTimestamp(unknownEmail.body())).isEqualTo(withoutTimestamp(wrongPassword.body()));
+        assertThat(browser.call("/api/users/_health").statusCode()).as("no session").isEqualTo(401);
+    }
+
+        @Test
+    void aLockedAccountGetsTheSameAnswerAsAWrongPassword() throws Exception {
+        String email = uniqueEmail("login-locked");
+        UUID id = console.createUser(email, PASSWORD);
+        HttpResponse<String> wrongPassword = null;
+        for (int attempt = 1; attempt <= 5; attempt++) {
+            // A person's pace: faster than one try per second, Keycloak's quick-login guard locks sooner
+            Thread.sleep(1_200);
+            wrongPassword = new Browser().apiLogin(email, "Wrong-Pass-" + attempt + "!");
+        }
+        assertThat(console.lockout(id).get("disabled")).as("locked after 5 wrong passwords").isEqualTo(true);
+        Browser browser = new Browser();
+
+        HttpResponse<String> rightPasswordWhileLocked = browser.apiLogin(email, PASSWORD);
+
+        assertThat(rightPasswordWhileLocked.statusCode()).isEqualTo(401);
+        assertThat(withoutTimestamp(rightPasswordWhileLocked.body()))
+                .as("a locked account must look exactly like a wrong password (decided on MLink-55)")
+                .isEqualTo(withoutTimestamp(wrongPassword.body()));
+        assertThat(rightPasswordWhileLocked.body()).contains("compte temporairement verrouillé");
         assertThat(browser.call("/api/users/_health").statusCode()).as("no session").isEqualTo(401);
     }
 

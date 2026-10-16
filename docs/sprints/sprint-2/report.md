@@ -87,8 +87,8 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 - Keycloak refuses the old redirect for `medlink-bff` ("Standard flow is disabled for the client").
 
 **Limits**
-- Locked account answers 401 like a wrong password: 423 is a pending decision (see plan.md §4,
-  endpoint 5). `attack-detection` works with `medlink-admin` if 423 is kept.
+- Locked account: 401 like a wrong password, decided on MLink-55 (2026-10-16); proved by
+  `aLockedAccountGetsTheSameAnswerAsAWrongPassword`.
 - Practitioner and staff get a session at login for now: the code step (`mfaRequired`) is sub-sprint 3.
 - The setup scripts check the session with `/api/users/_health`: `/api/auth/me` (MLink-53) is not built yet.
 - The realm checks "redirect URI" and "PKCE S256 enforced" still pass but no longer mean anything
@@ -291,6 +291,7 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-16 | A locked account answers 401 `INVALID_CREDENTIALS`, identical to a wrong password; the message mentions a possible lock | A 423 tells anyone whether an email has an account (Keycloak never locks an unknown one); decided on MLink-55 | 423 `ACCOUNT_LOCKED` |
 | 2026-10-15 | Login: a separate `LoginController` at `/api/auth` | No conflict with the sign-up changes in `AuthBffController` (#39) | Adding the endpoint to `AuthBffController` |
 | 2026-10-15 | Keep only `PATIENT`, `PRACTITIONER`, `ADMINISTRATIVE_STAFF` from the `roles` claim | Keycloak adds built-in roles that mean nothing to MedLink | Every claimed role as `ROLE_*` (the old `KeycloakRolesMapper`) |
 | 2026-10-15 | An unverified login ends the Keycloak session it opened | Keycloak accepts unverified emails; no session anywhere for a refused login | Leaving it to expire |
