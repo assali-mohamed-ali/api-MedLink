@@ -9,6 +9,11 @@
 - [ ] chore/docs/refacto
 - [ ] security fix
 
+## Utilisation de l'IA
+
+- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR.
+- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.
+
 ## Checklist DevSecOps
 
 - [ ] Tests unitaires/intégration ajoutés ou mis à jour (`./mvnw verify` OK en local)
