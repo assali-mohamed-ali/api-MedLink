@@ -57,6 +57,23 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## MLink-54 — logout (2026-10-16, epic/MLink-6)
+
+**Built:** `POST /api/auth/logout` (endpoint 7): `controller/LogoutController` → `security/LoginSessions.close`
+(reads the refresh token kept at login, invalidates the session, clears the security context, sends
+`JSESSIONID` with `Max-Age=0`) → `LoginService.logout` → `KeycloakLoginClient.endSession` (best effort: a
+Keycloak failure is only logged, the answer is still 204). No change to `SecurityConfig`: the endpoint
+needs a session (401 without) and the CSRF header (403 without) like every write.
+
+**Proof:** `LogoutFunctionalTest` (real Keycloak), committed red first (142e9b0): 204 then the session no
+longer works; no Keycloak session left; session cookie expired; no CSRF header → 403 and the session
+survives; no session → 401. Mutation checks: skipping the Keycloak logout, or the expired cookie, turns a
+test red. "Keycloak down → still 204": `KeycloakLoginClientTest.aFailedLogoutIsOnlyLogged`.
+`./mvnw -B clean test -Dsurefire.runOrder=reversealphabetical`: **122 tests, 0 failures**.
+
+**Limits:** the tests check the session with `/api/users/_health`: `/api/auth/me` (MLink-53) is not built yet.
+The Postman collection does not cover login and logout yet.
+
 ## MLink-55 — login through the API, and MLink-65 (sub-sprint 2 part) (2026-10-15)
 
 **Built** (branch `feat/ss2-login`, on top of #38):
