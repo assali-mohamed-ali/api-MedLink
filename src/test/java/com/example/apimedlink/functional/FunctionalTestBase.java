@@ -172,6 +172,11 @@ public abstract class FunctionalTestBase {
             return cookies.get(name);
         }
 
+        /** Puts a cookie in the jar by hand, as if the server had set it (e.g. an old session id). */
+        void set(String name, String value) {
+            cookies.put(name, value);
+        }
+
         @Override
         public Map<String, List<String>> get(URI uri, Map<String, List<String>> requestHeaders) {
             if (cookies.isEmpty()) {
