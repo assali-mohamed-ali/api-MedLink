@@ -2,6 +2,7 @@ package com.example.apimedlink.controller;
 
 import com.example.apimedlink.dto.UserDto;
 import com.example.apimedlink.mapper.UserMapper;
+import com.example.apimedlink.security.OwnershipGuard;
 import com.example.apimedlink.service.UserService;
 import java.util.List;
 import java.util.Map;
@@ -21,9 +22,11 @@ import org.springframework.security.access.prepost.PreAuthorize;
 public class UserController {
 
     private final UserService service;
+    private final OwnershipGuard ownership;
 
-    public UserController(UserService service) {
+    public UserController(UserService service, OwnershipGuard ownership) {
         this.service = service;
+        this.ownership = ownership;
     }
 
     @GetMapping
@@ -34,6 +37,7 @@ public class UserController {
 
     @GetMapping("/{id}")
     public UserDto get(@PathVariable UUID id) {
+        ownership.check(id); // before the lookup: a stranger gets 403 whether the id exists or not
         return UserMapper.toDto(service.findById(id));
     }
 

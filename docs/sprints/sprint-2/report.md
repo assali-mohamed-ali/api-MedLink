@@ -57,6 +57,28 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## MLink-58 — current user and ownership check (2026-10-17, epic/MLink-6)
+
+**Built:** `security/CurrentUser` (the caller's id is the Keycloak id the login saved in the session, =
+`users.id`; their row; their roles) and `security/OwnershipGuard.check(ownerId)` (owner or
+`ADMINISTRATIVE_STAFF` pass, anyone else gets an `AccessDeniedException`). `GET /api/users/{id}` checks
+**before** reading, so a stranger gets the same 403 whether the id exists or not; staff get 404 for an
+unknown id. Every refusal is 403 `{code: "FORBIDDEN"}` in our error body, from one place:
+`security/JsonAccessDeniedHandler`, wired in `config/SecurityConfig`. It answers refusals before any
+controller (a write without the CSRF header) and inside them (`@PreAuthorize`, `OwnershipGuard`), which
+used to get Spring Boot's error body without a `code`.
+
+**Proof:** `OwnershipFunctionalTest` (real Keycloak), committed red first (ab8b553): a patient reads their
+own record (200) but not another user's (403, nothing of theirs in the body); same 403 for an unknown id;
+staff read any record and get 404 for an unknown one; a role refusal and a missing CSRF header are 403 JSON
+`FORBIDDEN`. Mutation checks: without the ownership check, or without the JSON handler, a test turns red.
+A second handler in `GlobalExceptionHandler` survived its mutation check (refusals inside controllers
+reach the security handler anyway), so it was removed. `./mvnw -B clean test
+-Dsurefire.runOrder=reversealphabetical`: **132 tests, 0 failures**.
+
+**Limits:** "un praticien n'accède qu'aux patients qui lui sont rattachés" is not in this task (no link
+yet; records work). Refusals are not audited yet (MLink-59).
+
 ## MLink-86 — session expiry (2026-10-16, epic/MLink-6)
 
 **Built:** the "not logged in" answer is our JSON error: 401 `{code: "UNAUTHENTICATED"}` for no session,
@@ -324,6 +346,8 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-17 | Ownership is checked before the data is read: a non-owner gets 403 whether the id exists or not; only staff get 404 | A 404 next to a 403 tells anyone which ids exist | Reading first (404 for unknown ids to everyone) |
+| 2026-10-17 | One JSON access-denied handler for every 403 (`JsonAccessDeniedHandler`), none in `GlobalExceptionHandler` | Refusals inside controllers reach the security handler anyway; one place for the message; a second handler survived its mutation check | A handler in both places (as the ticket said) |
 | 2026-10-16 | Not logged in → 401 JSON `UNAUTHENTICATED` (our error body), never an empty 401 or a redirect | React needs a code to show its login page; same body shape everywhere | Spring's empty 401 (`HttpStatusEntryPoint`) |
 | 2026-10-16 | Session expiry tested by expiring the real Tomcat session, not by a short timeout | One shared Spring context on a fixed port; Tomcat sweeps expired sessions once a minute | Overriding `server.servlet.session.timeout` to 1 minute in the test |
 | 2026-10-16 | A locked account answers 401 `INVALID_CREDENTIALS`, identical to a wrong password; the message mentions a possible lock | A 423 tells anyone whether an email has an account (Keycloak never locks an unknown one); decided on MLink-55 | 423 `ACCOUNT_LOCKED` |
