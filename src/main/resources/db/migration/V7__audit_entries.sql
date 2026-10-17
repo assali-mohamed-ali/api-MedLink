@@ -1,5 +1,9 @@
 -- MLink-59: the audit trail (AuditEntry in the class diagram). Append-only: the application inserts
--- and reads, it never changes or deletes a row (MLink-17), and the database enforces it (triggers below).
+-- and reads, it never changes or deletes a row (MLink-17). The triggers below reject UPDATE, DELETE and
+-- TRUNCATE from any role, so ordinary SQL cannot rewrite the trail. They do not stop the table's owner
+-- from dropping or disabling them: today the owner is also the application's runtime role (Flyway runs
+-- as it). Protecting the trail from a compromised application role needs separate roles (an owner for
+-- migrations, a runtime role with INSERT and SELECT only): tracked on GitHub, see report.md (MLink-59).
 CREATE TABLE audit_entries (
     id            UUID         PRIMARY KEY,
     timestamp     TIMESTAMPTZ  NOT NULL,
