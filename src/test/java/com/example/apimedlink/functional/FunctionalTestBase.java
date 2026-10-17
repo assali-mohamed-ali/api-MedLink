@@ -44,6 +44,8 @@ public abstract class FunctionalTestBase {
 
     static final String BFF_SECRET = "functional-bff-secret";
     static final String ADMIN_CLIENT_SECRET = "functional-admin-secret";
+    /** Password of the realm's dev users (staff.dev, practitioner.dev, patient.dev) in these tests. */
+    static final String DEV_USERS_PASSWORD = "Functional-Dev-2026!";
     static final int APP_PORT = freePort();
 
     static final GenericContainer<?> KEYCLOAK = new GenericContainer<>("quay.io/keycloak/keycloak:26.7.5")
@@ -53,7 +55,7 @@ public abstract class FunctionalTestBase {
             .withEnv("KC_BFF_CLIENT_SECRET", BFF_SECRET)
             .withEnv("KC_ADMIN_CLIENT_SECRET", ADMIN_CLIENT_SECRET)
             .withEnv("KC_BFF_BASE_URL", "http://localhost:" + APP_PORT)
-            .withEnv("KC_DEV_USERS_PASSWORD", "Functional-Dev-2026!")
+            .withEnv("KC_DEV_USERS_PASSWORD", DEV_USERS_PASSWORD)
             .withCopyFileToContainer(
                     MountableFile.forHostPath("keycloak/realm-medlink.json"),
                     "/opt/keycloak/data/import/realm-medlink.json")
