@@ -1,5 +1,6 @@
 package com.example.apimedlink.config;
 
+import com.example.apimedlink.security.JsonAccessDeniedHandler;
 import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
 import com.example.apimedlink.security.SessionValidityFilter;
 import jakarta.servlet.DispatcherType;
@@ -61,7 +62,10 @@ public class SecurityConfig {
                 // Every logged-in call checks Keycloak still accepts the account (GitHub #28)
                 .addFilterBefore(new SessionValidityFilter(authorizedClients, json), AuthorizationFilter.class)
                 // Not logged in (no session, unknown, ended or expired): 401 with our JSON error, never a redirect
-                .exceptionHandling(ex -> ex.authenticationEntryPoint(new JsonAuthenticationEntryPoint(json)));
+                .exceptionHandling(ex -> ex
+                        .authenticationEntryPoint(new JsonAuthenticationEntryPoint(json))
+                        // Refused before any controller (e.g. no CSRF header): 403 with our JSON error
+                        .accessDeniedHandler(new JsonAccessDeniedHandler(json)));
         return http.build();
     }
 }
