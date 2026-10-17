@@ -57,6 +57,33 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## MLink-59 — audit trail, every refusal recorded (2026-10-17, epic/MLink-6)
+
+**Built:** migration **V7** `audit_entries` (id, timestamp, user_id, action, resource_type, resource_id,
+ip_address, outcome; index on (user_id, timestamp); no foreign key on `user_id`, so a row outlives its
+user) with triggers that reject `UPDATE`, `DELETE` and `TRUNCATE`: the trail can be neither changed nor
+deleted, not even with SQL from the application's own database user (MLink-17). `model/AuditEntry` (no
+setters, every column `updatable = false`), `AuditAction` (`ACCESS_DENIED`), `AuditOutcome` (`DENIED`),
+`repository/AuditEntryRepository` (a plain `Repository`: save and read only), `service/AuditService.record`
+(finds the caller through `CurrentUser.idOrNull()` and the IP itself; own transaction, `REQUIRES_NEW`).
+One call point: `security/JsonAccessDeniedHandler`, which sees every 403 (before and inside controllers),
+records `ACCESS_DENIED` / `DENIED` / `REQUEST` / "METHOD /path". Only the method and the path: no body,
+no query string, so no password, token or medical value reaches the trail. A failure to write is
+logged and the 403 still goes out. `UserControllerTest`'s fake users now have UUID names like real ones
+(they made the audit log "Invalid UUID string" errors).
+
+**Proof:** `AuditFunctionalTest` (real Keycloak, real database), committed red first (5336661): a refusal
+writes exactly one row with the caller, the IP, the action and the outcome; an anonymous refusal (no
+CSRF header) writes a row with no user; raw SQL `UPDATE` and `DELETE` on the trail are refused. Mutation
+checks: without the `record` call, the two row tests turn red; without the triggers, the append-only test
+turns red. `./mvnw -B clean test -Dsurefire.runOrder=reversealphabetical`: **135 tests, 0 failures**, and
+no audit error in the logs.
+
+**Limits:** behind a reverse proxy the recorded IP is the proxy's until forwarded headers are configured
+(`server.forward-headers-strategy`, with the proxy trusted). Anonymous refusals are recorded with no
+rate limit, so a flood of forged writes grows the table (per-IP limits: GitHub #51). Reading the trail
+(MLink-33) and account operations (MLink-72) are other tasks; they add their own `AuditAction` values.
+
 ## MLink-58 — current user and ownership check (2026-10-17, epic/MLink-6)
 
 **Built:** `security/CurrentUser` (the caller's id is the Keycloak id the login saved in the session, =
@@ -346,6 +373,9 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-17 | The audit trail is append-only in the database: triggers reject `UPDATE`, `DELETE` and `TRUNCATE` on `audit_entries` | "Ni modifié ni supprimé depuis l'application" (MLink-17) must hold even for raw SQL; the Java side alone is a promise | A save-and-read-only repository only |
+| 2026-10-17 | A refusal records only "METHOD /path" as the resource, never the body or the query string | No password, token or medical value can reach the trail | Logging the whole request |
+| 2026-10-17 | One audit call point for refusals: `JsonAccessDeniedHandler` | It sees every 403, before and inside controllers (MLink-58); a failed write never turns a 403 into a 500 | A call in each controller, or in two handlers as the ticket said |
 | 2026-10-17 | Ownership is checked before the data is read: a non-owner gets 403 whether the id exists or not; only staff get 404 | A 404 next to a 403 tells anyone which ids exist | Reading first (404 for unknown ids to everyone) |
 | 2026-10-17 | One JSON access-denied handler for every 403 (`JsonAccessDeniedHandler`), none in `GlobalExceptionHandler` | Refusals inside controllers reach the security handler anyway; one place for the message; a second handler survived its mutation check | A handler in both places (as the ticket said) |
 | 2026-10-16 | Not logged in → 401 JSON `UNAUTHENTICATED` (our error body), never an empty 401 or a redirect | React needs a code to show its login page; same body shape everywhere | Spring's empty 401 (`HttpStatusEntryPoint`) |
