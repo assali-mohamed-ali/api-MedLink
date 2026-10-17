@@ -28,6 +28,15 @@ public class CurrentUser {
         return UUID.fromString(authentication().getName());
     }
 
+    /** The caller's id, or null for an anonymous caller (the audit trail records refusals of both). */
+    public UUID idOrNull() {
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        if (authentication == null || authentication instanceof AnonymousAuthenticationToken) {
+            return null;
+        }
+        return UUID.fromString(authentication.getName());
+    }
+
     /** The caller's row; the login creates it, so it exists for any logged-in user. */
     public User user() {
         UUID id = id();

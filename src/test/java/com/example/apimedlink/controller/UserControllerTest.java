@@ -52,7 +52,7 @@ class UserControllerTest {
     @ParameterizedTest
     @ValueSource(strings = {Roles.PATIENT, Roles.PRACTITIONER})
     void nonStaffCannotListUsers(String role) throws Exception {
-        mvc.perform(get("/api/users").with(user("someone").roles(role)))
+        mvc.perform(get("/api/users").with(user(UUID.randomUUID().toString()).roles(role)))
                 .andExpect(status().isForbidden());
     }
 
@@ -60,21 +60,21 @@ class UserControllerTest {
     @ValueSource(strings = {Roles.PATIENT, Roles.PRACTITIONER})
     void nonStaffCannotDeleteUsers(String role) throws Exception {
         mvc.perform(delete("/api/users/{id}", newUser().getId())
-                        .with(user("someone").roles(role))
+                        .with(user(UUID.randomUUID().toString()).roles(role))
                         .with(csrf()))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void staffCanListUsers() throws Exception {
-        mvc.perform(get("/api/users").with(user("staff").roles(Roles.ADMINISTRATIVE_STAFF)))
+        mvc.perform(get("/api/users").with(user(UUID.randomUUID().toString()).roles(Roles.ADMINISTRATIVE_STAFF)))
                 .andExpect(status().isOk());
     }
 
     @Test
     void staffCanDeleteUsers() throws Exception {
         mvc.perform(delete("/api/users/{id}", newUser().getId())
-                        .with(user("staff").roles(Roles.ADMINISTRATIVE_STAFF))
+                        .with(user(UUID.randomUUID().toString()).roles(Roles.ADMINISTRATIVE_STAFF))
                         .with(csrf()))
                 .andExpect(status().isNoContent());
     }
