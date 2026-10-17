@@ -4,6 +4,8 @@ import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.UserRepository;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.authentication.AnonymousAuthenticationToken;
 import org.springframework.security.authentication.AuthenticationCredentialsNotFoundException;
 import org.springframework.security.core.Authentication;
@@ -17,6 +19,8 @@ import org.springframework.stereotype.Component;
 @Component
 public class CurrentUser {
 
+    private static final Logger log = LoggerFactory.getLogger(CurrentUser.class);
+
     private final UserRepository users;
 
     public CurrentUser(UserRepository users) {
@@ -28,13 +32,23 @@ public class CurrentUser {
         return UUID.fromString(authentication().getName());
     }
 
-    /** The caller's id, or null for an anonymous caller (the audit trail records refusals of both). */
+    /**
+     * The caller's id, or null for an anonymous caller (the audit trail records refusals of both). Never
+     * throws: an identity that is not a Keycloak id is logged and treated as unknown, so an audit event is
+     * never lost (review on PR #56).
+     */
     public UUID idOrNull() {
         Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
         if (authentication == null || authentication instanceof AnonymousAuthenticationToken) {
             return null;
         }
-        return UUID.fromString(authentication.getName());
+        try {
+            return UUID.fromString(authentication.getName());
+        } catch (IllegalArgumentException notAKeycloakId) {
+            // Never the name itself in the log: it could be an email
+            log.warn("A caller's identity is not a Keycloak id: recorded without a user id");
+            return null;
+        }
     }
 
     /** The caller's row; the login creates it, so it exists for any logged-in user. */

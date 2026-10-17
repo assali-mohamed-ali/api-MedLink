@@ -7,6 +7,9 @@ import com.example.apimedlink.service.AuditService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
+import java.util.Arrays;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
@@ -24,6 +27,9 @@ public class JsonAccessDeniedHandler implements AccessDeniedHandler {
 
     private static final Logger log = LoggerFactory.getLogger(JsonAccessDeniedHandler.class);
     private static final int MAX_RESOURCE_LENGTH = 255;
+    /** A path segment kept in the trail: a short route word or an id (a UUID). */
+    private static final Pattern SAFE_SEGMENT =
+            Pattern.compile("[a-z0-9_-]{1,40}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}");
 
     private final JsonMapper json;
     private final AuditService audit;
@@ -37,11 +43,9 @@ public class JsonAccessDeniedHandler implements AccessDeniedHandler {
     public void handle(HttpServletRequest request, HttpServletResponse response, AccessDeniedException refused)
             throws IOException {
         try {
-            // Method and path only: no query string, no body, so no token or value lands in the trail
-            String resource = request.getMethod() + " " + request.getRequestURI();
+            // Method and redacted path only: no query string, no body, so no token or value lands in the trail
             audit.record(AuditAction.ACCESS_DENIED, "REQUEST",
-                    resource.length() > MAX_RESOURCE_LENGTH ? resource.substring(0, MAX_RESOURCE_LENGTH) : resource,
-                    AuditOutcome.DENIED);
+                    resource(request.getMethod(), request.getRequestURI()), AuditOutcome.DENIED);
         } catch (RuntimeException e) {
             // The refusal stands even if it cannot be written down
             log.error("Could not record a refused access in the audit trail", e);
@@ -51,5 +55,18 @@ public class JsonAccessDeniedHandler implements AccessDeniedHandler {
         response.setCharacterEncoding("UTF-8");
         response.getWriter().write(json.writeValueAsString(ErrorBody.of(HttpStatus.FORBIDDEN, "FORBIDDEN",
                 "Vous n'avez pas accès à cette ressource.", null)));
+    }
+
+    /**
+     * "METHOD /path" for the trail (review on PR #56): a segment is kept only when it is a route word or
+     * an id, anything else (an email, a name, free text) becomes {redacted}; the whole is cut at 255
+     * characters. An allowlist, so an unforeseen kind of data is redacted by default.
+     */
+    static String resource(String method, String path) {
+        String redacted = Arrays.stream(path.split("/", -1))
+                .map(segment -> segment.isEmpty() || SAFE_SEGMENT.matcher(segment).matches() ? segment : "{redacted}")
+                .collect(Collectors.joining("/"));
+        String resource = method + " " + redacted;
+        return resource.length() > MAX_RESOURCE_LENGTH ? resource.substring(0, MAX_RESOURCE_LENGTH) : resource;
     }
 }
