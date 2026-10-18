@@ -16,6 +16,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -104,10 +105,33 @@ public abstract class FunctionalTestBase {
 
     // ---- the browser ---------------------------------------------------------------------------
 
-    /** A browser: keeps cookies (API session, CSRF) and follows redirects. */
+    /**
+     * A browser: keeps cookies (API session, CSRF) and follows redirects. Each one is a visitor with
+     * its own IP: the test plays the reverse proxy (loopback, trusted) and sends it in
+     * {@code X-Forwarded-For}, so the per-IP limits (GitHub #51) count each browser apart.
+     */
     static final class Browser {
 
+        private static final AtomicInteger NEXT_IP = new AtomicInteger();
+
         final LocalhostCookieJar cookies = new LocalhostCookieJar();
+
+        /** What the proxy puts in {@code X-Forwarded-For}: the client's IP, last. */
+        final String forwardedFor;
+
+        Browser() {
+            this(nextIp());
+        }
+
+        Browser(String forwardedFor) {
+            this.forwardedFor = forwardedFor;
+        }
+
+        /** A new address in 198.18.0.0/15 (reserved for tests) for each browser of the run. */
+        static String nextIp() {
+            int n = NEXT_IP.getAndIncrement();
+            return "198." + (18 + n / 65_536 % 2) + "." + (n / 256 % 256) + "." + (n % 256);
+        }
 
         final HttpClient http = HttpClient.newBuilder()
                 .cookieHandler(cookies)
@@ -134,6 +158,7 @@ public abstract class FunctionalTestBase {
         /** A JSON post; {@code withCsrf} echoes the XSRF-TOKEN cookie in the X-XSRF-TOKEN header. */
         HttpResponse<String> post(String path, String json, boolean withCsrf) throws Exception {
             HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(appUrl(path)))
+                    .header("X-Forwarded-For", forwardedFor)
                     .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
                     .POST(HttpRequest.BodyPublishers.ofString(json));
             String csrf = cookies.value("XSRF-TOKEN");
@@ -155,8 +180,8 @@ public abstract class FunctionalTestBase {
             return post(path, json, true);
         }
 
-        private static HttpRequest get(String url) {
-            return HttpRequest.newBuilder(URI.create(url)).GET().build();
+        private HttpRequest get(String url) {
+            return HttpRequest.newBuilder(URI.create(url)).header("X-Forwarded-For", forwardedFor).GET().build();
         }
     }
 
