@@ -18,8 +18,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
  * boundary is documented in report.md, not tested here.
  *
  * <p>The resource stored is "METHOD /path", redacted (review on PR #56): a segment is kept only when
- * it is a UUID or a short route word, anything else becomes {@code {redacted}}, and the whole is cut
- * at 255 characters.
+ * it is a UUID or a literal word of one of the API's routes, anything else becomes {@code {redacted}},
+ * and the whole is cut at 255 characters.
  */
 class AuditFunctionalTest extends FunctionalTestBase {
 
@@ -78,30 +78,33 @@ class AuditFunctionalTest extends FunctionalTestBase {
 
     @Test
     void personalDataInThePathIsRedactedInTheTrail() throws Exception {
-        String route = marker();
-        Browser browser = new Browser();
-        browser.call("/api/auth/csrf");
+        assertRefusedAndRecordedAs("/api/users/jean.dupont@example.com", "POST /api/users/{redacted}");
 
-        assertThat(browser.post("/api/" + route + "/jean.dupont@example.com", "{}", false).statusCode())
-                .as("no CSRF header").isEqualTo(403);
+        assertThat(rowsContaining("jean.dupont")).as("the email never reaches the trail").isZero();
+    }
 
-        assertThat(anonymousResources("POST /api/" + route + "/%"))
-                .as("the email never reaches the trail")
-                .containsExactly("POST /api/" + route + "/{redacted}");
+    @Test
+    void aWordThatIsNotARouteIsRedactedToo() throws Exception {
+        // Shaped like a route word, but no route of the API has it (review on PR #56)
+        assertRefusedAndRecordedAs("/api/users/john-smith", "POST /api/users/{redacted}");
+
+        assertThat(rowsContaining("john-smith")).as("the name never reaches the trail").isZero();
     }
 
     @Test
     void aVeryLongPathIsCutAndStillRefused() throws Exception {
-        String route = marker();
+        // 400 one-letter segments: none is a route word, so each is redacted, and the whole is cut
+        String cutResource = "POST /api/users/{redacted}/{redacted}%";
+        int before = anonymousRowsLike(cutResource);
         Browser browser = new Browser();
         browser.call("/api/auth/csrf");
 
-        assertThat(browser.post("/api/" + route + "/x".repeat(400), "{}", false).statusCode())
+        assertThat(browser.post("/api/users" + "/x".repeat(400), "{}", false).statusCode())
                 .as("the refusal is unchanged").isEqualTo(403);
 
-        assertThat(anonymousResources("POST /api/" + route + "/%"))
-                .singleElement()
-                .satisfies(resource -> assertThat(resource).startsWith("POST /api/" + route + "/x/x").hasSizeLessThanOrEqualTo(255));
+        assertThat(anonymousRowsLike(cutResource)).isEqualTo(before + 1);
+        assertThat(db.queryForObject("select max(length(resource_id)) from audit_entries", Integer.class))
+                .as("never longer than the column").isLessThanOrEqualTo(255);
     }
 
     @Test
@@ -121,13 +124,24 @@ class AuditFunctionalTest extends FunctionalTestBase {
                 "select count(*) from audit_entries where user_id is null and resource_id = ?", Integer.class, resource);
     }
 
-    private List<String> anonymousResources(String likePattern) {
-        return db.queryForList(
-                "select resource_id from audit_entries where user_id is null and resource_id like ?", String.class, likePattern);
+    private int anonymousRowsLike(String likePattern) {
+        return db.queryForObject(
+                "select count(*) from audit_entries where user_id is null and resource_id like ?", Integer.class, likePattern);
     }
 
-    /** A route word no other test uses, so the rows of this test are the only ones under it. */
-    private static String marker() {
-        return "t" + UUID.randomUUID().toString().substring(0, 8);
+    private int rowsContaining(String text) {
+        return db.queryForObject(
+                "select count(*) from audit_entries where resource_id like ?", Integer.class, "%" + text + "%");
+    }
+
+    /** A write without the CSRF header to {@code path} is refused, and recorded once as {@code resource}. */
+    private void assertRefusedAndRecordedAs(String path, String resource) throws Exception {
+        int before = anonymousRows(resource);
+        Browser browser = new Browser();
+        browser.call("/api/auth/csrf");
+
+        assertThat(browser.post(path, "{}", false).statusCode()).as("no CSRF header").isEqualTo(403);
+
+        assertThat(anonymousRows(resource)).as("recorded once as " + resource).isEqualTo(before + 1);
     }
 }
