@@ -2,7 +2,9 @@ package com.example.apimedlink.config;
 
 import com.example.apimedlink.security.JsonAccessDeniedHandler;
 import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
+import com.example.apimedlink.security.RouteWords;
 import com.example.apimedlink.security.SessionValidityFilter;
+import com.example.apimedlink.service.AuditService;
 import jakarta.servlet.DispatcherType;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -28,7 +30,9 @@ public class SecurityConfig {
     SecurityFilterChain filterChain(
             HttpSecurity http,
             OAuth2AuthorizedClientManager authorizedClients,
-            JsonMapper json) throws Exception {
+            JsonMapper json,
+            AuditService audit,
+            RouteWords routeWords) throws Exception {
         // Same cookie as csrf.spa() (readable by the SPA), plus SameSite like the session cookie
         CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
         csrfTokens.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
@@ -64,8 +68,8 @@ public class SecurityConfig {
                 // Not logged in (no session, unknown, ended or expired): 401 with our JSON error, never a redirect
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new JsonAuthenticationEntryPoint(json))
-                        // Refused before any controller (e.g. no CSRF header): 403 with our JSON error
-                        .accessDeniedHandler(new JsonAccessDeniedHandler(json)));
+                        // Every refusal, before or inside a controller: 403 with our JSON error, audited (MLink-59)
+                        .accessDeniedHandler(new JsonAccessDeniedHandler(json, audit, routeWords)));
         return http.build();
     }
 }
