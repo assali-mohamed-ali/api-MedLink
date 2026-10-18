@@ -27,16 +27,18 @@ public class JsonAccessDeniedHandler implements AccessDeniedHandler {
 
     private static final Logger log = LoggerFactory.getLogger(JsonAccessDeniedHandler.class);
     private static final int MAX_RESOURCE_LENGTH = 255;
-    /** A path segment kept in the trail: a short route word or an id (a UUID). */
-    private static final Pattern SAFE_SEGMENT =
-            Pattern.compile("[a-z0-9_-]{1,40}|[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}");
+    /** An id in a path: kept in the trail, since it says which record was targeted. */
+    private static final Pattern UUID_SEGMENT =
+            Pattern.compile("[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}");
 
     private final JsonMapper json;
     private final AuditService audit;
+    private final RouteWords routeWords;
 
-    public JsonAccessDeniedHandler(JsonMapper json, AuditService audit) {
+    public JsonAccessDeniedHandler(JsonMapper json, AuditService audit, RouteWords routeWords) {
         this.json = json;
         this.audit = audit;
+        this.routeWords = routeWords;
     }
 
     @Override
@@ -58,13 +60,15 @@ public class JsonAccessDeniedHandler implements AccessDeniedHandler {
     }
 
     /**
-     * "METHOD /path" for the trail (review on PR #56): a segment is kept only when it is a route word or
-     * an id, anything else (an email, a name, free text) becomes {redacted}; the whole is cut at 255
-     * characters. An allowlist, so an unforeseen kind of data is redacted by default.
+     * "METHOD /path" for the trail (review on PR #56): a segment is kept only when it is a literal word of
+     * one of the API's routes or a UUID; anything else (an email, a name, a word no route has) becomes
+     * {redacted}; the whole is cut at 255 characters. An allowlist, so an unforeseen kind of data is
+     * redacted by default.
      */
-    static String resource(String method, String path) {
+    String resource(String method, String path) {
         String redacted = Arrays.stream(path.split("/", -1))
-                .map(segment -> segment.isEmpty() || SAFE_SEGMENT.matcher(segment).matches() ? segment : "{redacted}")
+                .map(segment -> segment.isEmpty() || routeWords.contains(segment) || UUID_SEGMENT.matcher(segment).matches()
+                        ? segment : "{redacted}")
                 .collect(Collectors.joining("/"));
         String resource = method + " " + redacted;
         return resource.length() > MAX_RESOURCE_LENGTH ? resource.substring(0, MAX_RESOURCE_LENGTH) : resource;

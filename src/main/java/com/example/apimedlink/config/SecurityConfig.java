@@ -2,6 +2,7 @@ package com.example.apimedlink.config;
 
 import com.example.apimedlink.security.JsonAccessDeniedHandler;
 import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
+import com.example.apimedlink.security.RouteWords;
 import com.example.apimedlink.security.SessionValidityFilter;
 import com.example.apimedlink.service.AuditService;
 import jakarta.servlet.DispatcherType;
@@ -30,7 +31,8 @@ public class SecurityConfig {
             HttpSecurity http,
             OAuth2AuthorizedClientManager authorizedClients,
             JsonMapper json,
-            AuditService audit) throws Exception {
+            AuditService audit,
+            RouteWords routeWords) throws Exception {
         // Same cookie as csrf.spa() (readable by the SPA), plus SameSite like the session cookie
         CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
         csrfTokens.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
@@ -67,7 +69,7 @@ public class SecurityConfig {
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new JsonAuthenticationEntryPoint(json))
                         // Every refusal, before or inside a controller: 403 with our JSON error, audited (MLink-59)
-                        .accessDeniedHandler(new JsonAccessDeniedHandler(json, audit)));
+                        .accessDeniedHandler(new JsonAccessDeniedHandler(json, audit, routeWords)));
         return http.build();
     }
 }
