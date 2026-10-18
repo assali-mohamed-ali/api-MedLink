@@ -78,20 +78,31 @@ cp .env.example .env        # then edit secrets inside, never commit .env
 ./mvnw -B -DskipTests compile
 ```
 
-Run locally:
+Run locally: two compose files, one job each, one command each.
+
+| Setup | File | Command | Values |
+|---|---|---|---|
+| **A. Coding** (API on the host, dev profile) | `compose.yaml`: Postgres, Keycloak + its DB, Mailpit | `SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run` | fixed dev-only values in the file, matching `application-dev.yml`; no value from `.env` |
+| **B. Full stack** (everything in containers) | `docker-compose.yml`: the same four services + the API image + Prometheus | `docker compose -f docker-compose.yml up --build` | every secret from `.env` (required: it refuses to start without them) |
 
 ```bash
-# Option A: Postgres + Keycloak via compose.yaml + app via Maven (dev profile)
-docker compose -f compose.yaml up -d
+# A: Spring Boot's compose integration starts compose.yaml itself (spring.docker.compose.file), then
+#    points the app at Postgres. By hand, same file: docker compose -f compose.yaml up -d
 SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
 
-# Option B: full stack (app + postgres + keycloak + keycloak-db + prometheus)
-# fill .env first (KC_BFF_CLIENT_SECRET, KEYCLOAK_DB_PASSWORD, KEYCLOAK_ADMIN_PASSWORD, KC_DEV_USERS_PASSWORD)
+# B: fill .env first (KC_BFF_CLIENT_SECRET, KC_ADMIN_CLIENT_SECRET, KEYCLOAK_DB_PASSWORD, KEYCLOAK_ADMIN_PASSWORD, KC_DEV_USERS_PASSWORD)
 docker compose -f docker-compose.yml up --build
 # Staging / prod: same file, different env + profile
 docker compose --env-file .env.staging -f docker-compose.yml up --build   # SPRING_PROFILES_ACTIVE=staging
 docker compose --env-file .env.prod -f docker-compose.yml up --build -d    # SPRING_PROFILES_ACTIVE=prod
 ```
+
+The four shared services are the same in both files: images, commands, container ports, mounts,
+volumes, healthchecks and settings. Only the secrets differ. `ComposeFilesTest` fails when they drift,
+so change a shared service in both files. The two setups share their volumes (same folder, same
+compose project): the setup scripts wipe them when you switch between A and B. Data is kept between
+runs, so after checking out a branch with other migrations, re-run with `-Reset` / `--reset` if Flyway
+refuses to start.
 
 Useful URLs: API `http://localhost:8080`, Swagger `http://localhost:8080/swagger-ui.html`,
 health `http://localhost:8080/actuator/health`, Prometheus `http://localhost:9090`,
