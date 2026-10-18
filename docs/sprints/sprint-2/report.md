@@ -70,8 +70,10 @@ setters, every column `updatable = false`), `AuditAction` (`ACCESS_DENIED`), `Au
 `idOrNull()` never throws: an identity that is not a Keycloak id is logged (never the name) and recorded
 with no user id, so an event is never lost. One call point: `security/JsonAccessDeniedHandler`, which sees
 every 403 (before and inside controllers), records `ACCESS_DENIED` / `DENIED` / `REQUEST` / "METHOD /path".
-No body and no query string; in the path, a segment is kept only when it is a short route word or a UUID,
-anything else (an email, a name, free text) becomes `{redacted}`, then 255 characters at most. So no
+No body and no query string; in the path, a segment is kept only when it is a literal word of one of the
+API's routes (`security/RouteWords`, read once from Spring's request mappings at startup) or a UUID;
+anything else (an email, a name, a word no route has like `john-smith`) becomes `{redacted}`, then 255
+characters at most. So no
 password, token, personal or medical value reaches the trail, and the targeted id stays for an
 investigation. A failure to write is logged and the 403 still goes out. `UserControllerTest`'s fake users
 now have UUID names like real ones.
@@ -83,8 +85,10 @@ checks: without the `record` call, the two row tests turn red; without the trigg
 turns red. After the code owner's review (PR #56), committed red first (a852e64): an identity that is not
 a Keycloak id is still recorded (`AuditIdentityTest`, MockMvc: a real login cannot produce it); an email
 in a path is stored as `{redacted}`; an id in the path is kept; a very long path is cut to 255 characters
-and still answers 403. Mutation checks: throwing again on a non-UUID identity, or removing the redaction,
-turns a test red. `./mvnw -B clean test -Dsurefire.runOrder=reversealphabetical`: **139 tests, 0
+and still answers 403. Second review, committed red first (2dece17): a route-shaped word that no route has
+(`john-smith`) is redacted; a long path of one-letter segments becomes `{redacted}` segments. Mutation
+checks: throwing again on a non-UUID identity, removing the redaction, or accepting any lowercase word as
+a route word, turns a test red. `./mvnw -B clean test -Dsurefire.runOrder=reversealphabetical`: **140 tests, 0
 failures**, and no audit error in the logs.
 
 **Limits:** append-only holds against ordinary SQL, not against the table's owner: the owner can drop or
@@ -386,7 +390,7 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
 | 2026-10-17 | The audit trail is append-only in the database: triggers reject `UPDATE`, `DELETE` and `TRUNCATE` on `audit_entries`; against the table's owner it needs separate roles (GitHub issue) | "Ni modifié ni supprimé depuis l'application" (MLink-17) must hold for raw SQL too; the Java side alone is a promise; the owner boundary is stated, not hidden (review on #56) | A save-and-read-only repository only |
-| 2026-10-17 | A refusal records "METHOD /path" with the path redacted by allowlist (route words and UUIDs kept, anything else `{redacted}`), never the body or the query string | No password, token, personal or medical value can reach the trail, whatever a client puts in a path; the targeted id stays for investigations (review on #56) | Logging the whole request; the raw path |
+| 2026-10-17 | A refusal records "METHOD /path" with the path redacted by allowlist (the API's own route words, read from Spring at startup, and UUIDs kept; anything else `{redacted}`), never the body or the query string | No password, token, personal or medical value can reach the trail, whatever a client puts in a path; the targeted id stays for investigations (review on #56) | Logging the whole request; the raw path |
 | 2026-10-17 | An identity that is not a Keycloak id is recorded with no user id, never dropped | A security trail must not lose events silently (review on #56) | Failing the write (the event was lost) |
 | 2026-10-17 | One audit call point for refusals: `JsonAccessDeniedHandler` | It sees every 403, before and inside controllers (MLink-58); a failed write never turns a 403 into a 500 | A call in each controller, or in two handlers as the ticket said |
 | 2026-10-17 | Ownership is checked before the data is read: a non-owner gets 403 whether the id exists or not; only staff get 404 | A 404 next to a 403 tells anyone which ids exist | Reading first (404 for unknown ids to everyone) |
