@@ -13,6 +13,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | To do | — | — |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-18:** MLink-112 (GitHub #51, shared rate limits, a condition of #58 option 1) in review on
+`fix/51-shared-rate-limits`; it takes migration V8 (Ela's MLink-97 also announced V8: the second to merge
+renumbers).
+
 ### Where we are (handoff, 2026-10-16)
 
 Merged on `master`: sub-sprint 1 (#32), staff-only `/api/users` (#33, MLink-57), GitHub issues #28/#29
@@ -56,6 +60,50 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-112 — shared rate limits, GitHub #51 (2026-10-18, fix/51-shared-rate-limits)
+
+A condition of keeping the password grant (decision record on #58, option 1, MLink-96;
+`docs/decisions/0001-login-password-grant.md` once #58 merges).
+
+**Built:** migration **V8** `rate_limits` (key, hits, expires_at): fixed-window counters in Postgres, so every API
+instance shares them. `repository/RateLimitStore.hit` is one `INSERT … ON CONFLICT (key) DO UPDATE … RETURNING`:
+the row lock orders hits that arrive together, so no two read the same count (no check-then-act); the
+database's clock decides the windows; the key is `<kind>:` + SHA-256 of the subject (no IP or email stored in
+clear); ended windows are deleted every 10 minutes (`@Scheduled`, harmless on several instances).
+- `security/RateLimitFilter`: per-IP limits on `POST /api/auth/login` (30 per 5 min), `/register` (20 per hour),
+  `/verify-email/resend` (20 per hour), `app.rate-limit.*`. Past the limit: **429 `TOO_MANY_REQUESTS`** with
+  `Retry-After`, before validation, Keycloak or mail. Keyed by the IP only: the same answer whatever the email,
+  so it reveals no account. It runs after Spring Security: a write without the CSRF header is not counted.
+- Per account, silent as before (same 201 / 202): `MailThrottle` (one taken-email warning per address per
+  15 min) now counts in Postgres instead of a map in memory; resend gained the same atomic count, so a burst
+  of resends sends one new link, not one per request. Login per account stays Keycloak's lockout (5 failures,
+  15 min, MLink-66): one more counter there would let anyone lock an account faster.
+- The client's IP behind a proxy: `server.forward-headers-strategy=native`; Tomcat believes `X-Forwarded-For`
+  only from `server.tomcat.remoteip.internal-proxies` = `TRUSTED_PROXIES`, loopback by default. The audit trail
+  (MLink-59) now records that IP too, instead of the proxy's.
+- `spring.jpa.open-in-view=false` in `application.properties`, as every profile already had: without a
+  profile (the tests), a request kept its JPA connection and waited for a second one for the count, and a
+  burst emptied the pool.
+- Dev profile: the three limits at 1000 (every call comes from localhost; one Newman run would trip them).
+- `FunctionalTestBase.Browser` (shared, said on MLink-97): each browser sends its own `X-Forwarded-For`
+  address (198.18.0.0/15), as a visitor behind the proxy; existing tests are unchanged.
+
+**Proof:** `RateLimitFunctionalTest` red first (be41b9c), then green: parallel bursts of login, register and
+resend from one IP stop exactly at the limit; another IP keeps its own count; the 429 is the same for a real
+account with its right password and for an unknown email, and opens no session; a burst of sign-ups with a
+taken email warns the owner once; a burst of resends sends one new link; a forged left entry in
+`X-Forwarded-For` does not escape the limit. `RateLimitStoreTest`: 40 hits at once from two connection pools (two
+instances) get the counts 1 to 40, each once; windows restart; only hashes are stored. Mutation check: a
+read-then-write store turns 5 of these tests red. `./mvnw -B clean verify`: **148 tests, 0 failures**; reverse
+class order: **148, 0 failures**. Setup script: 0 warnings. Newman: 147 assertions, 0 failures.
+
+**Limits:** a fixed window lets up to twice the limit through around a window's edge (simple, and enough
+against floods). Staging and prod must set `TRUSTED_PROXIES` to their reverse proxy's address, or every client
+behind it shares the proxy's count (no proxy is described yet: issue #31, Terraform #53). The proxy must append
+the client's address (`$proxy_add_x_forwarded_for`), never pass the client's header as is. People behind one
+NAT (a clinic) share one count: the values leave room for that. A taken email still answers a little faster
+than a new one (no Keycloak call); the per-IP limit now caps how many emails one IP can probe.
 
 ## MLink-59 — audit trail, every refusal recorded (2026-10-17, epic/MLink-6)
 
@@ -389,6 +437,9 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-18 | Rate limits counted in Postgres (`rate_limits`, one atomic upsert per hit), not Redis | Shared by every instance and race-free with the database we already run; no new service to deploy and secure (GitHub #51) | Redis; the in-memory map (one instance, racy) |
+| 2026-10-18 | Per-IP limit past the threshold → 429 `TOO_MANY_REQUESTS` with `Retry-After`; per-account limits stay silent (201 / 202) and login per account stays Keycloak's lockout | A count keyed by the IP says nothing about an account, so a 429 is safe; a per-account 429 would tell which emails exist | The usual answer when limited per IP (hides an outage of the form from real users); our own per-account login lock |
+| 2026-10-18 | `X-Forwarded-For` believed only from `TRUSTED_PROXIES` (loopback by default) | Anyone can send the header; trusting it from everyone lets a client pick its own IP and escape every limit | Spring Boot's default list (all private ranges, which includes Docker's bridge) |
 | 2026-10-17 | The audit trail is append-only in the database: triggers reject `UPDATE`, `DELETE` and `TRUNCATE` on `audit_entries`; against the table's owner it needs separate roles (GitHub issue) | "Ni modifié ni supprimé depuis l'application" (MLink-17) must hold for raw SQL too; the Java side alone is a promise; the owner boundary is stated, not hidden (review on #56) | A save-and-read-only repository only |
 | 2026-10-17 | A refusal records "METHOD /path" with the path redacted by allowlist (the API's own route words, read from Spring at startup, and UUIDs kept; anything else `{redacted}`), never the body or the query string | No password, token, personal or medical value can reach the trail, whatever a client puts in a path; the targeted id stays for investigations (review on #56) | Logging the whole request; the raw path |
 | 2026-10-17 | An identity that is not a Keycloak id is recorded with no user id, never dropped | A security trail must not lose events silently (review on #56) | Failing the write (the event was lost) |
