@@ -10,7 +10,7 @@ on:
       - ready_for_review
 
 permissions:
-  pull-requests: write
+  pull-requests: read
 
 concurrency:
   group: ai-disclosure-${{ github.event.pull_request.number }}
@@ -20,7 +20,7 @@ jobs:
   ai-disclosure:
     name: Verify AI disclosure
     runs-on: ubuntu-latest
-
+    timeout-minutes: 5
     steps:
       - name: Validate both AI checklist declarations
         uses: actions/github-script@v9
@@ -44,7 +44,6 @@ jobs:
 
             const aiItems = findItems(aiText);
             const humanItems = findItems(humanText);
-
             let reason = "";
 
             if (aiItems.length !== 1 || humanItems.length !== 1) {
@@ -59,14 +58,7 @@ jobs:
             }
 
             if (reason) {
-              core.error(reason + " This PR will be closed. Correct the checklist and reopen the PR.");
-              await github.rest.pulls.update({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                pull_number: pr.number,
-                state: "closed"
-              });
-              core.setFailed(reason);
+              core.setFailed(reason + " Correct the checklist in the PR description and push/edit the PR to rerun this check.");
               return;
             }
 
