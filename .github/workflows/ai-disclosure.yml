@@ -38,8 +38,8 @@ jobs:
             const humanText = "Je confirme avoir relu, compris et validé les modifications proposées par l'IA.";
 
             const findItems = (text) =>
-              body.split(/\\r?\\n/)
-                .map((line) => line.match(/^\\s*-\\s*\\[([ xX])\\]\\s*(.*?)\\s*$/))
+              body.split(/\r?\n/)
+                .map((line) => line.match(/^\s*-\s*\[([ xX])\]\s*(.*?)\s*$/))
                 .filter((match) => match && match[2] === text);
 
             const aiItems = findItems(aiText);
