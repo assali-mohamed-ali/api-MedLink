@@ -7,7 +7,7 @@ on:
     branches: [main, master, staging, prod, develop]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -17,6 +17,7 @@ permissions:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -33,7 +34,7 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # BLOCKING GATE: any test failure fails the job and blocks the PR.
+      # Blocking gate: test/build failures fail the job.
       - name: Build + tests
         run: ./mvnw --no-transfer-progress --fail-fast verify
 
@@ -46,13 +47,14 @@ jobs:
           reporter: java-junit
           fail-on-error: false
 
+      # Reports are diagnostic artifacts, not a second failure gate.
       - name: Upload surefire reports
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: surefire-reports
           path: target/surefire-reports/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Upload coverage
@@ -61,5 +63,5 @@ jobs:
         with:
           name: jacoco-report
           path: target/site/jacoco/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
