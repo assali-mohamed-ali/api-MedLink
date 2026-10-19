@@ -47,9 +47,9 @@ jobs:
           test -f mvnw
           chmod +x mvnw
           ./mvnw --no-transfer-progress --fail-fast -DskipTests package
-          # Fork PRs do not receive repository secrets. This disposable test
-          # secret is only for the isolated CI instance, never production.
-          EFFECTIVE_JWT_SECRET="${JWT_SECRET:-ci-fallback-secret-32-chars-minimum-1234567890}"
+          # Never expose repository secrets to code under test. This disposable
+          # value is only for the isolated CI instance, never production.
+          EFFECTIVE_JWT_SECRET="ci-fallback-secret-32-chars-minimum-1234567890"
           SPRING_PROFILES_ACTIVE=dev \
           SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/mydatabase \
           SPRING_DATASOURCE_USERNAME=myuser \
@@ -64,8 +64,6 @@ jobs:
           done
           curl -sf http://localhost:8080/actuator/health
           tail -100 app.log
-        env:
-          JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
       - name: Upload app log
         if: always()
