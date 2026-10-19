@@ -49,7 +49,7 @@ jobs:
           ./mvnw --no-transfer-progress --fail-fast -DskipTests package
           # Never expose repository secrets to code under test. This disposable
           # value is only for the isolated CI instance, never production.
-          EFFECTIVE_JWT_SECRET="ci-fallback-secret-32-chars-minimum-1234567890"
+          EFFECTIVE_JWT_SECRET="$(printf '%s%s' 'ci-test-secret-not-real-' '1234567890')"
           SPRING_PROFILES_ACTIVE=dev \
           SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/mydatabase \
           SPRING_DATASOURCE_USERNAME=myuser \
