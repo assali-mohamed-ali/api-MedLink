@@ -3,18 +3,23 @@ name: DAST-ZAP
 on:
   push:
     branches: [main, master, staging]
+  pull_request:
+    branches: [main, master, staging, prod, develop]
   schedule:
     - cron: '0 2 * * 1'
   workflow_dispatch:
 
 permissions:
   contents: read
-  security-events: write
-  issues: write
+
+concurrency:
+  group: dast-zap-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 
 jobs:
   zap:
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     services:
       postgres:
         image: postgres:16
@@ -39,10 +44,11 @@ jobs:
 
       - name: Start app
         run: |
-          chmod +x mvnw || true
+          test -f mvnw
+          chmod +x mvnw
           ./mvnw --no-transfer-progress --fail-fast -DskipTests package
-          # CI fallback secret so PRs from forks (no secrets) still exercise DAST.
-          # Real staging/prod runs use the JWT_SECRET environment secret.
+          # Fork PRs do not receive repository secrets. This disposable test
+          # secret is only for the isolated CI instance, never production.
           EFFECTIVE_JWT_SECRET="${JWT_SECRET:-ci-fallback-secret-32-chars-minimum-1234567890}"
           SPRING_PROFILES_ACTIVE=dev \
           SPRING_DATASOURCE_URL=jdbc:postgresql://localhost:5432/mydatabase \
@@ -51,11 +57,13 @@ jobs:
           JWT_SECRET="$EFFECTIVE_JWT_SECRET" \
           nohup java -jar target/*.jar > app.log 2>&1 &
           for i in $(seq 1 30); do
-            curl -sf http://localhost:8080/actuator/health && break
+            if curl -sf http://localhost:8080/actuator/health; then
+              break
+            fi
             sleep 10
           done
           curl -sf http://localhost:8080/actuator/health
-          cat app.log | tail -100
+          tail -100 app.log
         env:
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
 
@@ -68,10 +76,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 7
 
-      # BLOCKING GATE: fail_action fails the job on any WARN or FAIL alert.
-      # Tune only via security/zap-rules.tsv with a justification comment.
-      # The action passes rules_file_name to ZAP only when the file has an
-      # IGNORE line, so the file is also given explicitly with -c.
+      # Baseline scan is unauthenticated; it does not replace authenticated API tests.
+      # Tune rules only with a documented justification in security/zap-rules.tsv.
       - name: ZAP Baseline Scan
         uses: zaproxy/action-baseline@v0.15.0
         with:
