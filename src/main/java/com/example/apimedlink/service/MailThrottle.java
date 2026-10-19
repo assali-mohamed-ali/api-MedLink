@@ -1,42 +1,33 @@
 package com.example.apimedlink.service;
 
+import com.example.apimedlink.repository.RateLimitStore;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 /**
  * At most one mail of a kind per address per interval, so nobody can use our forms to flood a
- * stranger's inbox. In memory: enough for one API instance (plan.md §2, "simple first").
+ * stranger's inbox. Counted in Postgres: shared by every API instance, and two requests at once
+ * cannot both send (GitHub #51).
  */
 @Component
 public class MailThrottle {
 
-    private static final int PRUNE_ABOVE = 10_000;
-
+    private final RateLimitStore store;
     private final Duration interval;
-    private final Map<String, Instant> lastSent = new ConcurrentHashMap<>();
 
-    public MailThrottle(@Value("${app.mail.warning-interval:15m}") Duration interval) {
+    public MailThrottle(RateLimitStore store, @Value("${app.mail.warning-interval:15m}") Duration interval) {
+        this.store = store;
         this.interval = interval;
     }
 
     /** True, and remembered, when no mail of this kind went to this address within the interval. */
     public boolean allow(String kind, String address) {
-        Instant now = Instant.now();
-        if (lastSent.size() > PRUNE_ABOVE) {
-            lastSent.values().removeIf(sent -> sent.plus(interval).isBefore(now));
-        }
-        boolean[] allowed = {false};
-        lastSent.compute(kind + ":" + address, (key, previous) -> {
-            if (previous == null || !now.isBefore(previous.plus(interval))) {
-                allowed[0] = true;
-                return now;
-            }
-            return previous;
-        });
-        return allowed[0];
+        return allow(kind, address, interval);
+    }
+
+    /** Same, with this kind's own interval. */
+    public boolean allow(String kind, String address, Duration interval) {
+        return store.hit("mail:" + kind, address, interval).count() == 1;
     }
 }

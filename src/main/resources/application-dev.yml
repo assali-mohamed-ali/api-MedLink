@@ -27,6 +27,15 @@ keycloak:
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:4200}
+  # One developer, every call from localhost (React, setup scripts, Newman reruns): the per-IP limits of
+  # application.properties would trip after one Postman run. The tests check the real values.
+  rate-limit:
+    login:
+      max: 1000
+    register:
+      max: 1000
+    resend:
+      max: 1000
 
 management:
   endpoints:
