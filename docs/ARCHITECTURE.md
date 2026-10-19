@@ -26,10 +26,10 @@ Five steps take a new developer from clone to a running stack and a first PR.
    - `cp .env.example .env`, then fill every `change-me` value. `.env` is git-ignored and must never be committed.
    - `pre-commit install` (once) so the local checks run on every commit.
 2. Start the dependencies (Option A, recommended for coding)
-   - `docker compose -f compose.yaml up -d` starts Postgres, Keycloak and Keycloak's own database.
-   - `SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run` starts the API.
+   - `SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run` starts the API, and Spring Boot's compose integration starts `compose.yaml` first (Postgres, Keycloak, Keycloak's own database, Mailpit; fixed dev values, none from `.env`). By hand: `docker compose -f compose.yaml up -d`.
 3. Or run everything in containers (Option B)
-   - `docker compose -f docker-compose.yml up --build` adds the app image and Prometheus. It refuses to start until the `.env` secrets are set.
+   - `docker compose -f docker-compose.yml up --build`: the same services plus the app image and Prometheus. It refuses to start until the `.env` secrets are set.
+   - The services the two files share stay identical except for secrets; `ComposeFilesTest` fails when they drift (GitHub #52).
 4. Check it works
    - `./mvnw -B verify` runs build, tests (Testcontainers needs Docker) and coverage.
 5. Make a first change
