@@ -22,6 +22,13 @@ spring:
     baseline-on-migrate: true
     validate-on-migrate: true
 
+server:
+  servlet:
+    session:
+      cookie:
+        # HTTPS only (MLink-84), also when TLS ends at the proxy; the XSRF-TOKEN cookie follows (SecurityConfig)
+        secure: true
+
 keycloak:
   # Client secret of the medlink-bff client (keycloak/realm-medlink.json)
   client-secret: ${KEYCLOAK_CLIENT_SECRET}

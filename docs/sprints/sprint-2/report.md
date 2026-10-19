@@ -13,8 +13,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | To do | — | — |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
-**2026-10-18:** MLink-112 (GitHub #51, shared rate limits, a condition of #58 option 1) in review on
-`fix/51-shared-rate-limits`. **Migration numbers settled (code owner's review, 2026-10-19): V8 is
+**2026-10-19:** MLink-84 (session cookie hardening: SameSite=Strict, Secure in staging/prod) in review (#63): no
+migration, no endpoint.
+
+**2026-10-18:** MLink-112 (GitHub #51, shared rate limits, a condition of #58 option 1) merged (#60). **Migration numbers settled (code owner's review, 2026-10-19): V8 is
 `rate_limits` (this PR, ready first); Ela's MLink-97 takes V9.** The PR that merges first must hold the lower
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
@@ -49,7 +51,7 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 **Next tickets for Mohamed** (his own, in this order):
 1. MLink-87 password policy (history + French messages). It changes the realm file, so everyone's dev
    realm is re-imported once.
-2. MLink-84 cookie hardening (coordinate with MLink-54).
+2. MLink-84 cookie hardening: in review on `feat/ss2-session-cookie-hardening` (2026-10-19), see its section.
 3. Sub-sprint 3 (staff code): MLink-62, MLink-63.
 4. Sub-sprint 4 (passwords): MLink-91, MLink-88, MLink-90.
 
@@ -63,6 +65,28 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-84 — session cookie hardening (2026-10-19, feat/ss2-session-cookie-hardening)
+
+Unblocked by decision #58 option 1 (keep the password grant): no Keycloak redirect comes back, so Strict is safe.
+- Session cookie: `same-site=strict` (was `lax`) in `application.properties`, `http-only` as before; `secure: true`
+  in `application-staging.yml` and `application-prod.yml`, so even behind a proxy that ends TLS. Dev: not forced.
+- `XSRF-TOKEN` cookie (`SecurityConfig`, cookie lines only): `SameSite=Strict`, and `Secure` by the same switch
+  (`server.servlet.session.cookie.secure`); still readable by React. Without the switch it keeps the
+  repository's default (Secure on an HTTPS request).
+- Session id at login: already changed by `LoginSessions.open` (MLink-55, Youssef's code, not changed).
+- Not changed: `LoginSessions.close()` expires the cookie with `HttpOnly` only; that still deletes it (said on MLink-54).
+- Local full stack: `.env` (from `.env.example`) sets `SPRING_PROFILES_ACTIVE=dev`, so no Secure on plain HTTP;
+  Secure only where the staging or prod profile runs (behind HTTPS).
+
+**Proof:** `SessionCookieFunctionalTest` (login's session cookie HttpOnly + Strict; XSRF-TOKEN Strict and readable;
+an anonymous session from before the login is not the one the login uses, its id opens nothing) and
+`SecureCookiesIntegrationTest` (real staging and prod profile files: both cookies Secure + Strict), red first
+(a5504ac), then green; `SecurityCookiesIntegrationTest` Lax → Strict, and not Secure without a profile. Mutation:
+the XSRF Secure switch off turns both profile tests red. The fixation test was green from the start (it guards
+existing code). Suite: **150 tests, 0 failures**, both class orders; after merging #60: **160, 0 failures**, both orders. No endpoint change, so no Postman change.
+`scripts/setup-dev.ps1` 0 failures in both modes (dev 28 OK, `-FullStack` 29 OK): the end-to-end login and sign-up
+still work with the Strict cookies.
 
 ## MLink-112 — shared rate limits, GitHub #51 (2026-10-18, fix/51-shared-rate-limits)
 

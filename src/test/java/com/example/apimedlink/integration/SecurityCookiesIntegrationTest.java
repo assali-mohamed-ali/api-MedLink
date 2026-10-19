@@ -32,7 +32,10 @@ class SecurityCookiesIntegrationTest {
 
         assertThat(cookies).anySatisfy(c -> assertThat(c).startsWith("JSESSIONID="));
         assertThat(cookies).anySatisfy(c -> assertThat(c).startsWith("XSRF-TOKEN="));
-        assertThat(cookies).allSatisfy(c -> assertThat(c).containsIgnoringCase("SameSite=Lax"));
+        // Strict since no Keycloak redirect comes back (MLink-84); Secure only in staging/prod (SecureCookiesIntegrationTest)
+        assertThat(cookies).allSatisfy(c -> assertThat(c)
+                .containsIgnoringCase("SameSite=Strict")
+                .doesNotContainIgnoringCase("Secure"));
         assertThat(cookies)
                 .filteredOn(c -> c.startsWith("JSESSIONID="))
                 .allSatisfy(c -> assertThat(c).containsIgnoringCase("HttpOnly"));
