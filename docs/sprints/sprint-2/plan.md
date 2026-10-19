@@ -99,6 +99,15 @@ request, so only the console path depends on this.
 ## 4. Endpoint contracts
 
 Common: JSON; writes need `X-XSRF-TOKEN`; error body `{timestamp, status, error, code, message, details}`.
+
+**Rate limits (GitHub #51, MLink-112).** Per IP, counted in Postgres (every instance shares them), checked
+before validation: login 30 per 5 minutes, register 20 per hour, resend 20 per hour (`app.rate-limit.*`; the
+dev profile raises them to 1000). Past the limit: **429** `TOO_MANY_REQUESTS` "Trop de demandes depuis votre
+connexion. Réessayez dans quelques minutes." with `Retry-After` (seconds). The count is keyed by the IP only,
+so the 429 is the same whatever the email: it reveals no account. Per account the limits stay silent (the
+usual 201 / 202, no mail): one taken-email warning per address per 15 minutes, one verification mail per
+minute; login per account is Keycloak's lockout (5 failures, 15 minutes). The IP behind a reverse proxy comes
+from `X-Forwarded-For`, believed only from `TRUSTED_PROXIES` (loopback by default).
 **User object** (endpoints 5, 6, 9): `{ "id": "<uuid>", "email", "firstName", "lastName", "roles": ["PATIENT"] }`.
 
 | # | Endpoint | Access | Sub-sprint | YouTrack |
@@ -135,6 +144,7 @@ policy is Keycloak's); names required, ≤ 100; `birthDate` required, in the pas
 - **201** `{ "message": "Vérifiez votre boîte mail pour activer votre compte." }`, also when the email already has
   an account (nothing is created, the owner is warned by mail): the answer never tells whether an email is registered
 - **400** `VALIDATION_FAILED` (one entry per field in `details`) · `PASSWORD_POLICY` (French rule)
+- **429** `TOO_MANY_REQUESTS` (per IP, see "Rate limits")
 - **503** `IDENTITY_UNAVAILABLE` (Keycloak unreachable)
 Steps: section 3. Never log or return the password.
 
@@ -145,7 +155,8 @@ Steps: hash → find `VERIFY_EMAIL` token → Keycloak `emailVerified=true` → 
 ### 4 · `POST /api/auth/verify-email/resend`
 `{ "email": "…" }` → always **202** `{ "message": "Si un compte non vérifié existe pour cet e-mail, un nouveau lien a été envoyé." }`.
 Only when the account exists and is not verified: older unused tokens are cancelled, a new
-one is mailed. At most one mail per minute per account.
+one is mailed. At most one mail per minute per account, also under parallel requests.
+**429** `TOO_MANY_REQUESTS` per IP (see "Rate limits"), the same for any email.
 
 ### 5 · `POST /api/auth/login`
 `{ "email": "…", "password": "…" }`
@@ -154,6 +165,7 @@ one is mailed. At most one mail per minute per account.
 - **200** `{ "passwordChangeRequired": true }` — forced change pending (sub-sprint 4)
 - **401** `INVALID_CREDENTIALS` "E-mail ou mot de passe incorrect, ou compte temporairement verrouillé." (same for an unknown email and a locked account)
 - **403** `EMAIL_NOT_VERIFIED` (React offers endpoint 4) · `ACCOUNT_DISABLED`
+- **429** `TOO_MANY_REQUESTS` per IP (see "Rate limits"), before Keycloak is asked: the same for any email
 - **503** `IDENTITY_UNAVAILABLE`
 How Keycloak 26.7.5 answers the password grant (checked on the dev stack, 2026-10-15):
 
@@ -233,6 +245,7 @@ Existing `/api/users` endpoints become staff-only in sub-sprint 5.
 | 3 | `user_mfa(user_id PK/FK users, secret_enc, enabled, enrolled_at)` | — | `app.mfa.encryption-key` (env, 32 bytes base64) |
 | 4 | — | `passwordHistory(3)` added to the policy | French messages for Keycloak policy errors |
 | 5 | `audit_entries(id, timestamp, user_id, action, resource_type, resource_id, ip_address, outcome)` | — | — |
+| #51 | `rate_limits(key PK, hits, expires_at)` (V8) | — | `app.rate-limit.*`, `TRUSTED_PROXIES` (staging/prod: the reverse proxy's address) |
 
 ## 6. Sub-sprints
 
@@ -285,7 +298,7 @@ proves every route; every account action and every refusal is audited.
 
 ## 8. Out of scope for sprint 2
 
-Forgot-password by mail, rate limiting on public endpoints, encryption of patient fields
+Forgot-password by mail, encryption of patient fields
 (MLink-14/24), practitioner-to-patient link (records work), central log store, running more
 than one API instance.
 
