@@ -37,10 +37,10 @@ jobs:
             const aiText = "J'ai utilisé des outils d'IA générative pour contribuer à cette PR.";
             const humanText = "Je confirme avoir relu, compris et validé les modifications proposées par l'IA.";
 
-            const checklistPattern = (text) =>
-              new RegExp("^\\s*-\\s*\\[([ xX])\\]\\s*" + text.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&") + "\\s*$", "gm");
-
-            const findItems = (text) => [...body.matchAll(checklistPattern(text))];
+            const findItems = (text) =>
+              body.split(/\\r?\\n/)
+                .map((line) => line.match(/^\\s*-\\s*\\[([ xX])\\]\\s*(.*?)\\s*$/))
+                .filter((match) => match && match[2] === text);
 
             const aiItems = findItems(aiText);
             const humanItems = findItems(humanText);
