@@ -14,8 +14,9 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
 **2026-10-18:** MLink-112 (GitHub #51, shared rate limits, a condition of #58 option 1) in review on
-`fix/51-shared-rate-limits`; it takes migration V8 (Ela's MLink-97 also announced V8: the second to merge
-renumbers).
+`fix/51-shared-rate-limits`. **Migration numbers settled (code owner's review, 2026-10-19): V8 is
+`rate_limits` (this PR, ready first); Ela's MLink-97 takes V9.** The PR that merges first must hold the lower
+number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 ### Where we are (handoff, 2026-10-16)
 
@@ -86,6 +87,11 @@ clear); ended windows are deleted every 10 minutes (`@Scheduled`, harmless on se
   profile (the tests), a request kept its JPA connection and waited for a second one for the count, and a
   burst emptied the pool.
 - Dev profile: the three limits at 1000 (every call comes from localhost; one Newman run would trip them).
+- API contract (review on #60): `/v3/api-docs` documents the 429 (the error body, an example, `Retry-After`)
+  on exactly the paths `RateLimitFilter.limitedPaths()` returns, through a customizer in `OpenApiConfig`
+  next to the CSRF header one: the filter answers before any controller, so springdoc cannot see it.
+  `SwaggerRateLimitFunctionalTest` red first, then green; mutation: documenting 429 on every POST turns it red.
+  Suite after it: **150 tests, 0 failures**, both class orders. No behaviour change, so no Postman change.
 - `FunctionalTestBase.Browser` (shared, said on MLink-97): each browser sends its own `X-Forwarded-For`
   address (198.18.0.0/15), as a visitor behind the proxy; existing tests are unchanged.
 

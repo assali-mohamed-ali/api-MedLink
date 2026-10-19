@@ -11,6 +11,7 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.util.Map;
+import java.util.Set;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
@@ -30,6 +31,9 @@ import tools.jackson.databind.json.JsonMapper;
 @Component
 public class RateLimitFilter extends OncePerRequestFilter {
 
+    public static final String CODE = "TOO_MANY_REQUESTS";
+    public static final String MESSAGE = "Trop de demandes depuis votre connexion. Réessayez dans quelques minutes.";
+
     private final RateLimitStore store;
     private final Map<String, Rule> rules;
     private final JsonMapper json;
@@ -41,6 +45,11 @@ public class RateLimitFilter extends OncePerRequestFilter {
                 "/api/auth/register", limits.register(),
                 "/api/auth/verify-email/resend", limits.resend());
         this.json = json;
+    }
+
+    /** The POST paths this filter limits; {@code OpenApiConfig} documents their 429 from this list. */
+    public Set<String> limitedPaths() {
+        return rules.keySet();
     }
 
     @Override
@@ -62,7 +71,7 @@ public class RateLimitFilter extends OncePerRequestFilter {
         response.setHeader(HttpHeaders.RETRY_AFTER, String.valueOf(hit.secondsLeft()));
         response.setContentType(MediaType.APPLICATION_JSON_VALUE);
         response.setCharacterEncoding("UTF-8");
-        response.getWriter().write(json.writeValueAsString(ErrorBody.of(HttpStatus.TOO_MANY_REQUESTS, "TOO_MANY_REQUESTS",
-                "Trop de demandes depuis votre connexion. Réessayez dans quelques minutes.", null)));
+        response.getWriter().write(json.writeValueAsString(
+                ErrorBody.of(HttpStatus.TOO_MANY_REQUESTS, CODE, MESSAGE, null)));
     }
 }
