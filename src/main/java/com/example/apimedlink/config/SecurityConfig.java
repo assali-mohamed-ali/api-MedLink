@@ -6,6 +6,7 @@ import com.example.apimedlink.security.RouteWords;
 import com.example.apimedlink.security.SessionValidityFilter;
 import com.example.apimedlink.service.AuditService;
 import jakarta.servlet.DispatcherType;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.HttpMethod;
@@ -32,10 +33,17 @@ public class SecurityConfig {
             OAuth2AuthorizedClientManager authorizedClients,
             JsonMapper json,
             AuditService audit,
-            RouteWords routeWords) throws Exception {
-        // Same cookie as csrf.spa() (readable by the SPA), plus SameSite like the session cookie
+            RouteWords routeWords,
+            @Value("${server.servlet.session.cookie.secure:false}") boolean secureCookies) throws Exception {
+        // Same cookie as csrf.spa() (readable by the SPA), plus SameSite and Secure like the session cookie (MLink-84);
+        // when not forced Secure, it stays Secure on HTTPS requests (the repository's default)
         CookieCsrfTokenRepository csrfTokens = CookieCsrfTokenRepository.withHttpOnlyFalse();
-        csrfTokens.setCookieCustomizer(cookie -> cookie.sameSite("Lax"));
+        csrfTokens.setCookieCustomizer(cookie -> {
+            cookie.sameSite("Strict");
+            if (secureCookies) {
+                cookie.secure(true);
+            }
+        });
         http
                 .cors(Customizer.withDefaults())
                 .csrf(csrf -> csrf.spa().csrfTokenRepository(csrfTokens))
