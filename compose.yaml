@@ -3,7 +3,7 @@
 # docker-compose.yml: the same services, kept alike by ComposeFilesTest; only the secrets differ there.
 services:
   postgres:
-    image: 'postgres:16'
+    image: 'postgres:18'
     environment:
       - 'POSTGRES_DB=mydatabase'
       - 'POSTGRES_PASSWORD=secret'
@@ -21,7 +21,7 @@ services:
 
   # Keycloak has its own database (separate container + volume), never the app's one.
   keycloak-db:
-    image: 'postgres:16'
+    image: 'postgres:18'
     labels:
       # not the app datasource: hide it from spring-boot-docker-compose
       org.springframework.boot.ignore: 'true'
@@ -38,7 +38,7 @@ services:
       retries: 10
 
   keycloak:
-    image: 'quay.io/keycloak/keycloak:26.7.5'
+    image: 'quay.io/keycloak/keycloak:26.8.1'
     command: ['start-dev', '--import-realm']
     labels:
       org.springframework.boot.ignore: 'true'
@@ -76,7 +76,7 @@ services:
 
   # Catches every mail the API sends in dev: inbox at http://localhost:8025, SMTP on 1025.
   mailpit:
-    image: 'axllent/mailpit:v1.27.10'
+    image: 'axllent/mailpit:v1.31.5'
     labels:
       org.springframework.boot.ignore: 'true'
     ports:
