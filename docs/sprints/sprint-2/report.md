@@ -13,6 +13,9 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | To do | — | — |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-18:** MLink-113 (GitHub #52, one compose setup per workflow) in review on
+`fix/52-one-compose-setup`: no migration, no endpoint.
+
 ### Where we are (handoff, 2026-10-16)
 
 Merged on `master`: sub-sprint 1 (#32), staff-only `/api/users` (#33, MLink-57), GitHub issues #28/#29
@@ -56,6 +59,42 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-113 — one compose setup per workflow, GitHub #52 (2026-10-18, fix/52-one-compose-setup)
+
+**Decision:** keep two files, one job each, one command each (README §1 table).
+- `compose.yaml`, coding: Postgres, Keycloak + its DB, Mailpit with fixed dev-only values that match
+  `application-dev.yml`; the API runs on the host. `SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run`
+  starts it through Spring Boot's compose integration, now pinned to this file
+  (`spring.docker.compose.file=compose.yaml`, before: discovery by file name).
+- `docker-compose.yml`, full stack and staging/prod: the same four services + API image + Prometheus,
+  every secret required from `.env`.
+- Not a base file + overrides: compose reads `.env` by itself, so the generated secrets would reach the
+  dev mode, whose values must stay those of `application-dev.yml`. The setup scripts already name each file.
+
+**Drift removed** (in `compose.yaml`): Postgres had no named volume, so every setup run (`down`, `up`)
+gave the app an empty database while Keycloak kept its users; now `pgdata` like the full stack. Healthchecks
+for Postgres, Keycloak's DB and Keycloak; `KC_HOSTNAME_BACKCHANNEL_DYNAMIC` and `KC_METRICS_ENABLED`.
+Still different on purpose: the secrets, Postgres's host port (any free one in dev, the integration hands
+it to the app), the `org.springframework.boot.ignore` labels.
+
+**Proof:** `ComposeFilesTest` (plain test, no API change): the full stack = the dev services + `app` +
+`prometheus`; shared services have the same image, command, container ports, mounts, healthcheck,
+dependencies and environment keys; every value but a required secret equals the full stack's default; both
+files declare their named volumes; the integration is pinned. Committed red (3 failures), then green;
+mutation check: a different `KC_HOSTNAME` default in `docker-compose.yml` turns it red. `docker compose
+config` resolves both files. Setup script on Windows, dev mode and `-FullStack`: 0 failures, 0 warnings.
+`setup-dev.sh --skip-tests` (dev mode) in Git Bash 5.3 on Windows: 0 failures, 0 warnings. Not run on macOS
+(bash 3.2) or Linux, and not in `--full-stack` mode: no change to the scripts, so this stays a gap.
+
+**For everyone:** dev Postgres data now survives a setup run. README §1 has a table of what keeps and what
+deletes the dev volumes. After checking out a branch with other migrations, re-run with `-Reset` if Flyway
+refuses to start.
+
+**Found, not fixed here (the scripts are shared files):** the two scripts write the realm stamp with a
+different hash case (PowerShell `Get-FileHash` upper case, `sha256sum` lower case). On one clone used
+with both scripts the stamps never match, so every switch of script wipes the dev volumes (the realm is
+saved first). One user runs one script, so it only bites when both are used on one machine.
 
 ## MLink-59 — audit trail, every refusal recorded (2026-10-17, epic/MLink-6)
 
