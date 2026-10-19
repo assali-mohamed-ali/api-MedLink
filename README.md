@@ -99,10 +99,24 @@ docker compose --env-file .env.prod -f docker-compose.yml up --build -d    # SPR
 
 The four shared services are the same in both files: images, commands, container ports, mounts,
 volumes, healthchecks and settings. Only the secrets differ. `ComposeFilesTest` fails when they drift,
-so change a shared service in both files. The two setups share their volumes (same folder, same
-compose project): the setup scripts wipe them when you switch between A and B. Data is kept between
-runs, so after checking out a branch with other migrations, re-run with `-Reset` / `--reset` if Flyway
-refuses to start.
+so change a shared service in both files.
+
+**What happens to dev data** (volumes `pgdata` = app database, `keycloak-db-data` = Keycloak). A and B
+use the same two volumes (same folder, so same compose project), but with different passwords, so a
+volume made by one setup refuses the other's credentials.
+
+| You run | Containers | Volumes (data) |
+|---|---|---|
+| the setup script again, same setup | removed (`down`) and recreated | **kept** |
+| the setup script in the other setup (A ↔ B) | removed | **deleted**, the realm is saved first to `.dev/realm-backups/` |
+| the setup script after `keycloak/realm-medlink.json` changed | removed | **deleted**, same backup (Keycloak imports the file only into an empty database) |
+| `-Reset` / `--reset` | removed | **deleted**, same backup |
+| `-KeepData` / `--keep-data` | removed | **kept** even after a realm change or a switch A ↔ B (a warning says so); after a switch the old passwords no longer match, so use it only within one setup |
+| `-Stop` / `--stop`, or by hand `docker compose -f <file> down` | removed | **kept** |
+| by hand `docker compose -f <file> down -v` | removed | **deleted**, no backup |
+
+Kept data includes the applied migrations: after checking out a branch with other migrations, re-run
+with `-Reset` / `--reset` if Flyway refuses to start.
 
 Useful URLs: API `http://localhost:8080`, Swagger `http://localhost:8080/swagger-ui.html`,
 health `http://localhost:8080/actuator/health`, Prometheus `http://localhost:9090`,

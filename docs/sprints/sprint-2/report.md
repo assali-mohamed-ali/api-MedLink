@@ -84,10 +84,17 @@ dependencies and environment keys; every value but a required secret equals the 
 files declare their named volumes; the integration is pinned. Committed red (3 failures), then green;
 mutation check: a different `KC_HOSTNAME` default in `docker-compose.yml` turns it red. `docker compose
 config` resolves both files. Setup script on Windows, dev mode and `-FullStack`: 0 failures, 0 warnings.
-`setup-dev.sh` was not run (no change to the scripts).
+`setup-dev.sh --skip-tests` (dev mode) in Git Bash 5.3 on Windows: 0 failures, 0 warnings. Not run on macOS
+(bash 3.2) or Linux, and not in `--full-stack` mode: no change to the scripts, so this stays a gap.
 
-**For everyone:** dev Postgres data now survives a setup run. After checking out a branch with other
-migrations (V8 is claimed by MLink-112 and MLink-97), re-run with `-Reset` if Flyway refuses to start.
+**For everyone:** dev Postgres data now survives a setup run. README §1 has a table of what keeps and what
+deletes the dev volumes. After checking out a branch with other migrations, re-run with `-Reset` if Flyway
+refuses to start.
+
+**Found, not fixed here (the scripts are shared files):** the two scripts write the realm stamp with a
+different hash case (PowerShell `Get-FileHash` upper case, `sha256sum` lower case). On one clone used
+with both scripts the stamps never match, so every switch of script wipes the dev volumes (the realm is
+saved first). One user runs one script, so it only bites when both are used on one machine.
 
 ## MLink-59 — audit trail, every refusal recorded (2026-10-17, epic/MLink-6)
 
