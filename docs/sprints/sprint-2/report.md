@@ -481,6 +481,7 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-19 | The login keeps the OAuth password grant, as a consciously accepted exception: [decision record 0001](../../decisions/0001-login-password-grant.md) | Keeps "the frontend never talks to Keycloak"; decided by the plan owner and the code owner on PR #58 (GitHub #50); its conditions: per-IP rate limiting (done, #60) and this link | Authorization Code + PKCE with a themed Keycloak login page |
 | 2026-10-18 | Rate limits counted in Postgres (`rate_limits`, one atomic upsert per hit), not Redis | Shared by every instance and race-free with the database we already run; no new service to deploy and secure (GitHub #51) | Redis; the in-memory map (one instance, racy) |
 | 2026-10-18 | Per-IP limit past the threshold → 429 `TOO_MANY_REQUESTS` with `Retry-After`; per-account limits stay silent (201 / 202) and login per account stays Keycloak's lockout | A count keyed by the IP says nothing about an account, so a 429 is safe; a per-account 429 would tell which emails exist | The usual answer when limited per IP (hides an outage of the form from real users); our own per-account login lock |
 | 2026-10-18 | `X-Forwarded-For` believed only from `TRUSTED_PROXIES` (loopback by default) | Anyone can send the header; trusting it from everyone lets a client pick its own IP and escape every limit | Spring Boot's default list (all private ranges, which includes Docker's bridge) |

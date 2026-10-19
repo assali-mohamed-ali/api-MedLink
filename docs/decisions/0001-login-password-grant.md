@@ -2,12 +2,44 @@
 
 | | |
 |---|---|
-| Status | **Proposed**, for the team to decide |
-| Date | 2026-10-18 |
+| Status | **Accepted: option 1**, keep the password grant as a consciously accepted exception |
+| Date | proposed 2026-10-18, decided 2026-10-19 |
 | Author | Youssef Benchaouacha |
-| Deciders | Mohamed Ben Naima (plan owner), Asseli Mohamed Ali (code owner), Ahlem Sakly (React) |
-| Tracking | GitHub #50, YouTrack MLink-96 (story MLink-15) |
-| Decide before | sub-sprint 3 starts (MLink-62/63, staff code) |
+| Deciders | Mohamed Ben Naima (plan owner), Asseli Mohamed Ali (code owner) |
+| Tracking | GitHub #50, PR #58, YouTrack MLink-96 (story MLink-15) |
+
+## Decision
+
+**Option 1: the login keeps the OAuth password grant.** Decided on PR #58 by the plan owner
+([comment](https://github.com/assali-mohamed-ali/api-MedLink/pull/58#issuecomment-6254098348), 2026-10-18)
+and the code owner ([comment](https://github.com/assali-mohamed-ali/api-MedLink/pull/58#issuecomment-6263047895),
+2026-10-19: "Continue with option 1").
+
+This is **a consciously accepted exception to the OAuth security best practice, not an equivalent of
+Authorization Code + PKCE**: the API still sees passwords, and every second factor and password rule
+is ours to build. In the code owner's words, the option sits "in between following standards and
+inventing your workflow", so the work now is to make it secure and cover the basics of
+authentication and authorisation.
+
+The two conditions of option 1:
+
+1. **Per-IP rate limiting on the public endpoints:** done, PR #60 (GitHub #51, MLink-112): login,
+   register and resend answer 429 past their limit, counted in the database and shared by every API
+   instance, with the same answer for any email.
+2. **This record linked from the sprint report:** done, `docs/sprints/sprint-2/report.md`, Decisions log.
+
+## What option 1 still needs
+
+The basics the code owner asked for, with where each one is tracked:
+
+| What | Why | Where |
+|---|---|---|
+| Staff code (TOTP) for practitioners and staff | no second factor today | MLink-62/63 (Mohamed), as planned |
+| Session cookie `Secure` in staging/prod, `SameSite=Strict` | the cookie is the only credential the browser holds | MLink-84 (Mohamed) |
+| Swagger UI, `/v3/api-docs` and `/actuator/prometheus` not public in production | they describe the API and its internals to anyone | GitHub #49 (Youssef) |
+| No default database password in staging/prod (`secret` today) | a missing secret must stop the start, not fall back | to track |
+| `ADMINISTRATIVE_STAFF` without Keycloak's `manage-users` rights | the `medlink-admin` service account does the admin calls; least privilege | to track |
+| Separate database roles for the audit trail | the runtime role can drop the append-only triggers today | GitHub #57 (Mohamed) |
 
 ## Context
 
@@ -86,7 +118,7 @@ Costs:
 | Work already done | kept as is | login code replaced (about one sub-sprint of rework) |
 | Work still to do in sub-sprints 3–4 | custom TOTP, password change and history | realm configuration, theme, tests |
 
-## Recommendation (author)
+## Recommendation (author, before the decision; not retained)
 
 **Option 2, if the team accepts a themed Keycloak login page.** It removes the deprecated grant, takes
 the second factor and password rules out of our own code, and the cost is lowest **now**: sub-sprint 3
@@ -96,7 +128,7 @@ If the team keeps the rule "no Keycloak page", **option 1** stays acceptable for
 down as an accepted risk, with two conditions: per-IP rate limiting on the public endpoints (#51), and
 this record kept in the sprint report so the choice is explained, not hidden.
 
-## Migration plan (if option 2)
+## Migration plan (if option 2; not retained, kept for reference if the decision is revisited)
 
 1. Team decision recorded here (Status → Accepted), `CLAUDE.md` hard rule and `plan.md` §2 updated.
 2. Realm: `medlink-bff` standard flow on, direct grants off; conditional OTP for the staff and
@@ -111,5 +143,10 @@ this record kept in the sprint report so the choice is explained, not hidden.
 
 ## Consequences
 
-Whatever is chosen, this record says why, and `report.md` links to it. Until the team decides, the
-password grant stays as it is: nothing in the code changes because of this record.
+- The login (`POST /api/auth/login`), the hard rule "the frontend never talks to Keycloak" and the
+  React login page (MLink-52) stay as they are; no code changes because of this record.
+- Sub-sprints 3 and 4 stay as planned: staff code in the API (MLink-62/63), password change, forced
+  change and history (MLink-87/88/91).
+- The items of "What option 1 still needs" are the security work that comes with this choice.
+- Revisit this record if the project leaves its private network, adds passkeys, or the password grant
+  disappears from Keycloak.
