@@ -1,4 +1,3 @@
-
 name: AI Contribution Disclosure
 
 on:
@@ -11,7 +10,11 @@ on:
       - ready_for_review
 
 permissions:
-  pull-requests: read
+  pull-requests: write
+
+concurrency:
+  group: ai-disclosure-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
 
 jobs:
   ai-disclosure:
@@ -19,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Check AI disclosure in PR description
+      - name: Validate both AI checklist declarations
         uses: actions/github-script@v9
         with:
           script: |
@@ -31,17 +34,40 @@ jobs:
             }
 
             const body = pr.body || "";
+            const aiText = "J'ai utilisé des outils d'IA générative pour contribuer à cette PR.";
+            const humanText = "Je confirme avoir relu, compris et validé les modifications proposées par l'IA.";
 
-            const aiDisclosure =
-              /^\s*-\s*\[[xX]\]\s*J'ai utilisé des outils d'IA générative pour contribuer à cette PR\.\s*$/m;
+            const checklistPattern = (text) =>
+              new RegExp("^\\s*-\\s*\\[([ xX])\\]\\s*" + text.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\$&") + "\\s*$", "gm");
 
-            if (!aiDisclosure.test(body)) {
-              core.setFailed(
-                "AI disclosure is missing or unchecked. " +
-                "Update the PR description and check: " +
-                "\"J'ai utilisé des outils d'IA générative pour contribuer à cette PR.\""
-              );
+            const findItems = (text) => [...body.matchAll(checklistPattern(text))];
+
+            const aiItems = findItems(aiText);
+            const humanItems = findItems(humanText);
+
+            let reason = "";
+
+            if (aiItems.length !== 1 || humanItems.length !== 1) {
+              reason = "Both AI checklist items must appear exactly once in the PR description.";
+            } else {
+              const aiChecked = aiItems[0][1].toLowerCase() === "x";
+              const humanChecked = humanItems[0][1].toLowerCase() === "x";
+
+              if (aiChecked !== humanChecked) {
+                reason = "The AI-use and human-review checkboxes must have the same state: both checked or both unchecked.";
+              }
+            }
+
+            if (reason) {
+              core.error(reason + " This PR will be closed. Correct the checklist and reopen the PR.");
+              await github.rest.pulls.update({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                pull_number: pr.number,
+                state: "closed"
+              });
+              core.setFailed(reason);
               return;
             }
 
-            core.info("AI contribution disclosure is present and checked.");
+            core.info("Both AI checklist items are present exactly once and have matching states.");
