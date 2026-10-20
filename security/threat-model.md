@@ -113,7 +113,7 @@ flowchart LR
 | # | Threat | Controls (where) | Status | Open work |
 |---|---|---|---|---|
 | E1 | A role or an id forged in a request | roles only from the signed token, filtered to the three MedLink roles (`security/Roles`, `LoginService`); never a role or the caller's id from a body | ✅ | |
-| E2 | A new endpoint without an access rule | deny by default (`SecurityConfig`), `@PreAuthorize`; the role × route matrix fails the build on a route without a line (`functional/AccessMatrixFunctionalTest`, MLink-60) | 🟡 | the matrix is in review (PR #77) |
+| E2 | A new endpoint without an access rule | deny by default (`SecurityConfig`), `@PreAuthorize`; the role × route matrix fails the build on a route without a line (`functional/AccessMatrixFunctionalTest`, MLink-60, #77; `OPEN` cells also reject 5xx and redirects) | ✅ | |
 | E3 | **Staff use Keycloak's admin rights directly** | the realm role `ADMINISTRATIVE_STAFF` holds no `realm-management` right; only the API's service account `medlink-admin` does (`keycloak/realm-medlink.json`, `StaffKeycloakRightsFunctionalTest`: staff get 403 from Keycloak's admin API; GitHub #80, fixed in #81) | ✅ | staging and prod: remove the five old role mappings by hand (the realm is imported only into an empty database) |
 | E4 | The Keycloak console or bootstrap admin taken over | the bootstrap admin is separate from the realm | ❌ | MFA for admin identities (GitHub #68); the browser no longer needs Keycloak, so its port can be closed to the public in production |
 

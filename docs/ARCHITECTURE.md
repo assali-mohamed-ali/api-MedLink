@@ -128,7 +128,7 @@ The API checks access in four layers:
 | Deny by default | `config/SecurityConfig` | every route needs a session, except the public auth endpoints, health/info, API docs and metrics |
 | Role | `@PreAuthorize("hasRole(...)")` with `security/Roles` | e.g. only staff list or delete users |
 | Ownership | `security/OwnershipGuard` | a user reads only their own record; checked before the lookup, so the same 403 whether the id exists or not |
-| Proof | `functional/AccessMatrixFunctionalTest` | one line per `/api` route × anonymous, patient, practitioner, staff; a route without a line fails the build (MLink-60, in review) |
+| Proof | `functional/AccessMatrixFunctionalTest` | one line per `/api` route × anonymous, patient, practitioner, staff; a route without a line fails the build (MLink-60, #77) |
 
 Every 403 is written to the audit trail (`audit_entries`, append-only).
 
