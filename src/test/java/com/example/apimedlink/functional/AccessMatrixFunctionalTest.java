@@ -24,7 +24,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
  */
 class AccessMatrixFunctionalTest extends FunctionalTestBase {
 
-    enum Expect { OPEN, LOGIN, FORBIDDEN } // OPEN: past security (not 401/403) · LOGIN: 401 · FORBIDDEN: 403
+    enum Expect { OPEN, LOGIN, FORBIDDEN } // OPEN: past security, no server error (2xx-4xx but 401/403) · LOGIN: 401 · FORBIDDEN: 403
 
     record Rule(String method, String path, Expect anonymous, Expect patient, Expect practitioner, Expect staff) {
         @Override
@@ -80,10 +80,14 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
     @ParameterizedTest(name = "{1} {0} → {2}")
     @MethodSource("cells")
     void eachCallerGetsWhatTheMatrixSays(Rule rule, Who who, Expect expect) throws Exception {
-        int status = send(as(who), rule.method(), rule.path()).statusCode();
+        HttpResponse<String> response = send(as(who), rule.method(), rule.path());
+        int status = response.statusCode();
 
+        // The browser follows redirects: an answer that came through one is never what the matrix expects
+        assertThat(response.previousResponse()).as("no redirect").isEmpty();
         switch (expect) {
-            case OPEN -> assertThat(status).as("past security").isNotIn(401, 403);
+            // Past security, and the endpoint did not break: a 500 must not pass for "allowed" (review on #77)
+            case OPEN -> assertThat(status).as("past security, no server error").isBetween(200, 499).isNotIn(401, 403);
             case LOGIN -> assertThat(status).as("asked to log in").isEqualTo(401);
             case FORBIDDEN -> assertThat(status).as("refused by role or ownership").isEqualTo(403);
         }

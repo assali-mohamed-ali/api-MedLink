@@ -75,8 +75,8 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 
 **Built:** one test file, `functional/AccessMatrixFunctionalTest`, no production code and no shared file changed.
 At the top of the class, one line per `/api` route and the expected answer for each caller, against the real
-API, Keycloak and database. `OPEN` = past security (any status but 401/403: 200, 204, 400, 404…), `LOGIN` =
-401, `FORBIDDEN` = 403.
+API, Keycloak and database. `OPEN` = past security and the endpoint did not break (2xx to 4xx but 401/403: 200,
+204, 400, 404…; never a 5xx), `LOGIN` = 401, `FORBIDDEN` = 403. No cell may answer through a redirect.
 
 | Route | Anonymous | Patient | Practitioner | Staff |
 |---|---|---|---|---|
@@ -109,6 +109,10 @@ the four expected answers, in the same PR as the endpoint. A path variable stays
 removing `@PreAuthorize` from the user list fails the patient and practitioner cells of `GET /api/users`;
 making `/api/users/_health` public fails its anonymous cell. Each break failed only its own cells.
 `./mvnw -B verify`: green; reverse class order: **201 tests, 0 failures**. No endpoint change, so no Postman change.
+After the code owner's review on #77 (non-blocking: `OPEN` also let a 5xx or a redirect through): `OPEN` now
+requires 2xx–4xx, and every cell checks that no redirect was followed. Still 41 green. Mutation checks: a
+`GET /api/auth/csrf` that throws (500) fails its four `OPEN` cells; a `/api/users/_health` that redirects fails its
+three logged-in cells on "no redirect".
 
 **Limits:** the matrix checks who gets past security, not what the answer holds (that is each feature's own
 tests, e.g. `OwnershipFunctionalTest`). Routes outside `/api` (actuator, Swagger) are not in it: their exposure
