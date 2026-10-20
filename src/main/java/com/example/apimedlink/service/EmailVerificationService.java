@@ -28,6 +28,7 @@ public class EmailVerificationService {
     private final KeycloakAdminService keycloak;
     private final UserRepository users;
     private final MailService mail;
+    private final MailThrottle throttle;
     private final TransactionTemplate tx;
 
     public EmailVerificationService(
@@ -35,11 +36,13 @@ public class EmailVerificationService {
             KeycloakAdminService keycloak,
             UserRepository users,
             MailService mail,
+            MailThrottle throttle,
             TransactionTemplate tx) {
         this.tokens = tokens;
         this.keycloak = keycloak;
         this.users = users;
         this.mail = mail;
+        this.throttle = throttle;
         this.tx = tx;
     }
 
@@ -72,6 +75,10 @@ public class EmailVerificationService {
         UUID id = userId.get();
         Instant last = tokens.lastIssuedAt(id, Purpose.VERIFY_EMAIL);
         if (last != null && Instant.now().isBefore(last.plus(RESEND_INTERVAL))) {
+            return;
+        }
+        // The check above reads, then we write: only one of several requests at once gets past here (GitHub #51)
+        if (!throttle.allow("verification-resend", id.toString(), RESEND_INTERVAL)) {
             return;
         }
         KeycloakUser account;

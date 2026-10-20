@@ -1,16 +1,27 @@
+# Dev dependencies; the API runs on the host: ./mvnw spring-boot:run (or the setup scripts).
+# Fixed dev-only values, never .env: they match application-dev.yml. The full stack in containers is
+# docker-compose.yml: the same services, kept alike by ComposeFilesTest; only the secrets differ there.
 services:
   postgres:
-    image: 'postgres:16'
+    image: 'postgres:18'
     environment:
       - 'POSTGRES_DB=mydatabase'
       - 'POSTGRES_PASSWORD=secret'
       - 'POSTGRES_USER=myuser'
     ports:
+      # any free host port: Spring Boot's compose integration gives it to the app
       - '5432'
+    volumes:
+      - 'pgdata:/var/lib/postgresql/data'
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER:-myuser}']
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   # Keycloak has its own database (separate container + volume), never the app's one.
   keycloak-db:
-    image: 'postgres:16'
+    image: 'postgres:18'
     labels:
       # not the app datasource: hide it from spring-boot-docker-compose
       org.springframework.boot.ignore: 'true'
@@ -21,13 +32,13 @@ services:
     volumes:
       - 'keycloak-db-data:/var/lib/postgresql/data'
     healthcheck:
-      test: ['CMD-SHELL', 'pg_isready -U keycloak']
+      test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER}']
       interval: 5s
       timeout: 5s
       retries: 10
 
   keycloak:
-    image: 'quay.io/keycloak/keycloak:26.7.5'
+    image: 'quay.io/keycloak/keycloak:26.8.1'
     command: ['start-dev', '--import-realm']
     labels:
       org.springframework.boot.ignore: 'true'
@@ -39,8 +50,10 @@ services:
       - 'KC_BOOTSTRAP_ADMIN_USERNAME=admin'
       - 'KC_BOOTSTRAP_ADMIN_PASSWORD=admin'
       - 'KC_HOSTNAME=http://localhost:8180'
+      - 'KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true'
       - 'KC_HTTP_ENABLED=true'
       - 'KC_HEALTH_ENABLED=true'
+      - 'KC_METRICS_ENABLED=true'
       # Placeholders resolved inside keycloak/realm-medlink.json at import (dev values only)
       - 'KC_BFF_CLIENT_SECRET=dev-only-medlink-bff-secret'
       - 'KC_ADMIN_CLIENT_SECRET=dev-only-medlink-admin-secret'
@@ -53,10 +66,17 @@ services:
     depends_on:
       keycloak-db:
         condition: service_healthy
+    healthcheck:
+      # no curl in the image: plain HTTP over bash /dev/tcp on the management port
+      test: ['CMD', 'bash', '-c', "exec 3<>/dev/tcp/127.0.0.1/9000 && printf 'GET /health/ready HTTP/1.1\\r\\nHost: localhost\\r\\nConnection: close\\r\\n\\r\\n' >&3 && grep -q UP <&3"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 30s
 
   # Catches every mail the API sends in dev: inbox at http://localhost:8025, SMTP on 1025.
   mailpit:
-    image: 'axllent/mailpit:v1.27.10'
+    image: 'axllent/mailpit:v1.31.5'
     labels:
       org.springframework.boot.ignore: 'true'
     ports:
@@ -64,4 +84,5 @@ services:
       - '8025:8025'
 
 volumes:
+  pgdata:
   keycloak-db-data:
