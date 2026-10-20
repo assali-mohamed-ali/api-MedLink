@@ -19,6 +19,11 @@ work by priority). No code change. **New gap found:** the realm role `ADMINISTRA
 `manage-users` and `view-realm`, so staff could manage users in Keycloak's console outside the API (threat model
 E3), tracked in GitHub #80 and fixed in #81 (MLink-121); E3 is ✅ in the threat model.
 
+**2026-10-20:** MLink-60 (role × route matrix, the last task of MLink-16 RBAC) ready on `epic/MLink-6`: no
+migration, no endpoint. **From now on every new `/api` route needs a line in `AccessMatrixFunctionalTest`, or
+the build fails** (see its section). Found while checking the dev stack: since #74 (postgres 18) `setup-dev`
+fails on `master` for everyone, even with empty volumes; reported on #74, not fixed here (tests still use 16).
+
 **2026-10-20:** MLink-121 (GitHub #80, threat model E3): the realm role `ADMINISTRATIVE_STAFF` no longer holds
 Keycloak admin rights. Realm file change only, no migration, no endpoint. **Staging and prod need the same change
 by hand in the Keycloak console** (see its section); locally the setup script re-imports the realm (dev volumes
@@ -76,6 +81,54 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-60 — role × route matrix (2026-10-20, epic/MLink-6)
+
+**Built:** one test file, `functional/AccessMatrixFunctionalTest`, no production code and no shared file changed.
+At the top of the class, one line per `/api` route and the expected answer for each caller, against the real
+API, Keycloak and database. `OPEN` = past security and the endpoint did not break (2xx to 4xx but 401/403: 200,
+204, 400, 404…; never a 5xx), `LOGIN` = 401, `FORBIDDEN` = 403. No cell may answer through a redirect.
+
+| Route | Anonymous | Patient | Practitioner | Staff |
+|---|---|---|---|---|
+| `GET /api/auth/csrf` | OPEN | OPEN | OPEN | OPEN |
+| `POST /api/auth/register` | OPEN | OPEN | OPEN | OPEN |
+| `POST /api/auth/verify-email` | OPEN | OPEN | OPEN | OPEN |
+| `POST /api/auth/verify-email/resend` | OPEN | OPEN | OPEN | OPEN |
+| `POST /api/auth/login` | OPEN | OPEN | OPEN | OPEN |
+| `POST /api/auth/logout` | LOGIN | OPEN | OPEN | OPEN |
+| `GET /api/users` | LOGIN | FORBIDDEN | FORBIDDEN | OPEN |
+| `GET /api/users/{id}` | LOGIN | FORBIDDEN | FORBIDDEN | OPEN |
+| `DELETE /api/users/{id}` | LOGIN | FORBIDDEN | FORBIDDEN | OPEN |
+| `GET /api/users/_health` | LOGIN | OPEN | OPEN | OPEN |
+
+- Each cell is its own test (40), with a fresh browser logged in as the realm's `patient.dev`,
+  `practitioner.dev` or `staff.dev`, so a logout cannot spoil another cell and each has its own IP (rate limits).
+- Every call carries the CSRF header: a 403 is a refusal by role or ownership, never a missing token. `{id}` is a
+  random UUID (someone else's: a patient gets 403, staff 404). Writes send `{}`, so public endpoints answer 400
+  and nothing is created.
+- `everyApiRouteHasALineInTheMatrix` reads every `/api` route from Spring's `RequestMappingHandlerMapping` and
+  fails when the routes and the matrix differ, either way (a mapping with no HTTP method shows as `ANY`).
+
+**Adding an endpoint (Ela, Mohamed, Chourouk, sub-sprint 5):** add one `new Rule(...)` line to `MATRIX` with
+the four expected answers, in the same PR as the endpoint. A path variable stays as written in the mapping
+(`{id}`); a path variable other than `{id}` needs a value in `send(...)`.
+
+**Proof:** red first (eb6472d: empty matrix, Spring listed exactly the 10 routes), then green (19b0157): **41 tests,
+0 failures**. Mutation checks, each restored after: a new `GET /api/users/_probe` without a line fails
+`everyApiRouteHasALineInTheMatrix`, which names `"GET /api/users/_probe"` (the build fails on a forgotten route);
+removing `@PreAuthorize` from the user list fails the patient and practitioner cells of `GET /api/users`;
+making `/api/users/_health` public fails its anonymous cell. Each break failed only its own cells.
+`./mvnw -B verify`: green; reverse class order: **201 tests, 0 failures**. No endpoint change, so no Postman change.
+After the code owner's review on #77 (non-blocking: `OPEN` also let a 5xx or a redirect through): `OPEN` now
+requires 2xx–4xx, and every cell checks that no redirect was followed. Still 41 green. Mutation checks: a
+`GET /api/auth/csrf` that throws (500) fails its four `OPEN` cells; a `/api/users/_health` that redirects fails its
+three logged-in cells on "no redirect".
+
+**Limits:** the matrix checks who gets past security, not what the answer holds (that is each feature's own
+tests, e.g. `OwnershipFunctionalTest`). Routes outside `/api` (actuator, Swagger) are not in it: their exposure
+in production is GitHub #49 and #65. Maven's console names the cells by number (`[26]`); IDEs and the
+surefire XML report show the readable name.
 
 ## MLink-121 — staff without Keycloak admin rights, GitHub #80 (2026-10-20, fix/80-staff-keycloak-rights)
 
@@ -546,6 +599,7 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-20 | The role × route matrix asserts past security / 401 / 403, not exact statuses, and reads the routes from Spring | It proves access rules only, so a feature's answers (200, 400, 404) can change without touching it; a route missing from the matrix fails the build (MLink-60) | Exact status per cell; a hand-kept list of routes |
 | 2026-10-19 | The login keeps the OAuth password grant, as a consciously accepted exception: [decision record 0001](../../decisions/0001-login-password-grant.md) | Keeps "the frontend never talks to Keycloak"; decided by the plan owner and the code owner on PR #58 (GitHub #50); its conditions: per-IP rate limiting (done, #60) and this link | Authorization Code + PKCE with a themed Keycloak login page |
 | 2026-10-18 | Rate limits counted in Postgres (`rate_limits`, one atomic upsert per hit), not Redis | Shared by every instance and race-free with the database we already run; no new service to deploy and secure (GitHub #51) | Redis; the in-memory map (one instance, racy) |
 | 2026-10-18 | Per-IP limit past the threshold → 429 `TOO_MANY_REQUESTS` with `Retry-After`; per-account limits stay silent (201 / 202) and login per account stays Keycloak's lockout | A count keyed by the IP says nothing about an account, so a 429 is safe; a per-account 429 would tell which emails exist | The usual answer when limited per IP (hides an outage of the form from real users); our own per-account login lock |
