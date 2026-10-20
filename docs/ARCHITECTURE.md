@@ -136,9 +136,9 @@ Every 403 is written to the audit trail (`audit_entries`, append-only).
   `/practitioners` is one change, and every holder of a role can be listed from its group.
 - **One role per person:** `Patient extends User` (JPA `JOINED`); a practitioner is another subclass.
 - **Role changes apply at the next login,** because the roles are read from the token issued at login.
-- **Known gap:** the realm role `ADMINISTRATIVE_STAFF` still holds Keycloak's `manage-users` and
-  `view-realm` rights, so staff could manage users in Keycloak's own console, outside the API's rules and
-  audit. The API's service account should hold those rights alone (threat model E3, GitHub #80).
+- **Staff hold no Keycloak admin rights:** `ADMINISTRATIVE_STAFF` is a plain realm role, so staff manage
+  accounts only through the API, under its rules and audit trail. Only the API's service account `medlink-admin`
+  holds `realm-management` rights (threat model E3, GitHub #80, fixed in #81).
 
 ### How to add a role
 
@@ -284,8 +284,8 @@ treatment, Statement of Applicability, policies, awareness, internal audit, mana
 | 5.15 Access control | Deny by default; roles; ownership checks; role × route matrix | `config/SecurityConfig.java`, `security/OwnershipGuard.java`, `AccessMatrixFunctionalTest` | Covered | Metrics and API docs public in production (GitHub #49, #65) |
 | 5.16 Identity management | One identity store (Keycloak); `users.id` = Keycloak id; one role per person | realm, `V3__users_keycloak_id_as_pk.sql` | Covered | |
 | 5.17 Authentication information | Passwords only in Keycloak; policy 12+ characters, mixed, not the email; never logged by the API | realm `passwordPolicy`, `LoginRequest.toString` | Covered | Password history and forced change: MLink-87/88 |
-| 5.18 Access rights | Roles through groups; new users in `/patients`; no role accepted from requests | realm `groups`, `defaultGroups`, `security/Roles` | Partial | Periodic review of group membership; staff's Keycloak admin rights (threat model E3, GitHub #80) |
-| 8.2 Privileged access rights | Admin calls through a dedicated service account; actuator limited to health/info/prometheus | realm, `application-*.yml` | Partial | MFA for staff and the bootstrap admin (MLink-62/63, GitHub #68); remove `manage-users` from `ADMINISTRATIVE_STAFF` (GitHub #80) |
+| 5.18 Access rights | Roles through groups; new users in `/patients`; no role accepted from requests | realm `groups`, `defaultGroups`, `security/Roles` | Partial | Periodic review of group membership |
+| 8.2 Privileged access rights | Admin calls only through a dedicated service account (staff hold no Keycloak admin rights, #81); actuator limited to health/info/prometheus | realm, `application-*.yml` | Partial | MFA for staff and the bootstrap admin (MLink-62/63, GitHub #68) |
 | 8.4 Access to source code | CODEOWNERS on security paths; ruleset on `master` (owner review, CodeQL) | `.github/CODEOWNERS`, README | Covered | Same protection for `staging`/`prod` |
 | 8.5 Secure authentication | Password grant server to server (accepted exception, decision 0001); lockout after 5 failures for 15 min; per-IP limits; 15-minute idle session; HttpOnly, Strict, Secure cookies; new session id at login | realm, `RateLimitFilter`, `LoginSessions`, `application*.yml` | Partial | No second factor yet; TLS ends at a proxy not in the repo |
 | 8.8 Management of technical vulnerabilities | Dependabot; Dependency-Check, Trivy and CodeQL blocking; private disclosure | `.github/dependabot.yml`, workflows, `SECURITY.md` | Covered | |
@@ -312,7 +312,6 @@ The prioritised list, with the threat behind each item, is in
 [the threat model, §6](../security/threat-model.md#6-open-work-by-priority). In short:
 
 - [ ] Second factor for practitioners and staff (MLink-62/63); MFA for admin identities (GitHub #68)
-- [ ] Remove Keycloak's `manage-users` and `view-realm` from `ADMINISTRATIVE_STAFF` (GitHub #80)
 - [ ] No default database credentials outside dev (GitHub #64)
 - [ ] Metrics and API docs not public in production (GitHub #49, #65)
 - [ ] Separate database roles for the audit trail (GitHub #57)
@@ -325,7 +324,7 @@ The prioritised list, with the threat behind each item, is in
 
 Done since the first version of this guide: login, logout and session expiry through the API, negative
 authorization tests and the access matrix, per-IP rate limits, Keycloak events, the audit trail of refusals,
-blocking SCA and Trivy, cookie hardening, `postgres:latest` pinned.
+blocking SCA and Trivy, cookie hardening, `postgres:latest` pinned, staff without Keycloak admin rights (#81).
 
 ## Rules of the road, FAQ & glossary
 

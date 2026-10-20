@@ -114,7 +114,7 @@ flowchart LR
 |---|---|---|---|---|
 | E1 | A role or an id forged in a request | roles only from the signed token, filtered to the three MedLink roles (`security/Roles`, `LoginService`); never a role or the caller's id from a body | ✅ | |
 | E2 | A new endpoint without an access rule | deny by default (`SecurityConfig`), `@PreAuthorize`; the role × route matrix fails the build on a route without a line (`functional/AccessMatrixFunctionalTest`, MLink-60) | 🟡 | the matrix is in review (PR #77) |
-| E3 | **Staff use Keycloak's admin rights directly** | none: the realm role `ADMINISTRATIVE_STAFF` holds `realm-management` `manage-users` and `view-realm`, so a staff member can manage users in Keycloak's admin console and skip the API's rules and audit | ❌ | remove those rights from the role: the API's service account `medlink-admin` makes the admin calls: GitHub #80 |
+| E3 | **Staff use Keycloak's admin rights directly** | the realm role `ADMINISTRATIVE_STAFF` holds no `realm-management` right; only the API's service account `medlink-admin` does (`keycloak/realm-medlink.json`, `StaffKeycloakRightsFunctionalTest`: staff get 403 from Keycloak's admin API; GitHub #80, fixed in #81) | ✅ | staging and prod: remove the five old role mappings by hand (the realm is imported only into an empty database) |
 | E4 | The Keycloak console or bootstrap admin taken over | the bootstrap admin is separate from the realm | ❌ | MFA for admin identities (GitHub #68); the browser no longer needs Keycloak, so its port can be closed to the public in production |
 
 ### Supply chain and operations
@@ -140,7 +140,6 @@ be triggered by someone else (D2).
 | Priority | Item | Tracked |
 |---|---|---|
 | 1 | Staff and practitioner second factor (S2); MFA for admin identities (E4) | MLink-62/63, GitHub #68 |
-| 1 | Remove Keycloak admin rights from `ADMINISTRATIVE_STAFF` (E3) | GitHub #80 |
 | 1 | No default database credentials outside dev (I7) | GitHub #64 |
 | 2 | Metrics and API docs not public in production (I4) | GitHub #49, #65 |
 | 2 | Separate database roles for the audit trail (T2) | GitHub #57 |
