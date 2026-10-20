@@ -31,13 +31,7 @@
     "realm": [
       {
         "name": "ADMINISTRATIVE_STAFF",
-        "description": "MedLink administrative staff: manages users and their roles in this realm",
-        "composite": true,
-        "composites": {
-          "client": {
-            "realm-management": ["view-users", "manage-users", "query-users", "query-groups", "view-realm"]
-          }
-        }
+        "description": "MedLink administrative staff: manages accounts through the API only (no Keycloak admin rights, GitHub #80)"
       },
       {
         "name": "PRACTITIONER",
