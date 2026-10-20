@@ -17,7 +17,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 `master` (password-grant login, trust boundaries, STRIDE controls mapped to code and tests, ISO 27001 rows, open
 work by priority). No code change. **New gap found:** the realm role `ADMINISTRATIVE_STAFF` holds Keycloak's
 `manage-users` and `view-realm`, so staff could manage users in Keycloak's console outside the API (threat model
-E3); not tracked yet.
+E3), now tracked in GitHub #80.
 
 **2026-10-19:** MLink-84 (session cookie hardening: SameSite=Strict, Secure in staging/prod) in review (#63): no
 migration, no endpoint.
