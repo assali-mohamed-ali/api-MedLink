@@ -2,10 +2,18 @@ package com.example.apimedlink.functional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.net.URI;
+import java.net.http.HttpRequest;
+import java.net.http.HttpResponse;
 import java.util.List;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandlerMapping;
@@ -28,7 +36,17 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
     static final Expect O = Expect.OPEN, L = Expect.LOGIN, F = Expect.FORBIDDEN;
 
     //                 method    path                                anonymous patient practitioner staff
-    static final List<Rule> MATRIX = List.of();
+    static final List<Rule> MATRIX = List.of(
+            new Rule("GET",    "/api/auth/csrf",                O, O, O, O),
+            new Rule("POST",   "/api/auth/register",            O, O, O, O),
+            new Rule("POST",   "/api/auth/verify-email",        O, O, O, O),
+            new Rule("POST",   "/api/auth/verify-email/resend", O, O, O, O),
+            new Rule("POST",   "/api/auth/login",               O, O, O, O),
+            new Rule("POST",   "/api/auth/logout",              L, O, O, O),
+            new Rule("GET",    "/api/users",                    L, F, F, O),
+            new Rule("GET",    "/api/users/{id}",               L, F, F, O),
+            new Rule("DELETE", "/api/users/{id}",               L, F, F, O),
+            new Rule("GET",    "/api/users/_health",            L, O, O, O));
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")
@@ -40,11 +58,68 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
                 .flatMap(info -> info.getPatternValues().stream()
                         .filter(path -> path.startsWith("/api/"))
                         .flatMap(path -> info.getMethodsCondition().getMethods().isEmpty()
-                                ? java.util.stream.Stream.of("ANY " + path) // no method given: must be listed too
+                                ? Stream.of("ANY " + path) // no method given: must be listed too
                                 : info.getMethodsCondition().getMethods().stream().map(method -> method.name() + " " + path)))
                 .collect(Collectors.toSet());
         Set<String> inMatrix = MATRIX.stream().map(Rule::toString).collect(Collectors.toSet());
 
         assertThat(inMatrix).as("one matrix line per /api route, no more, no less").isEqualTo(routes);
+    }
+
+    enum Who { ANONYMOUS, PATIENT, PRACTITIONER, STAFF }
+
+    /** Every cell of the matrix: 10 routes × 4 callers. */
+    static Stream<Arguments> cells() {
+        return MATRIX.stream().flatMap(rule -> Stream.of(
+                Arguments.of(rule, Who.ANONYMOUS, rule.anonymous()),
+                Arguments.of(rule, Who.PATIENT, rule.patient()),
+                Arguments.of(rule, Who.PRACTITIONER, rule.practitioner()),
+                Arguments.of(rule, Who.STAFF, rule.staff())));
+    }
+
+    @ParameterizedTest(name = "{1} {0} → {2}")
+    @MethodSource("cells")
+    void eachCallerGetsWhatTheMatrixSays(Rule rule, Who who, Expect expect) throws Exception {
+        int status = send(as(who), rule.method(), rule.path()).statusCode();
+
+        switch (expect) {
+            case OPEN -> assertThat(status).as("past security").isNotIn(401, 403);
+            case LOGIN -> assertThat(status).as("asked to log in").isEqualTo(401);
+            case FORBIDDEN -> assertThat(status).as("refused by role or ownership").isEqualTo(403);
+        }
+    }
+
+    /** A fresh browser per cell (a logout cannot spoil the next one), logged in as the realm's dev user. */
+    private static Browser as(Who who) throws Exception {
+        Browser browser = new Browser();
+        String email = switch (who) {
+            case ANONYMOUS -> null;
+            case PATIENT -> "patient.dev@medlink.local";
+            case PRACTITIONER -> "practitioner.dev@medlink.local";
+            case STAFF -> "staff.dev@medlink.local";
+        };
+        if (email != null) {
+            assertThat(browser.apiLogin(email, DEV_USERS_PASSWORD).statusCode()).as(who + " logged in").isEqualTo(200);
+        }
+        return browser;
+    }
+
+    /**
+     * Calls a route as React would, always with the CSRF header: a 403 here is a role refusal, never a
+     * missing token. {id} is a random UUID (someone else's); writes send an empty JSON body.
+     */
+    private static HttpResponse<String> send(Browser browser, String method, String path) throws Exception {
+        if (browser.cookies.value("XSRF-TOKEN") == null) {
+            browser.call("/api/auth/csrf");
+        }
+        HttpRequest request = HttpRequest.newBuilder(URI.create(appUrl(path.replace("{id}", UUID.randomUUID().toString()))))
+                .header("X-Forwarded-For", browser.forwardedFor)
+                .header("X-XSRF-TOKEN", browser.cookies.value("XSRF-TOKEN"))
+                .header("Content-Type", "application/json")
+                .method(method, method.equals("GET")
+                        ? HttpRequest.BodyPublishers.noBody()
+                        : HttpRequest.BodyPublishers.ofString("{}"))
+                .build();
+        return browser.http.send(request, HttpResponse.BodyHandlers.ofString());
     }
 }
