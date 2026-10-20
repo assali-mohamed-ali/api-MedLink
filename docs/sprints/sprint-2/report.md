@@ -17,7 +17,12 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 `master` (password-grant login, trust boundaries, STRIDE controls mapped to code and tests, ISO 27001 rows, open
 work by priority). No code change. **New gap found:** the realm role `ADMINISTRATIVE_STAFF` holds Keycloak's
 `manage-users` and `view-realm`, so staff could manage users in Keycloak's console outside the API (threat model
-E3), now tracked in GitHub #80.
+E3), tracked in GitHub #80 and fixed in #81 (MLink-121); E3 is ✅ in the threat model.
+
+**2026-10-20:** MLink-121 (GitHub #80, threat model E3): the realm role `ADMINISTRATIVE_STAFF` no longer holds
+Keycloak admin rights. Realm file change only, no migration, no endpoint. **Staging and prod need the same change
+by hand in the Keycloak console** (see its section); locally the setup script re-imports the realm (dev volumes
+wiped, realm saved first).
 
 **2026-10-19:** MLink-84 (session cookie hardening: SameSite=Strict, Secure in staging/prod) in review (#63): no
 migration, no endpoint.
@@ -71,6 +76,36 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-121 — staff without Keycloak admin rights, GitHub #80 (2026-10-20, fix/80-staff-keycloak-rights)
+
+**Problem** (found by the threat model update, row E3, #79): the realm role `ADMINISTRATIVE_STAFF` was a composite
+of `realm-management` `view-users`, `manage-users`, `query-users`, `query-groups` and `view-realm`. With only their
+own password and Keycloak's public client `admin-cli` (present in every realm, no secret), a staff member could
+list every user, create an account and read the realm settings straight from Keycloak's admin API, outside the
+API's rules, ownership checks and audit trail.
+
+**Fix:** `keycloak/realm-medlink.json`, the role `ADMINISTRATIVE_STAFF` is a plain role, like `PRACTITIONER` and
+`PATIENT`. Nothing in the API used those rights: every admin call goes through the service account
+`medlink-admin`, which keeps its own `realm-management` roles. Staff still manage accounts, through the API.
+
+**Proof:** `StaffKeycloakRightsFunctionalTest` (real Keycloak), committed red first (2e207fe): with a token staff.dev
+gets from `admin-cli`, listing users answered 200, creating a user 201, reading the realm 200; the service
+account's call 200. After the fix: 403, 403, 403, and still 200 for `medlink-admin`. Each test first checks that
+Keycloak issued the token, so a 403 means no rights, never "not logged in". The red commit is the mutation check
+(the old composite turns the three staff tests red). `./mvnw -B verify`: green; reverse class order: **164 tests, 0
+failures**; sign-up (`SignupFunctionalTest`) still creates users through `medlink-admin`.
+
+**Existing environments:** Keycloak imports the realm file only into an empty database. In staging and prod an
+admin must make the same change by hand: Keycloak console → realm `medlink` → Realm roles → `ADMINISTRATIVE_STAFF`
+→ Associated roles → remove the five `realm-management` roles. Locally the setup script sees the changed realm
+file and re-imports it (dev volumes wiped, the realm is saved first to `.dev/realm-backups/`); not run here, the
+dev stack does not start on `master` since #74 (postgres 18).
+
+**Limits:** `admin-cli` still lets any user get a Keycloak token with their password, which skips the API's per-IP
+limit (Keycloak's lockout still applies). That token now grants no admin right; closing Keycloak's port to the
+public in production (threat model E4) removes the path. The threat model's E3 row turns ✅ once this and #79 are
+both on `master`.
 
 ## MLink-84 — session cookie hardening (2026-10-19, feat/ss2-session-cookie-hardening)
 
