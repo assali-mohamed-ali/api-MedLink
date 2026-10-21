@@ -86,6 +86,24 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## GitHub #48 — AI disclosure is conditional and truthful (2026-10-21, fix/48-ai-disclosure)
+
+**PR:** [#82](https://github.com/assali-mohamed-ali/api-MedLink/pull/82)
+
+**Built:** the `Utilisation de l'IA` section now offers two exclusive usage choices ("no AI" or "AI used")
+and the human review acknowledgment. `ai-disclosure.yml` runs a small Node validator
+(`.github/scripts/validate-ai-disclosure.mjs`) that fails when neither or both usage choices are checked,
+when AI use has no review acknowledgment, when "no AI" is combined with the review acknowledgment, and
+when a checklist line is missing or duplicated. Failure messages say exactly what to fix. The validator's
+own tests run in the workflow before it validates the PR.
+
+**Proof:** `node --test .github/scripts/validate-ai-disclosure.test.mjs`: 10 tests, 0 failures, covering
+no-AI, AI + review, AI without review, both choices, no choice, missing/duplicated lines, CRLF, indentation
+and uppercase `X`.
+
+**Limits:** the workflow can only check the PR body; it cannot know whether an author lied. The template and
+`CLAUDE.md` now state the intended declaration in the same words as the validator.
+
 ## MLink-60 — role × route matrix (2026-10-20, epic/MLink-6)
 
 **Built:** one test file, `functional/AccessMatrixFunctionalTest`, no production code and no shared file changed.

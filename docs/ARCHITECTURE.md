@@ -229,7 +229,7 @@ flowchart LR
 | Threat model | STRIDE with controls mapped to code, `security/threat-model.md` | At design time, updated with the code | Guides reviews |
 | Decisions | `docs/decisions/`, the report's decisions log | Per decision | Reasons kept with the code |
 | Review gate | ruleset on `master`, `.github/CODEOWNERS`, PR template | Every PR | Code-owner approval and CodeQL required; merge commits only |
-| AI disclosure | `ai-disclosure.yml` | Every PR | Fails unless both AI checkboxes are present and in the same state |
+| AI disclosure | `ai-disclosure.yml`, `.github/scripts/validate-ai-disclosure.mjs` | Every PR | Fails unless exactly one usage choice is checked; AI use also requires the human review acknowledgment |
 | Local hooks | `.pre-commit-config.yaml`: whitespace, YAML, large files, merge markers, gitleaks, checkov | Every commit once `pre-commit install` ran | Blocks the commit |
 | Build + tests | `ci.yml`: `./mvnw -B verify`, JaCoCo | Push/PR on `master`, `staging`, `prod` | Fails the run |
 | SAST | `sast-codeql.yml`: CodeQL `security-extended` + `security-and-quality` | Push, PR, Mondays | Required on `master` |
