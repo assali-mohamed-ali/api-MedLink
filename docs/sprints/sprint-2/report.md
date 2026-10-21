@@ -164,6 +164,26 @@ limit (Keycloak's lockout still applies). That token now grants no admin right; 
 public in production (threat model E4) removes the path. The threat model's E3 row turns ✅ once this and #79 are
 both on `master`.
 
+## GitHub #53 — Terraform matches the Keycloak BFF (2026-10-21, fix/53-terraform-env)
+
+**PR:** [#84](https://github.com/assali-mohamed-ali/api-MedLink/pull/84)
+
+**Built:** `terraform/main.tf` now injects every setting the production profile needs: database,
+both Keycloak clients (public/internal URLs, realm, client id and the BFF/admin secrets), SMTP
+(host, port, user, password, sender), frontend URL and CORS. The obsolete `JWT_SECRET` variable is
+removed from `variables.tf` and all three tfvars examples. The app image examples use immutable
+digests. Secret variables are `sensitive`; `terraform/README.md` documents the required values, the
+Postgres/Keycloak networking contract, remote state (`backend.tf.example`) and rollback.
+`scripts/ci/check-prod-config.sh` checks the container environment against the production profile
+(and rejects any `JWT_SECRET` reference); CI also runs `terraform init -backend=false`,
+`terraform fmt -check` and `terraform validate`.
+
+**Proof:** `scripts/ci/check-prod-config.sh` passes; `terraform fmt -check` and `terraform validate`
+pass with Terraform 1.9.8. `python3 -c 'import yaml; yaml.safe_load(...)'` on `ci.yml`: valid.
+
+**Limits:** Terraform still deploys only the API container; PostgreSQL and Keycloak are external
+dependencies (documented). Provisioning Keycloak/keycloak-db belongs to the deployment work in #47.
+
 ## MLink-84 — session cookie hardening (2026-10-19, feat/ss2-session-cookie-hardening)
 
 Unblocked by decision #58 option 1 (keep the password grant): no Keycloak redirect comes back, so Strict is safe.
