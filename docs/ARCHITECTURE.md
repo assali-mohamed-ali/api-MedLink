@@ -233,7 +233,7 @@ flowchart LR
 | Local hooks | `.pre-commit-config.yaml`: whitespace, YAML, large files, merge markers, gitleaks, checkov | Every commit once `pre-commit install` ran | Blocks the commit |
 | Build + tests | `ci.yml`: `./mvnw -B verify`, JaCoCo | Push/PR on `master`, `staging`, `prod` | Fails the run |
 | SAST | `sast-codeql.yml`: CodeQL `security-extended` + `security-and-quality` | Push, PR, Mondays | Required on `master` |
-| SCA | `sca-dependency-check.yml`: OWASP Dependency-Check | Push, PR, Mondays | Fails on CVSS ≥ 7 |
+| SCA | `sca-dependency-check.yml`: OWASP Dependency-Check (NVD); Trivy fallback when `NVD_API_KEY` is absent, reported in the log, summary and artifact | Push, PR, Mondays | Fails on CVSS ≥ 7; release branches fail on the fallback unless `ALLOW_TRIVY_FALLBACK=true` |
 | Secrets | `secrets-scan.yml`: gitleaks on the full history | Every push and PR, daily | Fails the run |
 | Container + IaC | `container-scan.yml`: Trivy config and image | Push/PR | Fails on HIGH/CRITICAL |
 | DAST | `dast-zap.yml`: ZAP baseline against the running app | PRs, pushes to `master`/`staging`, Mondays | Fails on FAIL rules; unauthenticated only |
