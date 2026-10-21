@@ -152,6 +152,27 @@ tests, e.g. `OwnershipFunctionalTest`). Routes outside `/api` (actuator, Swagger
 in production is GitHub #49 and #65. Maven's console names the cells by number (`[26]`); IDEs and the
 surefire XML report show the readable name.
 
+## GitHub #54 — the SCA fallback is visible and gated (2026-10-21, fix/54-sca-fallback)
+
+**PR:** [#83](https://github.com/assali-mohamed-ali/api-MedLink/pull/83)
+
+**Built:** `scripts/ci/sca-policy.sh` decides the scanner from the event, ref, `NVD_API_KEY` and the new
+repository variable `ALLOW_TRIVY_FALLBACK`. The workflow now writes the scanner, the reason and the policy
+to the log, the step summary and `target/sca-scanner.txt` (uploaded in `sca-reports`), and fails when the
+selected scanner produced no report. Release branches (`master`, `staging`, `prod`, `v*` tags) fail on the
+Trivy fallback unless `ALLOW_TRIVY_FALLBACK=true` explicitly accepts it; PRs, schedules, manual runs and
+feature-branch pushes may fall back with a visible warning. `SECURITY.md` documents what Trivy covers and
+what it does not cover (NVD/CPE/transitive Java analysis, suppressions, unfixed CVEs).
+
+**Proof:** `scripts/ci/sca-policy.test.sh` covers the NVD-key path (always primary), the missing-key paths
+for PRs, schedules, manual runs and feature branches (fallback allowed), release branches and `v*` tags
+(denied), the explicit `ALLOW_TRIVY_FALLBACK` acceptance and an unknown event (denied). It runs in the SCA
+workflow before the scan.
+
+**Limits:** the policy cannot make Trivy equivalent to OWASP Dependency-Check; the documented answer is to
+set `NVD_API_KEY` for release scans. The fallback still runs (and publishes findings) before the release
+policy fails, so a red run has usable evidence.
+
 ## MLink-121 — staff without Keycloak admin rights, GitHub #80 (2026-10-20, fix/80-staff-keycloak-rights)
 
 **Problem** (found by the threat model update, row E3, #79): the realm role `ADMINISTRATIVE_STAFF` was a composite
