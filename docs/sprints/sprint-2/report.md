@@ -317,6 +317,33 @@ the client's address (`$proxy_add_x_forwarded_for`), never pass the client's hea
 NAT (a clinic) share one count: the values leave room for that. A taken email still answers a little faster
 than a new one (no Keycloak call); the per-IP limit now caps how many emails one IP can probe.
 
+## Docker — backend in the dev compose stack, PR #86 (2026-10-21, feat/dockerize-backend)
+
+**Built:** `compose.yaml` now defines the API under the `full` profile (`docker compose --profile full
+up --build`), with fixed dev values for the database, Keycloak clients, Mailpit and the frontend URL;
+the default profile is unchanged (API on the host, `spring-boot:run`). `docker-compose.yml` keeps the
+same image and gains the same `PGDATA=/var/lib/postgresql/data` pin as `compose.yaml` (the Postgres 18
+image otherwise looks in `/var/lib/postgresql/<major>/docker`); its no-env profile default is now `dev`
+(staging/prod env files still set `staging`/`prod`). The API datasource in the dev profile
+uses the fixed `postgres` service values, so a local `.env` cannot accidentally send it another
+password. The ineffective `docker/.dockerignore` moved to the repository root (the build context is
+`.`); it now excludes `.env*`, `.git`, `target`, docs, infra and monitoring, so a local secret never
+reaches the Docker daemon and the context is smaller. README and architecture docs document the new
+profile.
+
+**Proof:** `ComposeFilesTest` passes (5 tests). `docker compose -f compose.yaml config --services`
+excludes `app` by default and `--profile full` includes it; `config --images` resolves the app to
+`api-medlink:local`. `docker compose --profile full -f compose.yaml build app` succeeds. In a clean
+isolated project (`medlink-dockerize-test`, fresh volumes, temporary host-port overrides only to avoid
+the running stack) `docker compose --profile full up -d --build` started all five services and the
+app's `/actuator/health` returned `"status":"UP"` after 6 s. The project was removed with `down -v`,
+leaving the original dev dependencies running.
+
+**Limits:** the existing local Keycloak database volume was created by PostgreSQL 16 while `master`
+now pins the Postgres 18 image; that separate dev-stack failure is #74 (a fresh volume works, as the
+clean run shows). The check covers startup and health, not a browser login or a Keycloak admin
+operation.
+
 ## MLink-113 — one compose setup per workflow, GitHub #52 (2026-10-18, fix/52-one-compose-setup)
 
 **Decision:** keep two files, one job each, one command each (README §1 table).

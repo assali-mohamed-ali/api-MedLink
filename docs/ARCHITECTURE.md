@@ -198,7 +198,7 @@ owner, and names the security-sensitive ones explicitly: the `config/` and `secu
 | `resources/application*.properties/yml` | Base config; per-profile DB, cookies, CORS, actuator, logging | Environment-specific settings |
 | `resources/db/migration/` | Flyway `V1`–`V8` on `master` | Any schema change: the next free `V<N>__...`, never edit a merged file |
 | `keycloak/realm-medlink.json` | Realm, roles, groups, clients, lockout, events, dev users | Changing identity settings (in a PR) |
-| `compose.yaml` / `docker-compose.yml` | Dev dependencies / full stack (kept alike by `ComposeFilesTest`) | Adding a service |
+| `compose.yaml` / `docker-compose.yml` | Dev dependencies (plus the API under the `full` profile) / full stack with secrets (kept alike by `ComposeFilesTest`) | Adding a service |
 | `docker/` | Multi-stage `Dockerfile` (non-root), `Dockerfile.dev` | Changing the image |
 | `.github/workflows/` | CI, AI disclosure, SAST, SCA, secrets, container scan, DAST, CD | Changing the pipeline |
 | `security/` (repo root) | gitleaks, checkov, trivy, ZAP rules, OWASP suppressions, threat model | Tuning a scanner (with a reason) |
