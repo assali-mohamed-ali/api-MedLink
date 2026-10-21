@@ -319,4 +319,4 @@ actuator exposes only `health,info,prometheus`: don't open more without a securi
 | [docs/sprints/sprint-2/README.md](docs/sprints/sprint-2/README.md) | how a working session runs |
 | [docs/sprints/sprint-2/plan.md](docs/sprints/sprint-2/plan.md) | design and endpoint contracts |
 | [docs/decisions/](docs/decisions/) | decision records |
-| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [security/threat-model.md](security/threat-model.md) | architecture and threats (being updated: GitHub #66) |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [security/threat-model.md](security/threat-model.md) | architecture, trust boundaries, threats and controls mapped to code and tests |
