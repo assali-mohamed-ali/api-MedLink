@@ -18,6 +18,7 @@ services:
       retries: 10
 
   app:
+    image: ${APP_IMAGE:-api-medlink:local}
     build:
       context: .
       dockerfile: docker/Dockerfile

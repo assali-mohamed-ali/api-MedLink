@@ -245,6 +245,29 @@ existing code). Suite: **150 tests, 0 failures**, both class orders; after mergi
 `scripts/setup-dev.ps1` 0 failures in both modes (dev 28 OK, `-FullStack` 29 OK): the end-to-end login and sign-up
 still work with the Strict cookies.
 
+## GitHub #47 — real CD rollout (2026-10-21, feat/47-cd-compose-rollout)
+
+**PR:** [#85](https://github.com/assali-mohamed-ali/api-MedLink/pull/85)
+
+**Built:** `cd.yml` no longer stops at `terraform validate`. The build job publishes the image and
+exports its immutable digest (`repository@sha256:...`). The staging/production jobs run in their
+GitHub Environments and call `.github/actions/deploy-compose`: pin the host key, copy
+`docker-compose.yml`, the Keycloak realm and monitoring config to `DEPLOY_PATH`, write `.env` with
+mode `600` (environment file + `APP_IMAGE`), log in to GHCR on the target, `compose pull`/`up` the API
+by digest, verify the running container uses that exact digest, poll `/actuator/health` for
+`"status":"UP"`, and print the last 200 API log lines on failure. `docker-compose.yml` now accepts
+`APP_IMAGE` (default `api-medlink:local`). `docs/DEPLOYMENT.md` documents the host prerequisites,
+environment variables/secrets, immutable-digest rollout, rollback and failure recovery. Production
+still requires the `production` environment reviewers and is unreachable from `master`.
+
+**Proof:** `python3 -c 'import yaml; yaml.safe_load(...)'` on `cd.yml` and the composite action: valid;
+`bash -n` on every workflow/composite `run` block: clean; `docker compose config --images` with
+`APP_IMAGE` set: resolves the app to the supplied digest; the deployment input gate exits 1 with
+`DEPLOY_HOST` empty and 0 with every required input set. `ComposeFilesTest` still passes (5 tests).
+
+**Limits:** the real SSH rollout needs the staging/production hosts and environment secrets; it
+cannot run in this workspace. The first deployment and the environment review remain human steps.
+
 ## MLink-112 — shared rate limits, GitHub #51 (2026-10-18, fix/51-shared-rate-limits)
 
 A condition of keeping the password grant (decision record on #58, option 1, MLink-96;

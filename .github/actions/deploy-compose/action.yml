@@ -1,0 +1,185 @@
+name: Deploy the compose stack over SSH
+description: Pull an immutable image on a Docker host and roll out the API service.
+
+inputs:
+  host:
+    description: SSH host of the deployment target
+    required: true
+  user:
+    description: SSH user that can run Docker Compose
+    required: true
+  path:
+    description: Absolute directory that holds the compose file and .env
+    required: true
+  health_url:
+    description: URL of the deployed /actuator/health endpoint
+    required: true
+  ssh_key:
+    description: Private SSH key allowed to deploy
+    required: true
+  known_hosts:
+    description: Pinned SSH host key(s) for the target
+    required: true
+  env_file:
+    description: Full staging or production .env content (secrets included)
+    required: true
+  image:
+    description: Immutable image reference (repository@sha256:digest)
+    required: true
+  ghcr_token:
+    description: Token used on the target to pull from GHCR
+    required: true
+
+runs:
+  using: composite
+  steps:
+    - name: Validate deployment inputs
+      shell: bash
+      env:
+        DEPLOY_HOST: ${{ inputs.host }}
+        DEPLOY_USER: ${{ inputs.user }}
+        DEPLOY_PATH: ${{ inputs.path }}
+        DEPLOY_HEALTH_URL: ${{ inputs.health_url }}
+        DEPLOY_SSH_KEY: ${{ inputs.ssh_key }}
+        DEPLOY_KNOWN_HOSTS: ${{ inputs.known_hosts }}
+        DEPLOY_ENV_FILE: ${{ inputs.env_file }}
+        DEPLOY_IMAGE: ${{ inputs.image }}
+        GHCR_TOKEN: ${{ inputs.ghcr_token }}
+      run: |
+        for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_HEALTH_URL \
+          DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS DEPLOY_ENV_FILE DEPLOY_IMAGE GHCR_TOKEN; do
+          if [ -z "${!name}" ]; then
+            echo "::error::$name is not set. Define it in the GitHub Environment."
+            exit 1
+          fi
+        done
+
+    - name: Configure SSH
+      shell: bash
+      env:
+        DEPLOY_SSH_KEY: ${{ inputs.ssh_key }}
+        DEPLOY_KNOWN_HOSTS: ${{ inputs.known_hosts }}
+      run: |
+        install -m 700 -d "$HOME/.ssh"
+        printf '%s\n' "$DEPLOY_SSH_KEY" > "$HOME/.ssh/deploy_key"
+        chmod 600 "$HOME/.ssh/deploy_key"
+        printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
+        chmod 644 "$HOME/.ssh/known_hosts"
+
+    - name: Copy the compose file, realm and monitoring config
+      shell: bash
+      env:
+        DEPLOY_HOST: ${{ inputs.host }}
+        DEPLOY_USER: ${{ inputs.user }}
+        DEPLOY_PATH: ${{ inputs.path }}
+      run: |
+        SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i "$HOME/.ssh/deploy_key")
+        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+          "mkdir -p '$DEPLOY_PATH/keycloak' '$DEPLOY_PATH/monitoring/prometheus' '$DEPLOY_PATH/monitoring/alerts'"
+        scp -q "${SSH_OPTS[@]}" docker-compose.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.yml"
+        scp -q "${SSH_OPTS[@]}" keycloak/realm-medlink.json "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/keycloak/realm-medlink.json"
+        scp -q "${SSH_OPTS[@]}" monitoring/prometheus/prometheus.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/prometheus/prometheus.yml"
+        scp -q "${SSH_OPTS[@]}" monitoring/alerts/alert-rules.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/alerts/alert-rules.yml"
+
+    - name: Write the environment file
+      shell: bash
+      env:
+        DEPLOY_HOST: ${{ inputs.host }}
+        DEPLOY_USER: ${{ inputs.user }}
+        DEPLOY_PATH: ${{ inputs.path }}
+        DEPLOY_ENV_FILE: ${{ inputs.env_file }}
+        DEPLOY_IMAGE: ${{ inputs.image }}
+      run: |
+        umask 077
+        printf '%s\n' "$DEPLOY_ENV_FILE" > "$RUNNER_TEMP/deploy.env"
+        grep -q '^SPRING_PROFILES_ACTIVE=' "$RUNNER_TEMP/deploy.env" || {
+          echo "::error::DEPLOY_ENV_FILE must define SPRING_PROFILES_ACTIVE."
+          exit 1
+        }
+        printf 'APP_IMAGE=%s\n' "$DEPLOY_IMAGE" >> "$RUNNER_TEMP/deploy.env"
+        SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i "$HOME/.ssh/deploy_key")
+        scp -q "${SSH_OPTS[@]}" "$RUNNER_TEMP/deploy.env" "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/.env"
+        rm -f "$RUNNER_TEMP/deploy.env"
+        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "chmod 600 '$DEPLOY_PATH/.env'"
+
+    - name: Log in to GHCR on the target
+      shell: bash
+      env:
+        DEPLOY_HOST: ${{ inputs.host }}
+        DEPLOY_USER: ${{ inputs.user }}
+        GHCR_TOKEN: ${{ inputs.ghcr_token }}
+        GHCR_USER: ${{ github.actor }}
+      run: |
+        SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i "$HOME/.ssh/deploy_key")
+        printf '%s' "$GHCR_TOKEN" | ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+          "docker login ghcr.io -u '$GHCR_USER' --password-stdin"
+
+    - name: Pull and roll out the API container
+      shell: bash
+      env:
+        DEPLOY_HOST: ${{ inputs.host }}
+        DEPLOY_USER: ${{ inputs.user }}
+        DEPLOY_PATH: ${{ inputs.path }}
+      run: |
+        SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i "$HOME/.ssh/deploy_key")
+        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" <<'REMOTE'
+        set -euo pipefail
+        cd "$1"
+        docker compose --env-file .env -f docker-compose.yml pull app
+        docker compose --env-file .env -f docker-compose.yml up -d --no-build --remove-orphans app
+        REMOTE
+
+    - name: Verify the running image digest
+      shell: bash
+      env:
+        DEPLOY_HOST: ${{ inputs.host }}
+        DEPLOY_USER: ${{ inputs.user }}
+        DEPLOY_PATH: ${{ inputs.path }}
+        DEPLOY_IMAGE: ${{ inputs.image }}
+      run: |
+        SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i "$HOME/.ssh/deploy_key")
+        running="$(ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" <<'REMOTE'
+        set -euo pipefail
+        cd "$1"
+        cid="$(docker compose --env-file .env -f docker-compose.yml ps -q app)"
+        test -n "$cid"
+        docker inspect --format '{{.Config.Image}}' "$cid"
+        REMOTE
+        )"
+        if [ "$running" != "$DEPLOY_IMAGE" ]; then
+          echo "::error::The running API image is '$running', expected '$DEPLOY_IMAGE'."
+          exit 1
+        fi
+        echo "The API is running $running"
+
+    - name: Check the health endpoint
+      shell: bash
+      env:
+        DEPLOY_HEALTH_URL: ${{ inputs.health_url }}
+      run: |
+        for attempt in $(seq 1 30); do
+          if body="$(curl -fsS --max-time 10 "$DEPLOY_HEALTH_URL")" &&
+            jq -e '.status == "UP"' >/dev/null <<<"$body"; then
+            echo "Health check passed: $DEPLOY_HEALTH_URL"
+            exit 0
+          fi
+          echo "Waiting for $DEPLOY_HEALTH_URL (attempt $attempt/30)..."
+          sleep 5
+        done
+        echo "::error::The deployed API did not become healthy at $DEPLOY_HEALTH_URL."
+        exit 1
+
+    - name: Show the API logs on failure
+      if: failure()
+      shell: bash
+      env:
+        DEPLOY_HOST: ${{ inputs.host }}
+        DEPLOY_USER: ${{ inputs.user }}
+        DEPLOY_PATH: ${{ inputs.path }}
+      run: |
+        SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i "$HOME/.ssh/deploy_key")
+        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" <<'REMOTE' || true
+        set -u
+        cd "$1"
+        docker compose --env-file .env -f docker-compose.yml logs --tail=200 app
+        REMOTE

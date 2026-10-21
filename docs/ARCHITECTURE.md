@@ -218,7 +218,7 @@ flowchart LR
   BUILD["Build and test · CI<br/>./mvnw verify<br/>functional tests on real Keycloak<br/>access matrix, JaCoCo"]
   SCAN["Scan · CI<br/>CodeQL, Dependency-Check<br/>gitleaks history, Trivy<br/>ZAP baseline"]
   REVIEW["Review<br/>code owner + CodeQL required<br/>AI disclosure check"]
-  REL["Release · CD<br/>image to GHCR<br/>staging, prod, v*"]
+  REL["Release · CD<br/>image digest to GHCR<br/>compose rollout + health check<br/>staging, prod, v*"]
   OPS["Operate<br/>Prometheus + 4 alerts<br/>audit trail, Keycloak events<br/>SECURITY.md"]
   PLAN --> CODE --> COMMIT --> BUILD --> SCAN --> REVIEW --> REL --> OPS
   OPS -. "findings and incidents feed the next plan" .-> PLAN
@@ -238,7 +238,7 @@ flowchart LR
 | Container + IaC | `container-scan.yml`: Trivy config and image | Push/PR | Fails on HIGH/CRITICAL |
 | DAST | `dast-zap.yml`: ZAP baseline against the running app | PRs, pushes to `master`/`staging`, Mondays | Fails on FAIL rules; unauthenticated only |
 | Dependency updates | `dependabot.yml`: Maven, Actions, Dockerfile and compose images, 7-day cooldown | Mondays | Opens grouped PRs, reviewed like any PR |
-| Release + deploy | `cd.yml`: image to GHCR; GitHub Environments `staging` / `production`, `terraform validate` | Push to `staging`, `prod`, tags `v*` | Image published; no `terraform apply` yet (GitHub #47) |
+| Release + deploy | `cd.yml`: image to GHCR, immutable digest, compose over SSH; GitHub Environments `staging` / `production` | Push to `staging`, `prod`, tags `v*`, manual dispatch | API rolled out and health-checked; rollback/recovery in `docs/DEPLOYMENT.md` |
 | Monitoring | `monitoring/`: alerts AppDown, 5xx > 5 %, p95 > 1 s, heap > 90 % | Continuous | Alerts reach no one: Alertmanager has no target |
 | Audit | `audit_entries` (every 403), Keycloak events (logins, lockouts) | Continuous | Stored; reading the trail: MLink-115 |
 | Vulnerability intake | `SECURITY.md` | On report | Private disclosure path |
