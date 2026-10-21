@@ -13,6 +13,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | To do | — | — |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-20:** MLink-119 (GitHub #66, part 1) in review (#78): README rewritten to match `master` (password-grant
+login, auth flow diagram, endpoints, security rules, team workflow, CI). No code change. Part 2:
+`docs/ARCHITECTURE.md` and `security/threat-model.md`.
+
 **2026-10-20:** MLink-120 (GitHub #66, part 2): `docs/ARCHITECTURE.md` and `security/threat-model.md` match
 `master` (password-grant login, trust boundaries, STRIDE controls mapped to code and tests, ISO 27001 rows, open
 work by priority). No code change. **New gap found:** the realm role `ADMINISTRATIVE_STAFF` holds Keycloak's
