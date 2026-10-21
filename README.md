@@ -251,7 +251,9 @@ Logs of the last run: `%TEMP%\medlink-setup` (Windows) or `$TMPDIR/medlink-setup
 | **B. Full stack** (all in containers) | `docker-compose.yml`: the same + the API image + Prometheus | `docker compose -f docker-compose.yml up --build` | all from `.env`, required |
 
 The shared services must stay identical in both files (`ComposeFilesTest` fails when they drift).
-Staging and prod use file B with `--env-file .env.staging` or `.env.prod`.
+`compose.yaml` also defines the API under the `full` profile: `docker compose --profile full up --build`
+gives a zero-config dev stack with the fixed dev secrets, without touching the coding setup. Staging and
+prod use file B with `--env-file .env.staging` or `.env.prod`.
 
 </details>
 

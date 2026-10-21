@@ -8,6 +8,8 @@ services:
       - 'POSTGRES_DB=mydatabase'
       - 'POSTGRES_PASSWORD=secret'
       - 'POSTGRES_USER=myuser'
+      # Postgres 18 otherwise looks for its data in /var/lib/postgresql/<major>/docker.
+      - 'PGDATA=/var/lib/postgresql/data'
     ports:
       # any free host port: Spring Boot's compose integration gives it to the app
       - '5432'
@@ -29,6 +31,7 @@ services:
       - 'POSTGRES_DB=keycloak'
       - 'POSTGRES_USER=keycloak'
       - 'POSTGRES_PASSWORD=keycloak-dev'
+      - 'PGDATA=/var/lib/postgresql/data'
     volumes:
       - 'keycloak-db-data:/var/lib/postgresql/data'
     healthcheck:
@@ -82,6 +85,39 @@ services:
     ports:
       - '1025:1025'
       - '8025:8025'
+
+  # Optional full stack: docker compose --profile full up --build
+  # The default profile stays A (API on the host), so spring-boot:run never starts this container.
+  app:
+    profiles: ['full']
+    image: ${APP_IMAGE:-api-medlink:local}
+    build:
+      context: .
+      dockerfile: docker/Dockerfile
+    environment:
+      - 'SPRING_PROFILES_ACTIVE=dev'
+      - 'SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/mydatabase'
+      - 'SPRING_DATASOURCE_USERNAME=myuser'
+      - 'SPRING_DATASOURCE_PASSWORD=secret'
+      - 'KEYCLOAK_PUBLIC_URL=http://localhost:8180'
+      - 'KEYCLOAK_INTERNAL_URL=http://keycloak:8080'
+      - 'KEYCLOAK_REALM=medlink'
+      - 'KEYCLOAK_CLIENT_ID=medlink-bff'
+      - 'KEYCLOAK_CLIENT_SECRET=dev-only-medlink-bff-secret'
+      - 'KEYCLOAK_ADMIN_CLIENT_SECRET=dev-only-medlink-admin-secret'
+      - 'MAIL_HOST=mailpit'
+      - 'MAIL_PORT=1025'
+      - 'MAIL_USERNAME='
+      - 'MAIL_PASSWORD='
+      - 'MAIL_FROM=MedLink <no-reply@medlink.local>'
+      - 'APP_FRONTEND_URL=http://localhost:3000'
+    ports:
+      - '8080:8080'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      keycloak:
+        condition: service_healthy
 
 volumes:
   pgdata:

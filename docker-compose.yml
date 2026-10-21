@@ -5,6 +5,8 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-mydatabase}
       POSTGRES_USER: ${POSTGRES_USER:-myuser}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      # Postgres 18 otherwise looks in /var/lib/postgresql/<major>/docker.
+      PGDATA: /var/lib/postgresql/data
     ports:
       # Host side only (the app reaches postgres:5432 inside the network). The setup scripts pick
       # another host port when a local PostgreSQL already uses 5432.
@@ -18,11 +20,12 @@ services:
       retries: 10
 
   app:
+    image: ${APP_IMAGE:-api-medlink:local}
     build:
       context: .
       dockerfile: docker/Dockerfile
     environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-mydatabase}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-myuser}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-secret}
@@ -54,6 +57,8 @@ services:
       POSTGRES_DB: ${KEYCLOAK_DB_NAME:-keycloak}
       POSTGRES_USER: ${KEYCLOAK_DB_USER:-keycloak}
       POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD must be set}
+      # Same data-directory pin as the app database.
+      PGDATA: /var/lib/postgresql/data
     volumes:
       - keycloak-db-data:/var/lib/postgresql/data
     healthcheck:
