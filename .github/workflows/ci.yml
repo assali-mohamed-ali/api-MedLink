@@ -21,6 +21,21 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # GitHub #53: the Terraform container must match the production profile.
+      - name: Check the production container configuration
+        run: bash scripts/ci/check-prod-config.sh
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.9.x
+
+      - name: Validate Terraform
+        run: |
+          cd terraform
+          terraform init -backend=false -input=false
+          terraform fmt -check
+          terraform validate
+
       - name: Validate Maven wrapper
         run: |
           test -f mvnw || (echo "mvnw missing" && exit 1)

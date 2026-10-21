@@ -203,7 +203,7 @@ owner, and names the security-sensitive ones explicitly: the `config/` and `secu
 | `.github/workflows/` | CI, AI disclosure, SAST, SCA, secrets, container scan, DAST, CD | Changing the pipeline |
 | `security/` (repo root) | gitleaks, checkov, trivy, ZAP rules, OWASP suppressions, threat model | Tuning a scanner (with a reason) |
 | `monitoring/` | Prometheus config, 4 alert rules, Grafana dashboard | Adding metrics or alerts |
-| `terraform/` | Docker-provider IaC for the app container (still the old `JWT_SECRET`: GitHub #53) | Changing deployment |
+| `terraform/` | Docker-provider IaC for the app container, aligned with the Keycloak BFF and the production profile (GitHub #53) | Changing deployment |
 
 Tests: `src/test/java/.../functional/` drives the real API over HTTP against Keycloak, Postgres and Mailpit
 (`FunctionalTestBase`); `integration/`, MockMvc and unit tests mirror the packages. Docker must be running.
@@ -317,7 +317,7 @@ The prioritised list, with the threat behind each item, is in
 - [ ] Separate database roles for the audit trail (GitHub #57)
 - [ ] Logins and account operations in the audit trail (MLink-114, MLink-72)
 - [ ] Backup and tested restore of both databases (GitHub #67)
-- [ ] Terraform and CD aligned with the Keycloak BFF (GitHub #53, #47); Keycloak and `keycloak-db` in the deployment
+- [ ] CD rollout and Keycloak/`keycloak-db` in the deployment (GitHub #47); Terraform variables and container environment aligned with the production profile (GitHub #53)
 - [ ] Reverse proxy: TLS, HSTS, CSP, `TRUSTED_PROXIES`, Keycloak not public
 - [ ] Alert routing and a central log store; shared sessions before a second API instance
 - [ ] Delete the `*.dev` users in staging and prod after the first start
