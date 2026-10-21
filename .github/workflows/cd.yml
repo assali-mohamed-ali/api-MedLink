@@ -4,6 +4,12 @@ name: CD
 # validate, then staging -> prod (or tag v* for release).
 # SAFEGUARD: master pushes do NOT auto-deploy prod. Only the prod
 # branch and v* tags reach the production environment.
+#
+# Deployment uses Docker Compose over SSH: the workflow builds one image,
+# records its immutable digest, then asks the target host to pull that exact
+# digest. The GitHub Environment (staging/production) holds the host, key and
+# environment file; `production` must require reviewers in the repository
+# settings. See docs/DEPLOYMENT.md.
 
 on:
   push:
@@ -20,7 +26,6 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 env:
   REGISTRY: ghcr.io
@@ -33,8 +38,11 @@ concurrency:
 jobs:
   build-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
     outputs:
-      image: ${{ steps.meta.outputs.tags }}
+      image: ${{ steps.image.outputs.ref }}
     steps:
       - uses: actions/checkout@v7
 
@@ -72,6 +80,7 @@ jobs:
             type=semver,pattern={{version}}
 
       - name: Build & push
+        id: build
         uses: docker/build-push-action@v7
         with:
           context: .
@@ -80,28 +89,39 @@ jobs:
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
 
+      - name: Immutable image reference
+        id: image
+        run: |
+          test -n "${{ steps.build.outputs.digest }}" || {
+            echo "::error::The build did not produce an image digest."
+            exit 1
+          }
+          echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+
   deploy-staging:
     needs: build-push
     if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: staging
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v4
+      - name: Deploy the compose stack
+        uses: ./.github/actions/deploy-compose
         with:
-          terraform_version: 1.9.x
-
-      - name: Validate + plan (staging)
-        run: |
-          cd terraform
-          terraform init -backend=false
-          terraform fmt -check
-          terraform validate
-        env:
-          TF_VAR_app_image: ${{ needs.build-push.outputs.image }}
-          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
-          TF_VAR_db_password: ${{ secrets.STAGING_DB_PASSWORD }}
+          host: ${{ vars.DEPLOY_HOST }}
+          user: ${{ vars.DEPLOY_USER }}
+          path: ${{ vars.DEPLOY_PATH }}
+          health_url: ${{ vars.DEPLOY_HEALTH_URL }}
+          ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known_hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          env_file: ${{ secrets.DEPLOY_ENV_FILE }}
+          image: ${{ needs.build-push.outputs.image }}
+          ghcr_token: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-prod:
     needs: build-push
@@ -110,21 +130,23 @@ jobs:
     # required reviewers). master is intentionally excluded.
     if: github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.target == 'production')
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: production
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v4
+      - name: Deploy the compose stack
+        uses: ./.github/actions/deploy-compose
         with:
-          terraform_version: 1.9.x
-
-      - name: Validate + plan (prod)
-        run: |
-          cd terraform
-          terraform init -backend=false
-          terraform fmt -check
-          terraform validate
-        env:
-          TF_VAR_app_image: ${{ needs.build-push.outputs.image }}
-          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
-          TF_VAR_db_password: ${{ secrets.PROD_DB_PASSWORD }}
+          host: ${{ vars.DEPLOY_HOST }}
+          user: ${{ vars.DEPLOY_USER }}
+          path: ${{ vars.DEPLOY_PATH }}
+          health_url: ${{ vars.DEPLOY_HEALTH_URL }}
+          ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known_hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          env_file: ${{ secrets.DEPLOY_ENV_FILE }}
+          image: ${{ needs.build-push.outputs.image }}
+          ghcr_token: ${{ secrets.GITHUB_TOKEN }}

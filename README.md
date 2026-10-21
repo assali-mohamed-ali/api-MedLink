@@ -198,7 +198,7 @@ Tasks live in YouTrack, project `MLink` (https://medlink.youtrack.cloud).
 | Secrets | `secrets-scan.yml` | remove and rotate the secret |
 | Image + config | `container-scan.yml` (Trivy) | bump the base image or fix the Dockerfile |
 | DAST | `dast-zap.yml` | fix the endpoint; `security/zap-rules.tsv` only with a reason |
-| Publish | `cd.yml` | env-gated image build and push (staging, production) |
+| Publish + deploy | `cd.yml` | env-gated image build, immutable digest, compose rollout over SSH, health check (staging, production) |
 
 Local secrets check: `gitleaks detect --source . --config security/.gitleaks.toml --redact -v`.
 Optional: `pre-commit run --all-files`.
@@ -217,7 +217,9 @@ them like any PR: compose images are not what the tests use, so a green CI prove
 | `prod` (or a `v*` tag) | production | `prod` | `.env.prod` |
 
 Maintainers promote `master` → `staging` → `prod` with `--no-ff` merges. Production secrets live in GitHub
-Environments, never in git.
+Environments, never in git. CD builds one image per run and deploys its immutable digest to the target
+host with Docker Compose over SSH; setup, secrets, rollback and recovery are in
+[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
 
 ## 8. Dev setup in detail
 
@@ -320,3 +322,4 @@ actuator exposes only `health,info,prometheus`: don't open more without a securi
 | [docs/sprints/sprint-2/plan.md](docs/sprints/sprint-2/plan.md) | design and endpoint contracts |
 | [docs/decisions/](docs/decisions/) | decision records |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [security/threat-model.md](security/threat-model.md) | architecture, trust boundaries, threats and controls mapped to code and tests |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | staging/production host, GitHub Environment secrets, rollout, rollback and recovery |
