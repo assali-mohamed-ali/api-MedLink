@@ -13,6 +13,26 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | To do | — | — |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-20:** MLink-119 (GitHub #66, part 1) in review (#78): README rewritten to match `master` (password-grant
+login, auth flow diagram, endpoints, security rules, team workflow, CI). No code change. Part 2:
+`docs/ARCHITECTURE.md` and `security/threat-model.md`.
+
+**2026-10-20:** MLink-120 (GitHub #66, part 2): `docs/ARCHITECTURE.md` and `security/threat-model.md` match
+`master` (password-grant login, trust boundaries, STRIDE controls mapped to code and tests, ISO 27001 rows, open
+work by priority). No code change. **New gap found:** the realm role `ADMINISTRATIVE_STAFF` holds Keycloak's
+`manage-users` and `view-realm`, so staff could manage users in Keycloak's console outside the API (threat model
+E3), tracked in GitHub #80 and fixed in #81 (MLink-121); E3 is ✅ in the threat model.
+
+**2026-10-20:** MLink-60 (role × route matrix, the last task of MLink-16 RBAC) ready on `epic/MLink-6`: no
+migration, no endpoint. **From now on every new `/api` route needs a line in `AccessMatrixFunctionalTest`, or
+the build fails** (see its section). Found while checking the dev stack: since #74 (postgres 18) `setup-dev`
+fails on `master` for everyone, even with empty volumes; reported on #74, not fixed here (tests still use 16).
+
+**2026-10-20:** MLink-121 (GitHub #80, threat model E3): the realm role `ADMINISTRATIVE_STAFF` no longer holds
+Keycloak admin rights. Realm file change only, no migration, no endpoint. **Staging and prod need the same change
+by hand in the Keycloak console** (see its section); locally the setup script re-imports the realm (dev volumes
+wiped, realm saved first).
+
 **2026-10-19:** MLink-84 (session cookie hardening: SameSite=Strict, Secure in staging/prod) in review (#63): no
 migration, no endpoint.
 
@@ -66,6 +86,143 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## GitHub #48 — AI disclosure is conditional and truthful (2026-10-21, fix/48-ai-disclosure)
+
+**PR:** [#82](https://github.com/assali-mohamed-ali/api-MedLink/pull/82)
+
+**Built:** the `Utilisation de l'IA` section now offers two exclusive usage choices ("no AI" or "AI used")
+and the human review acknowledgment. `ai-disclosure.yml` runs a small Node validator
+(`.github/scripts/validate-ai-disclosure.mjs`) that fails when neither or both usage choices are checked,
+when AI use has no review acknowledgment, when "no AI" is combined with the review acknowledgment, and
+when a checklist line is missing or duplicated. Failure messages say exactly what to fix. The validator's
+own tests run in the workflow before it validates the PR.
+
+**Proof:** `node --test .github/scripts/validate-ai-disclosure.test.mjs`: 10 tests, 0 failures, covering
+no-AI, AI + review, AI without review, both choices, no choice, missing/duplicated lines, CRLF, indentation
+and uppercase `X`.
+
+**Limits:** the workflow can only check the PR body; it cannot know whether an author lied. The template and
+`CLAUDE.md` now state the intended declaration in the same words as the validator.
+
+## MLink-60 — role × route matrix (2026-10-20, epic/MLink-6)
+
+**Built:** one test file, `functional/AccessMatrixFunctionalTest`, no production code and no shared file changed.
+At the top of the class, one line per `/api` route and the expected answer for each caller, against the real
+API, Keycloak and database. `OPEN` = past security and the endpoint did not break (2xx to 4xx but 401/403: 200,
+204, 400, 404…; never a 5xx), `LOGIN` = 401, `FORBIDDEN` = 403. No cell may answer through a redirect.
+
+| Route | Anonymous | Patient | Practitioner | Staff |
+|---|---|---|---|---|
+| `GET /api/auth/csrf` | OPEN | OPEN | OPEN | OPEN |
+| `POST /api/auth/register` | OPEN | OPEN | OPEN | OPEN |
+| `POST /api/auth/verify-email` | OPEN | OPEN | OPEN | OPEN |
+| `POST /api/auth/verify-email/resend` | OPEN | OPEN | OPEN | OPEN |
+| `POST /api/auth/login` | OPEN | OPEN | OPEN | OPEN |
+| `POST /api/auth/logout` | LOGIN | OPEN | OPEN | OPEN |
+| `GET /api/users` | LOGIN | FORBIDDEN | FORBIDDEN | OPEN |
+| `GET /api/users/{id}` | LOGIN | FORBIDDEN | FORBIDDEN | OPEN |
+| `DELETE /api/users/{id}` | LOGIN | FORBIDDEN | FORBIDDEN | OPEN |
+| `GET /api/users/_health` | LOGIN | OPEN | OPEN | OPEN |
+
+- Each cell is its own test (40), with a fresh browser logged in as the realm's `patient.dev`,
+  `practitioner.dev` or `staff.dev`, so a logout cannot spoil another cell and each has its own IP (rate limits).
+- Every call carries the CSRF header: a 403 is a refusal by role or ownership, never a missing token. `{id}` is a
+  random UUID (someone else's: a patient gets 403, staff 404). Writes send `{}`, so public endpoints answer 400
+  and nothing is created.
+- `everyApiRouteHasALineInTheMatrix` reads every `/api` route from Spring's `RequestMappingHandlerMapping` and
+  fails when the routes and the matrix differ, either way (a mapping with no HTTP method shows as `ANY`).
+
+**Adding an endpoint (Ela, Mohamed, Chourouk, sub-sprint 5):** add one `new Rule(...)` line to `MATRIX` with
+the four expected answers, in the same PR as the endpoint. A path variable stays as written in the mapping
+(`{id}`); a path variable other than `{id}` needs a value in `send(...)`.
+
+**Proof:** red first (eb6472d: empty matrix, Spring listed exactly the 10 routes), then green (19b0157): **41 tests,
+0 failures**. Mutation checks, each restored after: a new `GET /api/users/_probe` without a line fails
+`everyApiRouteHasALineInTheMatrix`, which names `"GET /api/users/_probe"` (the build fails on a forgotten route);
+removing `@PreAuthorize` from the user list fails the patient and practitioner cells of `GET /api/users`;
+making `/api/users/_health` public fails its anonymous cell. Each break failed only its own cells.
+`./mvnw -B verify`: green; reverse class order: **201 tests, 0 failures**. No endpoint change, so no Postman change.
+After the code owner's review on #77 (non-blocking: `OPEN` also let a 5xx or a redirect through): `OPEN` now
+requires 2xx–4xx, and every cell checks that no redirect was followed. Still 41 green. Mutation checks: a
+`GET /api/auth/csrf` that throws (500) fails its four `OPEN` cells; a `/api/users/_health` that redirects fails its
+three logged-in cells on "no redirect".
+
+**Limits:** the matrix checks who gets past security, not what the answer holds (that is each feature's own
+tests, e.g. `OwnershipFunctionalTest`). Routes outside `/api` (actuator, Swagger) are not in it: their exposure
+in production is GitHub #49 and #65. Maven's console names the cells by number (`[26]`); IDEs and the
+surefire XML report show the readable name.
+
+## GitHub #54 — the SCA fallback is visible and gated (2026-10-21, fix/54-sca-fallback)
+
+**PR:** [#83](https://github.com/assali-mohamed-ali/api-MedLink/pull/83)
+
+**Built:** `scripts/ci/sca-policy.sh` decides the scanner from the event, ref, `NVD_API_KEY` and the new
+repository variable `ALLOW_TRIVY_FALLBACK`. The workflow now writes the scanner, the reason and the policy
+to the log, the step summary and `target/sca-scanner.txt` (uploaded in `sca-reports`), and fails when the
+selected scanner produced no report. Release branches (`master`, `staging`, `prod`, `v*` tags) fail on the
+Trivy fallback unless `ALLOW_TRIVY_FALLBACK=true` explicitly accepts it; PRs, schedules, manual runs and
+feature-branch pushes may fall back with a visible warning. `SECURITY.md` documents what Trivy covers and
+what it does not cover (NVD/CPE/transitive Java analysis, suppressions, unfixed CVEs).
+
+**Proof:** `scripts/ci/sca-policy.test.sh` covers the NVD-key path (always primary), the missing-key paths
+for PRs, schedules, manual runs and feature branches (fallback allowed), release branches and `v*` tags
+(denied), the explicit `ALLOW_TRIVY_FALLBACK` acceptance and an unknown event (denied). It runs in the SCA
+workflow before the scan.
+
+**Limits:** the policy cannot make Trivy equivalent to OWASP Dependency-Check; the documented answer is to
+set `NVD_API_KEY` for release scans. The fallback still runs (and publishes findings) before the release
+policy fails, so a red run has usable evidence.
+
+## MLink-121 — staff without Keycloak admin rights, GitHub #80 (2026-10-20, fix/80-staff-keycloak-rights)
+
+**Problem** (found by the threat model update, row E3, #79): the realm role `ADMINISTRATIVE_STAFF` was a composite
+of `realm-management` `view-users`, `manage-users`, `query-users`, `query-groups` and `view-realm`. With only their
+own password and Keycloak's public client `admin-cli` (present in every realm, no secret), a staff member could
+list every user, create an account and read the realm settings straight from Keycloak's admin API, outside the
+API's rules, ownership checks and audit trail.
+
+**Fix:** `keycloak/realm-medlink.json`, the role `ADMINISTRATIVE_STAFF` is a plain role, like `PRACTITIONER` and
+`PATIENT`. Nothing in the API used those rights: every admin call goes through the service account
+`medlink-admin`, which keeps its own `realm-management` roles. Staff still manage accounts, through the API.
+
+**Proof:** `StaffKeycloakRightsFunctionalTest` (real Keycloak), committed red first (2e207fe): with a token staff.dev
+gets from `admin-cli`, listing users answered 200, creating a user 201, reading the realm 200; the service
+account's call 200. After the fix: 403, 403, 403, and still 200 for `medlink-admin`. Each test first checks that
+Keycloak issued the token, so a 403 means no rights, never "not logged in". The red commit is the mutation check
+(the old composite turns the three staff tests red). `./mvnw -B verify`: green; reverse class order: **164 tests, 0
+failures**; sign-up (`SignupFunctionalTest`) still creates users through `medlink-admin`.
+
+**Existing environments:** Keycloak imports the realm file only into an empty database. In staging and prod an
+admin must make the same change by hand: Keycloak console → realm `medlink` → Realm roles → `ADMINISTRATIVE_STAFF`
+→ Associated roles → remove the five `realm-management` roles. Locally the setup script sees the changed realm
+file and re-imports it (dev volumes wiped, the realm is saved first to `.dev/realm-backups/`); not run here, the
+dev stack does not start on `master` since #74 (postgres 18).
+
+**Limits:** `admin-cli` still lets any user get a Keycloak token with their password, which skips the API's per-IP
+limit (Keycloak's lockout still applies). That token now grants no admin right; closing Keycloak's port to the
+public in production (threat model E4) removes the path. The threat model's E3 row turns ✅ once this and #79 are
+both on `master`.
+
+## GitHub #53 — Terraform matches the Keycloak BFF (2026-10-21, fix/53-terraform-env)
+
+**PR:** [#84](https://github.com/assali-mohamed-ali/api-MedLink/pull/84)
+
+**Built:** `terraform/main.tf` now injects every setting the production profile needs: database,
+both Keycloak clients (public/internal URLs, realm, client id and the BFF/admin secrets), SMTP
+(host, port, user, password, sender), frontend URL and CORS. The obsolete `JWT_SECRET` variable is
+removed from `variables.tf` and all three tfvars examples. The app image examples use immutable
+digests. Secret variables are `sensitive`; `terraform/README.md` documents the required values, the
+Postgres/Keycloak networking contract, remote state (`backend.tf.example`) and rollback.
+`scripts/ci/check-prod-config.sh` checks the container environment against the production profile
+(and rejects any `JWT_SECRET` reference); CI also runs `terraform init -backend=false`,
+`terraform fmt -check` and `terraform validate`.
+
+**Proof:** `scripts/ci/check-prod-config.sh` passes; `terraform fmt -check` and `terraform validate`
+pass with Terraform 1.9.8. `python3 -c 'import yaml; yaml.safe_load(...)'` on `ci.yml`: valid.
+
+**Limits:** Terraform still deploys only the API container; PostgreSQL and Keycloak are external
+dependencies (documented). Provisioning Keycloak/keycloak-db belongs to the deployment work in #47.
+
 ## MLink-84 — session cookie hardening (2026-10-19, feat/ss2-session-cookie-hardening)
 
 Unblocked by decision #58 option 1 (keep the password grant): no Keycloak redirect comes back, so Strict is safe.
@@ -87,6 +244,29 @@ the XSRF Secure switch off turns both profile tests red. The fixation test was g
 existing code). Suite: **150 tests, 0 failures**, both class orders; after merging #60: **160, 0 failures**, both orders. No endpoint change, so no Postman change.
 `scripts/setup-dev.ps1` 0 failures in both modes (dev 28 OK, `-FullStack` 29 OK): the end-to-end login and sign-up
 still work with the Strict cookies.
+
+## GitHub #47 — real CD rollout (2026-10-21, feat/47-cd-compose-rollout)
+
+**PR:** [#85](https://github.com/assali-mohamed-ali/api-MedLink/pull/85)
+
+**Built:** `cd.yml` no longer stops at `terraform validate`. The build job publishes the image and
+exports its immutable digest (`repository@sha256:...`). The staging/production jobs run in their
+GitHub Environments and call `.github/actions/deploy-compose`: pin the host key, copy
+`docker-compose.yml`, the Keycloak realm and monitoring config to `DEPLOY_PATH`, write `.env` with
+mode `600` (environment file + `APP_IMAGE`), log in to GHCR on the target, `compose pull`/`up` the API
+by digest, verify the running container uses that exact digest, poll `/actuator/health` for
+`"status":"UP"`, and print the last 200 API log lines on failure. `docker-compose.yml` now accepts
+`APP_IMAGE` (default `api-medlink:local`). `docs/DEPLOYMENT.md` documents the host prerequisites,
+environment variables/secrets, immutable-digest rollout, rollback and failure recovery. Production
+still requires the `production` environment reviewers and is unreachable from `master`.
+
+**Proof:** `python3 -c 'import yaml; yaml.safe_load(...)'` on `cd.yml` and the composite action: valid;
+`bash -n` on every workflow/composite `run` block: clean; `docker compose config --images` with
+`APP_IMAGE` set: resolves the app to the supplied digest; the deployment input gate exits 1 with
+`DEPLOY_HOST` empty and 0 with every required input set. `ComposeFilesTest` still passes (5 tests).
+
+**Limits:** the real SSH rollout needs the staging/production hosts and environment secrets; it
+cannot run in this workspace. The first deployment and the environment review remain human steps.
 
 ## MLink-112 — shared rate limits, GitHub #51 (2026-10-18, fix/51-shared-rate-limits)
 
@@ -136,6 +316,33 @@ behind it shares the proxy's count (no proxy is described yet: issue #31, Terraf
 the client's address (`$proxy_add_x_forwarded_for`), never pass the client's header as is. People behind one
 NAT (a clinic) share one count: the values leave room for that. A taken email still answers a little faster
 than a new one (no Keycloak call); the per-IP limit now caps how many emails one IP can probe.
+
+## Docker — backend in the dev compose stack, PR #86 (2026-10-21, feat/dockerize-backend)
+
+**Built:** `compose.yaml` now defines the API under the `full` profile (`docker compose --profile full
+up --build`), with fixed dev values for the database, Keycloak clients, Mailpit and the frontend URL;
+the default profile is unchanged (API on the host, `spring-boot:run`). `docker-compose.yml` keeps the
+same image and gains the same `PGDATA=/var/lib/postgresql/data` pin as `compose.yaml` (the Postgres 18
+image otherwise looks in `/var/lib/postgresql/<major>/docker`); its no-env profile default is now `dev`
+(staging/prod env files still set `staging`/`prod`). The API datasource in the dev profile
+uses the fixed `postgres` service values, so a local `.env` cannot accidentally send it another
+password. The ineffective `docker/.dockerignore` moved to the repository root (the build context is
+`.`); it now excludes `.env*`, `.git`, `target`, docs, infra and monitoring, so a local secret never
+reaches the Docker daemon and the context is smaller. README and architecture docs document the new
+profile.
+
+**Proof:** `ComposeFilesTest` passes (5 tests). `docker compose -f compose.yaml config --services`
+excludes `app` by default and `--profile full` includes it; `config --images` resolves the app to
+`api-medlink:local`. `docker compose --profile full -f compose.yaml build app` succeeds. In a clean
+isolated project (`medlink-dockerize-test`, fresh volumes, temporary host-port overrides only to avoid
+the running stack) `docker compose --profile full up -d --build` started all five services and the
+app's `/actuator/health` returned `"status":"UP"` after 6 s. The project was removed with `down -v`,
+leaving the original dev dependencies running.
+
+**Limits:** the existing local Keycloak database volume was created by PostgreSQL 16 while `master`
+now pins the Postgres 18 image; that separate dev-stack failure is #74 (a fresh volume works, as the
+clean run shows). The check covers startup and health, not a browser login or a Keycloak admin
+operation.
 
 ## MLink-113 — one compose setup per workflow, GitHub #52 (2026-10-18, fix/52-one-compose-setup)
 
@@ -505,6 +712,7 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-20 | The role × route matrix asserts past security / 401 / 403, not exact statuses, and reads the routes from Spring | It proves access rules only, so a feature's answers (200, 400, 404) can change without touching it; a route missing from the matrix fails the build (MLink-60) | Exact status per cell; a hand-kept list of routes |
 | 2026-10-19 | The login keeps the OAuth password grant, as a consciously accepted exception: [decision record 0001](../../decisions/0001-login-password-grant.md) | Keeps "the frontend never talks to Keycloak"; decided by the plan owner and the code owner on PR #58 (GitHub #50); its conditions: per-IP rate limiting (done, #60) and this link | Authorization Code + PKCE with a themed Keycloak login page |
 | 2026-10-18 | Rate limits counted in Postgres (`rate_limits`, one atomic upsert per hit), not Redis | Shared by every instance and race-free with the database we already run; no new service to deploy and secure (GitHub #51) | Redis; the in-memory map (one instance, racy) |
 | 2026-10-18 | Per-IP limit past the threshold → 429 `TOO_MANY_REQUESTS` with `Retry-After`; per-account limits stay silent (201 / 202) and login per account stays Keycloak's lockout | A count keyed by the IP says nothing about an account, so a 429 is safe; a per-account 429 would tell which emails exist | The usual answer when limited per IP (hides an outage of the form from real users); our own per-account login lock |

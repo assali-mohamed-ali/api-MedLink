@@ -8,11 +8,11 @@ This repository is its Spring Boot API. It is also the only component that talks
 Any AI agent working on this repository MUST follow these rules:
 
 1. **Disclose AI usage:** If you generate, modify, refactor, or materially influence any code, tests, configuration, documentation, or other files in a change, you MUST disclose AI assistance in the associated Pull Request.
-2. **Update the PR description:** Ensure the PR description contains the following checklist item and that it is checked when AI assistance was used:
+2. **Update the PR description:** The `Utilisation de l'IA` section offers two exclusive usage choices. Check exactly one: when AI assistance was used, check the following item; when it was not, check `- [x] Cette PR n'utilise pas d'outils d'IA générative.` instead.
 
    `- [x] J'ai utilisé des outils d'IA générative pour contribuer à cette PR.`
 
-3. **Human review:** Include the following item and do not mark it as completed on behalf of the human contributor:
+3. **Human review:** When AI was used, include the following item and do not mark it as completed on behalf of the human contributor. When AI was not used, leave it unchecked.
 
    `- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.`
 
