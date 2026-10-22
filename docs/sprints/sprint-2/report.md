@@ -42,6 +42,18 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
 
+## MLink-87 - password history (2026-10-22, feat/ss4-password-history)
+
+- Realm `passwordPolicy` gains `passwordHistory(3)`: a new password must differ from the last three.
+- No migration, no endpoint, no Postman change; Keycloak remains the only place that stores passwords.
+- The French message was already mapped in `InvalidPasswordException`
+  (`invalidPasswordHistoryMessage`): "Le mot de passe doit être différent de vos 3 derniers mots de passe."
+- **Proof:** `PasswordHistoryFunctionalTest` creates a user and sets two passwords through
+  `KeycloakAdminService`, then reuses the first: Keycloak refuses it and the API raises
+  `PASSWORD_POLICY` with that French message. Red first (no throwable), then green.
+- **Every dev machine re-imports the realm once:** the setup script sees the realm file hash change and
+  resets the volumes automatically; `-Reset` does the same by hand.
+
 ### Where we are (handoff, 2026-10-16)
 
 Merged on `master`: sub-sprint 1 (#32), staff-only `/api/users` (#33, MLink-57), GitHub issues #28/#29
