@@ -10,7 +10,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
 | 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
-| 4 | Passwords (endpoints 10–11) | To do | — | — |
+| 4 | Passwords (endpoints 10–11) | **In progress** (MLink-87 in review) | [#88](https://github.com/assali-mohamed-ali/api-MedLink/pull/88) | 2026-10-22 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
 **2026-10-20:** MLink-119 (GitHub #66, part 1) in review (#78): README rewritten to match `master` (password-grant
