@@ -1,5 +1,7 @@
 package com.example.apimedlink.service;
 
+import com.example.apimedlink.model.AuditAction;
+import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.UserRepository;
 import jakarta.persistence.EntityExistsException;
@@ -14,20 +16,26 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
 
     private final UserRepository users;
+    private final AuditService audit;
 
-    public UserService(UserRepository users) {
+    public UserService(UserRepository users, AuditService audit) {
         this.users = users;
+        this.audit = audit;
     }
 
     @Transactional(readOnly = true)
     public List<User> findAll() {
-        return users.findAll();
+        List<User> all = users.findAll();
+        audit.record(AuditAction.DATA_READ, "USER", "ALL", AuditOutcome.SUCCESS);
+        return all;
     }
 
     @Transactional(readOnly = true)
     public User findById(UUID id) {
-        return users.findById(id)
+        User user = users.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("User " + id + " not found"));
+        audit.record(AuditAction.DATA_READ, "USER", id.toString(), AuditOutcome.SUCCESS);
+        return user;
     }
 
     /** {@code id} is the Keycloak user id: the Keycloak account is created first. */
