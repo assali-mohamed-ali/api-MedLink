@@ -2,7 +2,7 @@
   "info": {
     "name": "MedLink API · Sprint 2 · Sub-sprint 1 (registration and email verification)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases.\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created, the per-IP limits (429 `TOO_MANY_REQUESTS` with `Retry-After`, GitHub #51: the dev profile raises them to 1000 so this collection can be rerun; `RateLimitFunctionalTest` checks the real values).\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them."
+    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases.\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created, the per-IP limits (429 `TOO_MANY_REQUESTS` with `Retry-After`, GitHub #51: the dev profile raises them to 1000 so this collection can be rerun; `RateLimitFunctionalTest` checks the real values).\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them.\n\nFolder 6 (slot search, MLink-98) logs in as patient.dev and reads the dev seed: run the setup script first."
   },
   "item": [
     {
@@ -1824,6 +1824,179 @@
           ]
         }
       ]
+    },
+    {
+      "name": "6 · Slot search (endpoint 25.2, MLink-98)",
+      "description": "GET /api/slots as patient.dev, on the dev seed (three practitioners, free slots over the next two weeks). Needs the dev stack started by scripts/setup-dev.",
+      "item": [
+        {
+          "name": "GET /slots without a session → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The search window: from now, for the next 14 days (the dev seed's slots)",
+                  "const now = new Date();",
+                  "pm.collectionVariables.set(\"slotFrom\", now.toISOString());",
+                  "pm.collectionVariables.set(\"slotTo\", new Date(now.getTime() + 14 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf before logging in → 204",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /login as patient.dev → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient.dev@medlink.local\",\n  \"password\": \"{{devPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"logged in as a patient\", () => pm.expect(pm.response.json().user.roles).to.include(\"PATIENT\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots (next 14 days) → 200, free slots earliest first",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"the dev seed's slots come back\", () => pm.expect(body.items).to.be.an(\"array\").that.is.not.empty);",
+                  "pm.test(\"total counts every match\", () => pm.expect(body.total).to.be.at.least(body.items.length));",
+                  "pm.test(\"each slot: times, clinic, practitioner, specialty\", () => body.items.forEach(s => {",
+                  "    pm.expect(s).to.have.all.keys(\"slotId\", \"startsAt\", \"endsAt\", \"clinic\", \"practitioner\", \"specialty\");",
+                  "    pm.expect(s.clinic).to.have.all.keys(\"id\", \"name\");",
+                  "    pm.expect(s.practitioner).to.have.all.keys(\"id\", \"firstName\", \"lastName\");",
+                  "}));",
+                  "pm.test(\"earliest first, never in the past\", () => {",
+                  "    const starts = body.items.map(s => Date.parse(s.startsAt));",
+                  "    pm.expect(starts).to.eql([...starts].sort((a, b) => a - b));",
+                  "    starts.forEach(t => pm.expect(t).to.be.above(Date.now() - 60000));",
+                  "});",
+                  "pm.test(\"no email or username of the practitioner\", () => pm.expect(pm.response.text()).to.not.include(\"@\"));",
+                  "pm.collectionVariables.set(\"practitionerId\", body.items[0].practitioner.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots?practitionerId=… → only that practitioner",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&practitionerId={{practitionerId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"some slots\", () => pm.expect(body.items).to.not.be.empty);",
+                  "pm.test(\"all of the chosen practitioner\", () => body.items.forEach(s =>",
+                  "    pm.expect(s.practitioner.id).to.eql(pm.collectionVariables.get(\"practitionerId\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots without from → 400 VALIDATION_FAILED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?to={{slotTo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the missing field is named\", () => pm.expect(pm.response.json().details).to.have.property(\"from\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
@@ -1905,6 +2078,22 @@
     },
     {
       "key": "newSlowToken",
+      "value": ""
+    },
+    {
+      "key": "devPassword",
+      "value": "MedLink-Dev-2026!"
+    },
+    {
+      "key": "slotFrom",
+      "value": ""
+    },
+    {
+      "key": "slotTo",
+      "value": ""
+    },
+    {
+      "key": "practitionerId",
       "value": ""
     }
   ]
