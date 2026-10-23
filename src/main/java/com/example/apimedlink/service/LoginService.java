@@ -1,6 +1,7 @@
 package com.example.apimedlink.service;
 
 import com.example.apimedlink.exception.ApiException;
+import com.example.apimedlink.exception.PasswordChangeRequiredException;
 import com.example.apimedlink.model.User;
 import com.example.apimedlink.security.Roles;
 import java.util.List;
@@ -24,10 +25,13 @@ public class LoginService {
     private static final Logger log = LoggerFactory.getLogger(LoginService.class);
 
     private final KeycloakLoginClient keycloak;
+    private final KeycloakAdminService admin;
     private final UserProvisioningService provisioning;
 
-    public LoginService(KeycloakLoginClient keycloak, UserProvisioningService provisioning) {
+    public LoginService(KeycloakLoginClient keycloak, KeycloakAdminService admin,
+                        UserProvisioningService provisioning) {
         this.keycloak = keycloak;
+        this.admin = admin;
         this.provisioning = provisioning;
     }
 
@@ -35,8 +39,17 @@ public class LoginService {
      * @throws ApiException 401 {@code INVALID_CREDENTIALS}, 403 {@code ACCOUNT_DISABLED} or
      *     {@code EMAIL_NOT_VERIFIED}, 409 {@code ACCOUNT_CONFLICT}, 503 {@code IDENTITY_UNAVAILABLE}
      */
-    public Login login(String email, String password) {
-        KeycloakTokens tokens = keycloak.passwordGrant(email.trim(), password);
+    public LoginResult login(String email, String password) {
+        KeycloakTokens tokens;
+        try {
+            tokens = keycloak.passwordGrant(email.trim(), password);
+        } catch (PasswordChangeRequiredException pending) {
+            UUID id = admin.findByEmail(email.trim())
+                    .filter(user -> user.requiredActions().contains("UPDATE_PASSWORD"))
+                    .map(KeycloakUser::id)
+                    .orElseThrow(LoginService::invalidCredentials);
+            return new LoginResult.PasswordChange(id);
+        }
         Jwt token = tokens.accessToken();
         try {
             // Keycloak accepts an unverified email: refusing it is ours
@@ -50,8 +63,8 @@ public class LoginService {
                     UUID.fromString(token.getSubject()),
                     token.getClaimAsString("email"),
                     token.getClaimAsString("preferred_username"));
-            return new Login(user, token.getClaimAsString("given_name"), token.getClaimAsString("family_name"),
-                    ourRoles(token), tokens);
+            return new LoginResult.Success(new Login(user, token.getClaimAsString("given_name"),
+                    token.getClaimAsString("family_name"), ourRoles(token), tokens));
         } catch (RuntimeException refused) {
             // Keycloak accepted the password and opened a session: no session of ours, so none of theirs
             keycloak.endSession(tokens.refreshToken());
@@ -73,5 +86,10 @@ public class LoginService {
             return List.of();
         }
         return Roles.ALL.stream().filter(claimed::contains).toList();
+    }
+
+    private static ApiException invalidCredentials() {
+        return new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS",
+                "E-mail ou mot de passe incorrect, ou compte temporairement verrouillé.");
     }
 }

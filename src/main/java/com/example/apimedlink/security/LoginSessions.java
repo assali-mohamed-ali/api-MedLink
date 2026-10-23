@@ -61,6 +61,7 @@ public class LoginSessions {
         } else {
             request.getSession(true);
         }
+        request.getSession().removeAttribute(PasswordChangePending.ATTRIBUTE);
         KeycloakTokens tokens = login.tokens();
         List<GrantedAuthority> authorities = login.roles().stream()
                 .<GrantedAuthority>map(role -> new SimpleGrantedAuthority("ROLE_" + role))

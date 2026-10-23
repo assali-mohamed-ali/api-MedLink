@@ -1,5 +1,6 @@
 package com.example.apimedlink.service;
 
+import java.util.Optional;
 import java.util.UUID;
 
 /**
@@ -23,4 +24,16 @@ public interface KeycloakAdminService {
     void setEmailVerified(UUID id, boolean verified);
 
     KeycloakUser getUser(UUID id);
+
+    /** Exact email lookup, used only after Keycloak accepted the password. */
+    Optional<KeycloakUser> findByEmail(String email);
+
+    /** Adds Keycloak's UPDATE_PASSWORD required action, keeping any other pending action. */
+    void requirePasswordChange(UUID id);
+
+    /** Removes UPDATE_PASSWORD once the forced change succeeded. */
+    void clearPasswordChange(UUID id);
+
+    /** Ends every open Keycloak session of this user. */
+    void endSessions(UUID id);
 }

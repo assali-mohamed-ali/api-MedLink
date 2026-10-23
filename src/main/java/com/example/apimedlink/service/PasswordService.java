@@ -37,6 +37,13 @@ public class PasswordService {
         }
     }
 
+    /** The forced branch: the pending login already proved the current password. */
+    public void changeForced(UUID userId, String newPassword) {
+        validateNewPassword(newPassword);
+        keycloak.setPassword(userId, newPassword);
+        keycloak.clearPasswordChange(userId);
+    }
+
     /**
      * Checked here, not with Bean Validation: the controller must first tell a pending session from
      * no session, so an anonymous {@code {}} must be 401, not 400.

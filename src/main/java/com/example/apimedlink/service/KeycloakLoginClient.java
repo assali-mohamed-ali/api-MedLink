@@ -3,6 +3,7 @@ package com.example.apimedlink.service;
 import com.example.apimedlink.config.KeycloakProperties;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.KeycloakUnavailableException;
+import com.example.apimedlink.exception.PasswordChangeRequiredException;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Duration;
@@ -156,7 +157,9 @@ public class KeycloakLoginClient {
                 return new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_DISABLED",
                         "Ce compte est désactivé. Contactez l'administration.");
             }
-            // Sub-sprint 4 (forced password change) adds Keycloak's "account not fully set up" here.
+            if (error.description() != null && error.description().contains("not fully set up")) {
+                return new PasswordChangeRequiredException();
+            }
             // A locked account answers exactly like a wrong password: a 423 would tell anyone that the
             // email has an account (Keycloak never locks an unknown email). Decided on MLink-55.
             return new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS",

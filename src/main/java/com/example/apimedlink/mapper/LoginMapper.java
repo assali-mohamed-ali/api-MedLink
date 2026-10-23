@@ -11,6 +11,6 @@ public final class LoginMapper {
 
     public static LoginResponse toResponse(Login login) {
         return new LoginResponse(new SessionUserDto(
-                login.user().getId(), login.user().getEmail(), login.firstName(), login.lastName(), login.roles()));
+                login.user().getId(), login.user().getEmail(), login.firstName(), login.lastName(), login.roles()), null);
     }
 }
