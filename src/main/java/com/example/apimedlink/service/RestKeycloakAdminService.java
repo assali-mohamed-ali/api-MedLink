@@ -157,14 +157,6 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
     }
 
     @Override
-    public void clearPasswordChange(UUID id) {
-        KeycloakUser user = getUser(id);
-        updateRequiredActions(id, user.requiredActions().stream()
-                .filter(action -> !"UPDATE_PASSWORD".equals(action))
-                .toList());
-    }
-
-    @Override
     public void endSessions(UUID id) {
         call("end user sessions", bearer -> http.post().uri(users + "/{id}/logout", id)
                 .header(HttpHeaders.AUTHORIZATION, bearer)

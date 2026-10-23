@@ -1,17 +1,24 @@
 package com.example.apimedlink.service;
 
 import com.example.apimedlink.exception.ApiException;
+import com.example.apimedlink.exception.KeycloakUnavailableException;
+import com.example.apimedlink.exception.PasswordChangeRequiredException;
 import java.util.Map;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 
 /**
  * Endpoint 10: the current password is checked by Keycloak (password grant), then the new one is
- * set through the admin API. The password grant's Keycloak session is ended at once.
+ * set through the admin API. A change ends every Keycloak session of the user (the check's one
+ * too); the controller closes the caller's API session, the others follow at their next renewal.
  */
 @Service
 public class PasswordService {
+
+    private static final Logger log = LoggerFactory.getLogger(PasswordService.class);
 
     private final KeycloakAdminService keycloak;
     private final KeycloakLoginClient login;
@@ -32,16 +39,33 @@ public class PasswordService {
         KeycloakTokens tokens = currentPassword(user, currentPassword);
         try {
             keycloak.setPassword(userId, newPassword);
-        } finally {
+        } catch (RuntimeException refused) {
             login.endSession(tokens.refreshToken());
+            throw refused;
         }
+        endSessions(userId);
     }
 
-    /** The forced branch: the pending login already proved the current password. */
+    /**
+     * The forced branch: the pending login already proved the current password. One Keycloak write:
+     * a permanent password also drops UPDATE_PASSWORD (Keycloak 26), so nothing is left half done.
+     */
     public void changeForced(UUID userId, String newPassword) {
         validateNewPassword(newPassword);
         keycloak.setPassword(userId, newPassword);
-        keycloak.clearPasswordChange(userId);
+    }
+
+    /**
+     * The new password is set and cannot be put back (password history), so a failure here does not
+     * undo the change: it is logged for an admin to sign the user out in the console.
+     */
+    private void endSessions(UUID userId) {
+        try {
+            keycloak.endSessions(userId);
+        } catch (KeycloakUnavailableException e) {
+            log.error("Password changed for user {} but its Keycloak sessions could not be ended: "
+                    + "sign the user out in the Keycloak console", userId);
+        }
     }
 
     /**
@@ -64,6 +88,10 @@ public class PasswordService {
     private KeycloakTokens currentPassword(KeycloakUser user, String password) {
         try {
             return login.passwordGrant(user.email(), password);
+        } catch (PasswordChangeRequiredException reset) {
+            // Staff forced a reset while this session's token was still fresh: the session is over
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "SESSION_EXPIRED",
+                    "Votre session a expiré. Reconnectez-vous.");
         } catch (ApiException refused) {
             if (refused.getStatus() == HttpStatus.UNAUTHORIZED) {
                 throw new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CURRENT_PASSWORD",

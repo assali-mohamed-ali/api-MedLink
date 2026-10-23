@@ -23,6 +23,7 @@ import org.springframework.stereotype.Service;
 public class LoginService {
 
     private static final Logger log = LoggerFactory.getLogger(LoginService.class);
+    private static final String UPDATE_PASSWORD = "UPDATE_PASSWORD";
 
     private final KeycloakLoginClient keycloak;
     private final KeycloakAdminService admin;
@@ -36,19 +37,26 @@ public class LoginService {
     }
 
     /**
-     * @throws ApiException 401 {@code INVALID_CREDENTIALS}, 403 {@code ACCOUNT_DISABLED} or
-     *     {@code EMAIL_NOT_VERIFIED}, 409 {@code ACCOUNT_CONFLICT}, 503 {@code IDENTITY_UNAVAILABLE}
+     * @throws ApiException 401 {@code INVALID_CREDENTIALS}, 403 {@code ACCOUNT_DISABLED},
+     *     {@code EMAIL_NOT_VERIFIED} or {@code ACCOUNT_SETUP_INCOMPLETE}, 409 {@code ACCOUNT_CONFLICT},
+     *     503 {@code IDENTITY_UNAVAILABLE}
      */
     public LoginResult login(String email, String password) {
         KeycloakTokens tokens;
         try {
             tokens = keycloak.passwordGrant(email.trim(), password);
         } catch (PasswordChangeRequiredException pending) {
-            UUID id = admin.findByEmail(email.trim())
-                    .filter(user -> user.requiredActions().contains("UPDATE_PASSWORD"))
-                    .map(KeycloakUser::id)
-                    .orElseThrow(LoginService::invalidCredentials);
-            return new LoginResult.PasswordChange(id);
+            // Keycloak checked the password first; its admin API says which step is missing. Only
+            // UPDATE_PASSWORD alone is ours to finish: anything else would leave the account blocked
+            // after the change, so it is refused before the change starts.
+            KeycloakUser user = admin.findByEmail(email.trim()).orElseThrow(LoginService::invalidCredentials);
+            if (user.requiredActions().equals(List.of(UPDATE_PASSWORD))) {
+                return new LoginResult.PasswordChange(user.id());
+            }
+            log.warn("Login refused for user {}: not fully set up in Keycloak (required actions {})",
+                    user.id(), user.requiredActions());
+            throw new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_SETUP_INCOMPLETE",
+                    "Votre compte n'est pas encore prêt. Contactez l'administration.");
         }
         Jwt token = tokens.accessToken();
         try {
