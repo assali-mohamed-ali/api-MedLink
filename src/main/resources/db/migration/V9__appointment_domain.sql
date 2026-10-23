@@ -60,3 +60,7 @@ CREATE TABLE appointments (
 
 CREATE INDEX idx_appointments_patient ON appointments (patient_id);
 CREATE INDEX idx_appointments_slot ON appointments (slot_id);
+
+-- A slot holds one active appointment at most, even when two bookings race (review on PR #87).
+-- A cancelled appointment does not count, so its slot can be booked again.
+CREATE UNIQUE INDEX appointments_one_active_per_slot ON appointments (slot_id) WHERE status = 'BOOKED';

@@ -135,39 +135,6 @@
       "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
     },
     {
-      "id": "d0c70000-0000-4000-8000-000000000001",
-      "username": "generalist.dev",
-      "email": "generalist.dev@medlink.local",
-      "firstName": "Généraliste",
-      "lastName": "Dev",
-      "enabled": true,
-      "emailVerified": true,
-      "groups": ["/practitioners"],
-      "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
-    },
-    {
-      "id": "d0c70000-0000-4000-8000-000000000002",
-      "username": "cardiologist.dev",
-      "email": "cardiologist.dev@medlink.local",
-      "firstName": "Cardiologue",
-      "lastName": "Dev",
-      "enabled": true,
-      "emailVerified": true,
-      "groups": ["/practitioners"],
-      "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
-    },
-    {
-      "id": "d0c70000-0000-4000-8000-000000000003",
-      "username": "pediatrician.dev",
-      "email": "pediatrician.dev@medlink.local",
-      "firstName": "Pédiatre",
-      "lastName": "Dev",
-      "enabled": true,
-      "emailVerified": true,
-      "groups": ["/practitioners"],
-      "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
-    },
-    {
       "username": "patient.dev",
       "email": "patient.dev@medlink.local",
       "firstName": "Patient",
