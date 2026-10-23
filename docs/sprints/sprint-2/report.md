@@ -13,6 +13,12 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-23:** `master` merged into `epic/MLink-8` after #89: the appointment migration is renumbered
+**V10** (`V10__appointment_domain.sql`), since #89 merged first with `V9__session_revocations.sql` (the code owner's
+call on #87: the PR merged second takes the next free number). Conflicts kept both sides: the access matrix lines,
+this report, and the Postman collection (the slot search becomes folder 7, after #89's folder 6). Dev databases that
+ran the old V9 need the setup script with `--reset` (`-Reset`) once.
+
 **2026-10-23:** MLink-98 (slot search, `GET /api/slots`, the epic's first endpoint) on `epic/MLink-8`, draft PR #87:
 no migration. **One new line in `AccessMatrixFunctionalTest`.**
 
@@ -181,7 +187,7 @@ missing (one entry per field in `details`); 401 anonymous; 403 practitioner and 
   practitioner without dates would get 400 instead of 403.
 - `AccessMatrixFunctionalTest` (MLink-60, said on MLink-60): `GET /api/slots` → anonymous 401, patient past
   security, practitioner 403, staff 403.
-- Postman: folder 6 logs in as `patient.dev` and searches the dev seed (401 without a session, 200 with the
+- Postman: folder 7 (folder 6 until #89) logs in as `patient.dev` and searches the dev seed (401 without a session, 200 with the
   expected shape, earliest first, no email, filter by practitioner, 400 without `from`).
 
 **Proof** (Ubuntu VM with Docker):
@@ -197,7 +203,7 @@ missing (one entry per field in `details`); 401 anonymous; 403 practitioner and 
   `aPatientGetsOnlyTheFreeSlotsOfThePeriodThatStartInTheFutureEarliestFirst` turns red (the booked slot comes back).
 - `./mvnw -B clean verify`: **242 tests, 0 failures** (with the overlap fix below); reverse order: 242, 0 failures.
 - `scripts/setup-dev.sh --reset --skip-tests`: 0 warnings. Postman, `npx newman@6.2.1 run`: **57 requests,
-  163 assertions, 0 failures**, folder 6 included.
+  163 assertions, 0 failures**, the slot search folder included (before the merge of #89).
 
 **Decisions** (also in the log below): patients only; a past `from` starts at now; `page=0`, `size=20` by
 default; earliest first; of the practitioner only the id and names.
@@ -213,7 +219,7 @@ endpoints need in the database, and enough dev data to try them. No endpoint. Sh
 fixes: `compose.yaml` (one dev-only service) and `ComposeFilesTest` (a `DEV_ONLY` list), announced to Mohamed.
 
 **Built:**
-- `V9__appointment_domain.sql`: `clinics`, `specialties`, `practitioners` (id = `users.id`, the Keycloak id; names
+- `V10__appointment_domain.sql` (V9 until #89 took V9 for `session_revocations`): `clinics`, `specialties`, `practitioners` (id = `users.id`, the Keycloak id; names
   and specialty), `practitioner_clinics`, `slots` and `appointments`. Rules held by the database: one practitioner
   never has two slots starting at the same time (`UNIQUE (practitioner_id, starts_at)`), a slot ends after it
   starts, slot status is `FREE`/`BOOKED`, appointment status `BOOKED`/`CANCELLED`, an appointment belongs to a
@@ -295,7 +301,7 @@ repeatable SQL migration in its own dev-only location; fixed ids for new dev use
   PR #87, a separate ticket proposed.
 - In full-stack mode (`docker-compose.yml`, setup `--full-stack`) the three dev practitioners are not created, on
   purpose; the dev seed still inserts their rows, they just cannot log in there.
-- V9 runs `CREATE EXTENSION IF NOT EXISTS btree_gist`: a trusted extension, so the database owner can create it;
+- V10 runs `CREATE EXTENSION IF NOT EXISTS btree_gist`: a trusted extension, so the database owner can create it;
   a deployed database whose migration role is not the owner needs it created once by an administrator.
 - `docker compose up -d` does not fail when `keycloak-dev-users` fails (it exits after its job): check
   `docker compose logs keycloak-dev-users` if a dev practitioner cannot log in.
