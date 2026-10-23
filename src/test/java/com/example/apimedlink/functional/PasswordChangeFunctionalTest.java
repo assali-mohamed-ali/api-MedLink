@@ -1,0 +1,90 @@
+package com.example.apimedlink.functional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import com.example.apimedlink.service.KeycloakAdminService;
+import java.net.http.HttpResponse;
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+
+/**
+ * MLink-91: {@code POST /api/auth/password} with a session (endpoint 10 in plan.md).
+ */
+class PasswordChangeFunctionalTest extends FunctionalTestBase {
+
+    static final String PASSWORD = "Change-Pass-2026!";
+    static final String NEXT_PASSWORD = "Changed-Pass-2026!";
+
+    final KeycloakConsole console = new KeycloakConsole();
+
+    @Autowired
+    KeycloakAdminService keycloak;
+
+    @Test
+    void aPatientChangesTheirPassword() throws Exception {
+        String email = uniqueEmail("change");
+        console.createUser(email, PASSWORD);
+        Browser browser = new Browser().login(email, PASSWORD);
+
+        HttpResponse<String> response = browser.postJson("/api/auth/password",
+                "{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"" + NEXT_PASSWORD + "\"}");
+
+        assertThat(response.statusCode()).isEqualTo(204);
+        assertThat(new Browser().apiLogin(email, PASSWORD).statusCode()).isEqualTo(401);
+        assertThat(new Browser().apiLogin(email, NEXT_PASSWORD).statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void aWrongCurrentPasswordIsRefusedWithoutChangingThePassword() throws Exception {
+        String email = uniqueEmail("change-wrong");
+        console.createUser(email, PASSWORD);
+        Browser browser = new Browser().login(email, PASSWORD);
+
+        HttpResponse<String> response = browser.postJson("/api/auth/password",
+                "{\"currentPassword\":\"Wrong-Pass-2026!\",\"newPassword\":\"" + NEXT_PASSWORD + "\"}");
+
+        assertThat(response.statusCode()).isEqualTo(401);
+        assertThat(response.body()).contains("\"code\":\"INVALID_CURRENT_PASSWORD\"");
+        assertThat(new Browser().apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void aWeakPasswordKeepsTheFrenchPolicyMessage() throws Exception {
+        String email = uniqueEmail("change-weak");
+        console.createUser(email, PASSWORD);
+        Browser browser = new Browser().login(email, PASSWORD);
+
+        HttpResponse<String> response = browser.postJson("/api/auth/password",
+                "{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"Aa1!short\"}");
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(response.body()).contains("\"code\":\"PASSWORD_POLICY\"",
+                "Le mot de passe doit contenir au moins 12 caractères.");
+    }
+
+    @Test
+    void aReusedPasswordIsRefused() throws Exception {
+        String email = uniqueEmail("change-reuse");
+        UUID id = keycloak.createUser(email, email, "Reuse", "User", "/patients");
+        keycloak.setEmailVerified(id, true);
+        keycloak.setPassword(id, PASSWORD);
+        keycloak.setPassword(id, NEXT_PASSWORD);
+        Browser browser = new Browser().login(email, NEXT_PASSWORD);
+
+        HttpResponse<String> response = browser.postJson("/api/auth/password",
+                "{\"currentPassword\":\"" + NEXT_PASSWORD + "\",\"newPassword\":\"" + PASSWORD + "\"}");
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        assertThat(response.body()).contains("\"code\":\"PASSWORD_POLICY\"",
+                "Le mot de passe doit être différent de vos 3 derniers mots de passe.");
+    }
+
+    @Test
+    void changingWithoutASessionOrAPendingChangeIsRefused() throws Exception {
+        HttpResponse<String> response = new Browser().postJson("/api/auth/password",
+                "{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"" + NEXT_PASSWORD + "\"}");
+
+        assertThat(response.statusCode()).isEqualTo(401);
+    }
+}
