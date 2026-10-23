@@ -20,7 +20,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * The appointment domain tables (MLink-97), checked in SQL: practitioners share their user's id,
- * slots cannot overlap for one practitioner or end before they start, appointments belong to a patient,
+ * slots of one practitioner cannot overlap (adjacent ones can) or end before they start, appointments belong to a patient,
  * and a slot holds one active appointment at most (review on PR #87).
  */
 @DataJpaTest
@@ -70,6 +70,40 @@ class AppointmentSchemaTest {
         assertThatThrownBy(() ->
                 insertSlot(practitioner, clinic, NINE_AM, NINE_AM.plus(30, ChronoUnit.MINUTES), "FREE"))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void overlappingSlotsOfOnePractitionerAreRefusedEvenInAnotherClinic() {
+        UUID practitioner = insertPractitioner();
+        insertSlot(practitioner, insertClinic(), NINE_AM, NINE_AM.plus(60, ChronoUnit.MINUTES), "FREE");
+
+        // 09:00-10:00 is taken: 09:30-10:00 overlaps it, wherever it is
+        assertThatThrownBy(() -> insertSlot(practitioner, insertClinic(),
+                NINE_AM.plus(30, ChronoUnit.MINUTES), NINE_AM.plus(60, ChronoUnit.MINUTES), "FREE"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void adjacentSlotsOfOnePractitionerAreAccepted() {
+        UUID practitioner = insertPractitioner();
+        UUID clinic = insertClinic();
+
+        insertSlot(practitioner, clinic, NINE_AM, NINE_AM.plus(30, ChronoUnit.MINUTES), "FREE");
+        insertSlot(practitioner, clinic, NINE_AM.plus(30, ChronoUnit.MINUTES), NINE_AM.plus(60, ChronoUnit.MINUTES), "FREE");
+
+        assertThat(jdbc.queryForObject("select count(*) from slots where practitioner_id = ?", Integer.class,
+                practitioner)).isEqualTo(2);
+    }
+
+    @Test
+    void twoPractitionersMayHaveSlotsAtTheSameTime() {
+        UUID clinic = insertClinic();
+
+        insertSlot(insertPractitioner(), clinic, NINE_AM, NINE_AM.plus(60, ChronoUnit.MINUTES), "FREE");
+        insertSlot(insertPractitioner(), clinic, NINE_AM.plus(30, ChronoUnit.MINUTES), NINE_AM.plus(90, ChronoUnit.MINUTES), "FREE");
+
+        assertThat(jdbc.queryForObject("select count(*) from slots where clinic_id = ?", Integer.class, clinic))
+                .isEqualTo(2);
     }
 
     @Test
