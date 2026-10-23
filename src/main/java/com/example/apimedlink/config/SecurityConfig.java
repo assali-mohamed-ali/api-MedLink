@@ -1,5 +1,6 @@
 package com.example.apimedlink.config;
 
+import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.security.JsonAccessDeniedHandler;
 import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
 import com.example.apimedlink.security.RouteWords;
@@ -34,6 +35,7 @@ public class SecurityConfig {
             JsonMapper json,
             AuditService audit,
             RouteWords routeWords,
+            SessionRevocationStore revocations,
             @Value("${server.servlet.session.cookie.secure:false}") boolean secureCookies) throws Exception {
         // Same cookie as csrf.spa() (readable by the SPA), plus SameSite and Secure like the session cookie (MLink-84);
         // when not forced Secure, it stays Secure on HTTPS requests (the repository's default)
@@ -67,12 +69,13 @@ public class SecurityConfig {
                                 "/api/auth/login",
                                 "/api/auth/register",
                                 "/api/auth/verify-email",
-                                "/api/auth/verify-email/resend")
+                                "/api/auth/verify-email/resend",
+                                "/api/auth/password")
                         .permitAll()
                         .anyRequest()
                         .authenticated())
                 // Every logged-in call checks Keycloak still accepts the account (GitHub #28)
-                .addFilterBefore(new SessionValidityFilter(authorizedClients, json), AuthorizationFilter.class)
+                .addFilterBefore(new SessionValidityFilter(authorizedClients, json, revocations), AuthorizationFilter.class)
                 // Not logged in (no session, unknown, ended or expired): 401 with our JSON error, never a redirect
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new JsonAuthenticationEntryPoint(json))

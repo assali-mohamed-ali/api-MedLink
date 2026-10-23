@@ -43,6 +43,8 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("POST",   "/api/auth/verify-email/resend", O, O, O, O),
             new Rule("POST",   "/api/auth/login",               O, O, O, O),
             new Rule("POST",   "/api/auth/logout",              L, O, O, O),
+            new Rule("POST",   "/api/auth/password",            L, O, O, O),
+            new Rule("POST",   "/api/admin/users/{id}/force-password-reset", L, F, F, O),
             new Rule("GET",    "/api/users",                    L, F, F, O),
             new Rule("GET",    "/api/users/{id}",               L, F, F, O),
             new Rule("DELETE", "/api/users/{id}",               L, F, F, O),
@@ -68,7 +70,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
 
     enum Who { ANONYMOUS, PATIENT, PRACTITIONER, STAFF }
 
-    /** Every cell of the matrix: 10 routes × 4 callers. */
+    /** Every cell of the matrix: 12 routes × 4 callers. */
     static Stream<Arguments> cells() {
         return MATRIX.stream().flatMap(rule -> Stream.of(
                 Arguments.of(rule, Who.ANONYMOUS, rule.anonymous()),
