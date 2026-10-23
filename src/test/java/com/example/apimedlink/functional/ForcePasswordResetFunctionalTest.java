@@ -60,6 +60,35 @@ class ForcePasswordResetFunctionalTest extends FunctionalTestBase {
     }
 
     @Test
+    void anotherPendingActionIsRefusedBeforeAnyChange() throws Exception {
+        String email = uniqueEmail("force-other");
+        UUID id = console.createUser(email, PASSWORD);
+        console.update(id, Map.of("requiredActions", List.of("UPDATE_PASSWORD", "UPDATE_PROFILE")));
+        Browser browser = new Browser();
+
+        assertThat(browser.apiLogin(email, "Wrong-Pass-2026!").statusCode()).as("wrong password").isEqualTo(401);
+        HttpResponse<String> login = browser.apiLogin(email, PASSWORD);
+
+        assertThat(login.statusCode()).isEqualTo(403);
+        assertThat(login.body()).contains("\"code\":\"ACCOUNT_SETUP_INCOMPLETE\"");
+        assertThat(browser.postJson("/api/auth/password", "{\"newPassword\":\"" + NEXT_PASSWORD + "\"}").statusCode())
+                .as("no pending change").isEqualTo(401);
+        assertThat(requiredActions(id)).containsExactlyInAnyOrder("UPDATE_PASSWORD", "UPDATE_PROFILE");
+    }
+
+    @Test
+    void aResetSentAgainIsTheSameAsOnce() throws Exception {
+        UUID id = console.createUser(uniqueEmail("force-twice"), PASSWORD);
+        Browser staff = new Browser().login("staff.dev@medlink.local", DEV_USERS_PASSWORD);
+        String reset = "/api/admin/users/" + id + "/force-password-reset";
+
+        assertThat(staff.postJson(reset, "").statusCode()).isEqualTo(204);
+        assertThat(staff.postJson(reset, "").statusCode()).as("staff retry after a 503").isEqualTo(204);
+
+        assertThat(requiredActions(id)).containsExactly("UPDATE_PASSWORD");
+    }
+
+    @Test
     void aPatientCannotForceAReset() throws Exception {
         UUID target = console.createUser(uniqueEmail("force-target"), PASSWORD);
         Browser patient = new Browser().login("patient.dev@medlink.local", DEV_USERS_PASSWORD);

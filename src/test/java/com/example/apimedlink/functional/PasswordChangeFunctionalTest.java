@@ -38,6 +38,22 @@ class PasswordChangeFunctionalTest extends FunctionalTestBase {
     }
 
     @Test
+    void aChangeEndsEverySessionOfTheUser() throws Exception {
+        String email = uniqueEmail("change-sessions");
+        UUID id = console.createUser(email, PASSWORD);
+        Browser here = new Browser().login(email, PASSWORD);
+        Browser elsewhere = new Browser().login(email, PASSWORD);
+
+        HttpResponse<String> response = here.postJson("/api/auth/password",
+                "{\"currentPassword\":\"" + PASSWORD + "\",\"newPassword\":\"" + NEXT_PASSWORD + "\"}");
+
+        assertThat(response.statusCode()).isEqualTo(204);
+        assertThat(here.call("/api/users/_health").statusCode()).as("this session, at once").isEqualTo(401);
+        assertThat(elsewhere.call("/api/users/_health").statusCode()).as("another browser").isEqualTo(401);
+        assertThat(console.sessions(id)).as("Keycloak sessions").isEmpty();
+    }
+
+    @Test
     void aWrongCurrentPasswordIsRefusedWithoutChangingThePassword() throws Exception {
         String email = uniqueEmail("change-wrong");
         console.createUser(email, PASSWORD);
