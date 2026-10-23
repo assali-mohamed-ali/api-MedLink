@@ -10,7 +10,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
 | 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
-| 4 | Passwords (endpoints 10–11) | To do | — | — |
+| 4 | Passwords (endpoints 10–11) | **In progress** (MLink-87 in review) | [#88](https://github.com/assali-mohamed-ali/api-MedLink/pull/88) | 2026-10-22 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
 **2026-10-22:** MLink-97, code owner's review on draft PR #87 addressed on `epic/MLink-8`: one active appointment
@@ -49,6 +49,18 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-87 - password history (2026-10-22, feat/ss4-password-history)
+
+- Realm `passwordPolicy` gains `passwordHistory(3)`: a new password must differ from the last three.
+- No migration, no endpoint, no Postman change; Keycloak remains the only place that stores passwords.
+- The French message was already mapped in `InvalidPasswordException`
+  (`invalidPasswordHistoryMessage`): "Le mot de passe doit être différent de vos 3 derniers mots de passe."
+- **Proof:** `PasswordHistoryFunctionalTest` creates a user and sets two passwords through
+  `KeycloakAdminService`, then reuses the first: Keycloak refuses it and the API raises
+  `PASSWORD_POLICY` with that French message. Red first (no throwable), then green.
+- **Every dev machine re-imports the realm once:** the setup script sees the realm file hash change and
+  resets the volumes automatically; `-Reset` does the same by hand.
 
 ### Where we are (handoff, 2026-10-16)
 
