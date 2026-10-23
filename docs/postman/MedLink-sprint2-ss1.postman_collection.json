@@ -1,8 +1,8 @@
 {
   "info": {
-    "name": "MedLink API · Sprint 2 · Sub-sprint 1 (registration and email verification)",
+    "name": "MedLink API · Sprint 2 (registration, email verification, password changes)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases.\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created, the per-IP limits (429 `TOO_MANY_REQUESTS` with `Retry-After`, GitHub #51: the dev profile raises them to 1000 so this collection can be rerun; `RateLimitFunctionalTest` checks the real values).\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them."
+    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases, then folder 6 for endpoints 10–11 (sub-sprint 4).\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token; folder 6 reuses the account verified in folder 4). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created, the per-IP limits (429 `TOO_MANY_REQUESTS` with `Retry-After`, GitHub #51: the dev profile raises them to 1000 so this collection can be rerun; `RateLimitFunctionalTest` checks the real values).\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them."
   },
   "item": [
     {
@@ -1824,6 +1824,425 @@
           ]
         }
       ]
+    },
+    {
+      "name": "6 · Password changes (endpoints 10–11)",
+      "description": "Run after folder 4: it reuses the verified account ({{email}} / {{password}}) and staff.dev. Covers the normal session change, its refusals, the staff-forced reset, the pending login and the single-use forced change.",
+      "item": [
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "const xsrf = pm.cookies.get(\"XSRF-TOKEN\");",
+                  "pm.test(\"XSRF-TOKEN cookie present\", () => pm.expect(xsrf).to.be.a(\"string\").and.not.empty);",
+                  "pm.collectionVariables.set(\"xsrf\", xsrf);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · password change without a session",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{password}}\",\n  \"newPassword\": \"Nouveau-Pass-2026!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"error code UNAUTHORIZED\", () => pm.expect(pm.response.json().code).to.eql(\"UNAUTHORIZED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · patient login (verified account from folder 4)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a full session, not a pending change\", () => pm.expect(body).to.have.key(\"user\").and.not.have.key(\"passwordChangeRequired\"));",
+                  "pm.collectionVariables.set(\"targetUserId\", body.user.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · current password missing",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newPassword\": \"Nouveau-Pass-2026!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "const err = pm.response.json();",
+                  "pm.test(\"error code VALIDATION_FAILED\", () => pm.expect(err.code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"details.currentPassword\", () => pm.expect(err.details).to.have.key(\"currentPassword\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · wrong current password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"Wrong-Pass-2026!\",\n  \"newPassword\": \"Nouveau-Pass-2026!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"error code INVALID_CURRENT_PASSWORD\", () => pm.expect(pm.response.json().code).to.eql(\"INVALID_CURRENT_PASSWORD\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · new password too weak",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{password}}\",\n  \"newPassword\": \"Aa1!short\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"error code PASSWORD_POLICY\", () => pm.expect(pm.response.json().code).to.eql(\"PASSWORD_POLICY\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "204 · patient changes their password (current password required)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"currentPassword\": \"{{password}}\",\n  \"newPassword\": \"Postman-Pass-2026!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"changedPassword\", \"Postman-Pass-2026!\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · the old password no longer works",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"error code INVALID_CREDENTIALS\", () => pm.expect(pm.response.json().code).to.eql(\"INVALID_CREDENTIALS\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the new password works",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{changedPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"a full session\", () => pm.expect(pm.response.json()).to.have.key(\"user\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff login (staff.dev)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"staff.dev@medlink.local\",\n  \"password\": \"MedLink-Dev-2026!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"ADMINISTRATIVE_STAFF\", () => pm.expect(pm.response.json().user.roles).to.include(\"ADMINISTRATIVE_STAFF\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "204 · staff forces the patient's password reset",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/admin/users/{{targetUserId}}/force-password-reset"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.test(\"no body\", () => pm.expect(pm.response.text()).to.eql(\"\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · next patient login asks for a password change",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{changedPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"only the pending marker comes back\", () => pm.expect(body).to.eql({ passwordChangeRequired: true }));",
+                  "pm.test(\"no user, no token\", () => pm.expect(body).to.not.have.any.keys(\"user\", \"accessToken\", \"refreshToken\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "204 · forced change, no current password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newPassword\": \"Postman-Forced-2026!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"forcedPassword\", \"Postman-Forced-2026!\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · the pending change is single use",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/password",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newPassword\": \"Another-Pass-2026!\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · login with the forced password",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{forcedPassword}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"a full session\", () => pm.expect(pm.response.json()).to.have.key(\"user\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
@@ -1905,6 +2324,18 @@
     },
     {
       "key": "newSlowToken",
+      "value": ""
+    },
+    {
+      "key": "targetUserId",
+      "value": ""
+    },
+    {
+      "key": "changedPassword",
+      "value": ""
+    },
+    {
+      "key": "forcedPassword",
       "value": ""
     }
   ]

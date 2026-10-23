@@ -32,7 +32,9 @@ class PasswordChangeFunctionalTest extends FunctionalTestBase {
 
         assertThat(response.statusCode()).isEqualTo(204);
         assertThat(new Browser().apiLogin(email, PASSWORD).statusCode()).isEqualTo(401);
-        assertThat(new Browser().apiLogin(email, NEXT_PASSWORD).statusCode()).isEqualTo(200);
+        HttpResponse<String> after = new Browser().apiLogin(email, NEXT_PASSWORD);
+        assertThat(after.statusCode()).isEqualTo(200);
+        assertThat(after.body()).contains("\"user\"").doesNotContain("passwordChangeRequired");
     }
 
     @Test

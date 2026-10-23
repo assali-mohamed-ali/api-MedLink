@@ -10,8 +10,11 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
 | 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
-| 4 | Passwords (endpoints 10–11) | **In progress** (MLink-87 in review) | [#88](https://github.com/assali-mohamed-ali/api-MedLink/pull/88) | 2026-10-22 |
+| 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
+
+**2026-10-23:** MLink-91, MLink-88 and MLink-90 on `feat/ss4-password-change`, one PR based on `master`.
+Endpoints 10 and 11 work end to end; see the section below for the proofs.
 
 **2026-10-20:** MLink-119 (GitHub #66, part 1) in review (#78): README rewritten to match `master` (password-grant
 login, auth flow diagram, endpoints, security rules, team workflow, CI). No code change. Part 2:
@@ -41,6 +44,28 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-91, MLink-88, MLink-90 - password changes (2026-10-23, feat/ss4-password-change, [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89))
+
+- **MLink-91:** `POST /api/auth/password` changes the logged-in user's password. The current password
+  is checked by a Keycloak password grant, then `KeycloakAdminService.setPassword` applies the new one;
+  the temporary Keycloak session is ended. Wrong current password -> `401 INVALID_CURRENT_PASSWORD`;
+  Keycloak policy -> `400 PASSWORD_POLICY` with the existing French messages. No password or token is
+  logged; the browser keeps only its session cookie.
+- **MLink-88:** `POST /api/admin/users/{id}/force-password-reset` is staff-only (`204`, unknown id
+  `404`). It adds Keycloak's `UPDATE_PASSWORD` and ends the user's Keycloak sessions. The next password
+  login returns `200 {"passwordChangeRequired":true}` in a five-minute pending session that carries no
+  authenticated principal. `POST /api/auth/password` then needs only the new password and is single-use.
+  A normal login clears the pending marker.
+- **MLink-90:** the two routes are in `AccessMatrixFunctionalTest` (anonymous 401, patient/practitioner
+  403, staff allowed; a missing pending session is 401). The forced test also covers a weak forced
+  password (pending stays usable), the single-use rule, session shutdown and a normal login afterwards.
+- **Proof:** `PasswordChangeFunctionalTest` 5/5 green; `ForcePasswordResetFunctionalTest` 3/3 green;
+  full suite 222/222 in normal and reverse class order. Postman folder 6 (66 requests, 176 assertions,
+  0 failure) runs the complete scenario: normal change, wrong current, policy refusal, staff reset,
+  pending login, forced change, reuse refusal.
+- **Known scope:** only Keycloak sessions are ended by the reset. API sessions end at their next token
+  renewal through `SessionValidityFilter`; the access token lifespan is five minutes.
 
 ## MLink-87 - password history (2026-10-22, feat/ss4-password-history)
 

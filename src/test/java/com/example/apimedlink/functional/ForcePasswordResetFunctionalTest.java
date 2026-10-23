@@ -40,14 +40,23 @@ class ForcePasswordResetFunctionalTest extends FunctionalTestBase {
         assertThat(login.body()).contains("\"passwordChangeRequired\":true").doesNotContain("\"user\"");
         assertThat(changing.call("/api/users/_health").statusCode()).as("no full session yet").isEqualTo(401);
 
+        HttpResponse<String> weak = changing.postJson("/api/auth/password",
+                "{\"newPassword\":\"Aa1!short\"}");
+        assertThat(weak.statusCode()).isEqualTo(400);
+        assertThat(weak.body()).contains("PASSWORD_POLICY");
+
         HttpResponse<String> changed = changing.postJson("/api/auth/password",
                 "{\"newPassword\":\"" + NEXT_PASSWORD + "\"}");
         assertThat(changed.statusCode()).isEqualTo(204);
         assertThat(changing.call("/api/users/_health").statusCode()).as("pending step is gone").isEqualTo(401);
+        assertThat(changing.postJson("/api/auth/password",
+                "{\"newPassword\":\"Another-Pass-2026!\"}").statusCode()).as("single use").isEqualTo(401);
         assertThat(requiredActions(id)).doesNotContain("UPDATE_PASSWORD");
 
         assertThat(new Browser().apiLogin(email, PASSWORD).statusCode()).isEqualTo(401);
-        assertThat(new Browser().apiLogin(email, NEXT_PASSWORD).statusCode()).isEqualTo(200);
+        HttpResponse<String> after = new Browser().apiLogin(email, NEXT_PASSWORD);
+        assertThat(after.statusCode()).isEqualTo(200);
+        assertThat(after.body()).contains("\"user\"");
     }
 
     @Test
