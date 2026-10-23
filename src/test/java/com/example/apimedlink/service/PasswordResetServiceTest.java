@@ -6,6 +6,7 @@ import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 
 import com.example.apimedlink.exception.KeycloakUnavailableException;
+import com.example.apimedlink.repository.SessionRevocationStore;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.mockito.InOrder;
@@ -17,18 +18,20 @@ import org.mockito.InOrder;
 class PasswordResetServiceTest {
 
     final KeycloakAdminService admin = mock(KeycloakAdminService.class);
-    final PasswordResetService resets = new PasswordResetService(admin);
+    final SessionRevocationStore revocations = mock(SessionRevocationStore.class);
+    final PasswordResetService resets = new PasswordResetService(admin, revocations);
     final UUID id = UUID.randomUUID();
 
     @Test
-    void newLoginsAreBlockedBeforeSessionsEndAndAFailureIsReportedForARetry() {
+    void newLoginsAndOldApiSessionsAreRefusedBeforeKeycloakSignsOut() {
         doThrow(new KeycloakUnavailableException("end user sessions: HTTP 500")).when(admin).endSessions(id);
 
         assertThatThrownBy(() -> resets.force(id))
                 .as("503: staff send it again, nothing is rolled back")
                 .isInstanceOf(KeycloakUnavailableException.class);
-        InOrder order = inOrder(admin);
+        InOrder order = inOrder(admin, revocations);
         order.verify(admin).requirePasswordChange(id);
+        order.verify(revocations).revoke(id);
         order.verify(admin).endSessions(id);
     }
 }

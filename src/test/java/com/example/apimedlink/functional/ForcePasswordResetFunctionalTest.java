@@ -2,11 +2,13 @@ package com.example.apimedlink.functional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.apimedlink.repository.SessionRevocationStore;
 import java.net.http.HttpResponse;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * MLink-88: staff force a password change (endpoint 11) and the next login is limited to that change.
@@ -17,6 +19,9 @@ class ForcePasswordResetFunctionalTest extends FunctionalTestBase {
     static final String NEXT_PASSWORD = "Forced-Pass-2026!";
 
     final KeycloakConsole console = new KeycloakConsole();
+
+    @Autowired
+    SessionRevocationStore revocations;
 
     @Test
     void staffForceResetAndTheUserChangesAtNextLogin() throws Exception {
@@ -31,6 +36,7 @@ class ForcePasswordResetFunctionalTest extends FunctionalTestBase {
 
         assertThat(forced.statusCode()).isEqualTo(204);
         assertThat(console.sessions(id)).as("Keycloak sessions ended").isEmpty();
+        assertThat(revocations.revokedAt(id)).as("the API's own mark").isPresent();
         assertThat(user.call("/api/users/_health").statusCode()).as("API session follows").isEqualTo(401);
         assertThat(requiredActions(id)).contains("UPDATE_PASSWORD");
 

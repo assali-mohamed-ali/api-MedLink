@@ -1,5 +1,6 @@
 package com.example.apimedlink.service;
 
+import com.example.apimedlink.repository.SessionRevocationStore;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
 
@@ -14,9 +15,11 @@ import org.springframework.stereotype.Service;
 public class PasswordResetService {
 
     private final KeycloakAdminService keycloak;
+    private final SessionRevocationStore revocations;
 
-    public PasswordResetService(KeycloakAdminService keycloak) {
+    public PasswordResetService(KeycloakAdminService keycloak, SessionRevocationStore revocations) {
         this.keycloak = keycloak;
+        this.revocations = revocations;
     }
 
     public void force(UUID userId) {

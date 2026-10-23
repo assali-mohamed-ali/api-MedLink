@@ -1,6 +1,7 @@
 package com.example.apimedlink.security;
 
 import com.example.apimedlink.exception.ErrorBody;
+import com.example.apimedlink.repository.SessionRevocationStore;
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -34,10 +35,13 @@ public class SessionValidityFilter extends OncePerRequestFilter {
 
     private final OAuth2AuthorizedClientManager authorizedClients;
     private final JsonMapper json;
+    private final SessionRevocationStore revocations;
 
-    public SessionValidityFilter(OAuth2AuthorizedClientManager authorizedClients, JsonMapper json) {
+    public SessionValidityFilter(OAuth2AuthorizedClientManager authorizedClients, JsonMapper json,
+                                 SessionRevocationStore revocations) {
         this.authorizedClients = authorizedClients;
         this.json = json;
+        this.revocations = revocations;
     }
 
     @Override

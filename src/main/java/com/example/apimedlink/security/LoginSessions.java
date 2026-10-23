@@ -41,6 +41,9 @@ public class LoginSessions {
     /** The client registration in application.properties; the session filter renews tokens through it. */
     static final String REGISTRATION = "keycloak";
 
+    /** When the session was opened, compared with the user's revocation mark (review of PR #89). */
+    public static final String OPENED_AT = LoginSessions.class.getName() + ".OPENED_AT";
+
     private final ClientRegistrationRepository registrations;
     private final OAuth2AuthorizedClientRepository authorizedClients;
     private final SecurityContextRepository contexts = new HttpSessionSecurityContextRepository();

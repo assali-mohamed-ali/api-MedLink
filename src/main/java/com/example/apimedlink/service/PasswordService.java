@@ -3,6 +3,7 @@ package com.example.apimedlink.service;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.KeycloakUnavailableException;
 import com.example.apimedlink.exception.PasswordChangeRequiredException;
+import com.example.apimedlink.repository.SessionRevocationStore;
 import java.util.Map;
 import java.util.UUID;
 import org.slf4j.Logger;
@@ -22,10 +23,13 @@ public class PasswordService {
 
     private final KeycloakAdminService keycloak;
     private final KeycloakLoginClient login;
+    private final SessionRevocationStore revocations;
 
-    public PasswordService(KeycloakAdminService keycloak, KeycloakLoginClient login) {
+    public PasswordService(KeycloakAdminService keycloak, KeycloakLoginClient login,
+                           SessionRevocationStore revocations) {
         this.keycloak = keycloak;
         this.login = login;
+        this.revocations = revocations;
     }
 
     public void change(UUID userId, String currentPassword, String newPassword) {

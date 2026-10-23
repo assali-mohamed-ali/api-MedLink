@@ -2,6 +2,7 @@ package com.example.apimedlink.functional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.service.KeycloakAdminService;
 import java.net.http.HttpResponse;
 import java.util.UUID;
@@ -20,6 +21,9 @@ class PasswordChangeFunctionalTest extends FunctionalTestBase {
 
     @Autowired
     KeycloakAdminService keycloak;
+
+    @Autowired
+    SessionRevocationStore revocations;
 
     @Test
     void aPatientChangesTheirPassword() throws Exception {
@@ -51,6 +55,23 @@ class PasswordChangeFunctionalTest extends FunctionalTestBase {
         assertThat(here.call("/api/users/_health").statusCode()).as("this session, at once").isEqualTo(401);
         assertThat(elsewhere.call("/api/users/_health").statusCode()).as("another browser").isEqualTo(401);
         assertThat(console.sessions(id)).as("Keycloak sessions").isEmpty();
+        assertThat(revocations.revokedAt(id)).as("the API's own mark").isPresent();
+    }
+
+    /** What a failed Keycloak sign-out leaves behind after a change: only the API's own mark stands. */
+    @Test
+    void anOldSessionIsRefusedEvenWhileKeycloakStillAcceptsIt() throws Exception {
+        String email = uniqueEmail("change-mark");
+        UUID id = console.createUser(email, PASSWORD);
+        Browser old = new Browser().login(email, PASSWORD);
+        assertThat(old.call("/api/users/_health").statusCode()).isEqualTo(200);
+
+        revocations.revoke(id);
+
+        assertThat(console.sessions(id)).as("Keycloak still has the session").isNotEmpty();
+        assertThat(old.call("/api/users/_health").statusCode()).as("the API refuses it").isEqualTo(401);
+        assertThat(new Browser().login(email, PASSWORD).call("/api/users/_health").statusCode())
+                .as("a session opened after the mark").isEqualTo(200);
     }
 
     @Test
