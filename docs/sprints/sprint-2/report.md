@@ -13,9 +13,13 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | To do | — | — |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-22:** MLink-97, code owner's review on draft PR #87 addressed on `epic/MLink-8`: one active appointment
+per slot is now a database rule (partial unique index in V9), and the three dev practitioners left the shared realm
+file for a dev-only file imported by a dev-only compose service. **The realm file is back to `master`'s**; a new
+service `keycloak-dev-users` appears in `compose.yaml` only (`ComposeFilesTest` gains a `DEV_ONLY` list).
+
 **2026-10-21:** MLink-97 (epic MLink-8, appointments: tables and dev seed) ready on `epic/MLink-8`: migration
-**V9** (after V8 `rate_limits`), no endpoint. **Realm file changed** (three dev practitioners added): the next
-setup run re-imports everyone's dev realm once. The endpoints of the epic (MLink-98…) come next on the same branch.
+**V9** (after V8 `rate_limits`), no endpoint. The endpoints of the epic (MLink-98…) come next on the same branch.
 
 **2026-10-20:** MLink-119 (GitHub #66, part 1) in review (#78): README rewritten to match `master` (password-grant
 login, auth flow diagram, endpoints, security rules, team workflow, CI). No code change. Part 2:
@@ -93,7 +97,8 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 ## MLink-97 — appointment domain tables and dev seed (2026-10-21, epic/MLink-8)
 
 First task of epic MLink-8 (MLink-25 search, 27 booking, 28 cancel/reschedule, 36 reminders). Everything the epic's
-endpoints need in the database, and enough dev data to try them. No endpoint, no shared Java file changed.
+endpoints need in the database, and enough dev data to try them. No endpoint. Shared files touched by the review
+fixes: `compose.yaml` (one dev-only service) and `ComposeFilesTest` (a `DEV_ONLY` list), announced to Mohamed.
 
 **Built:**
 - `V9__appointment_domain.sql`: `clinics`, `specialties`, `practitioners` (id = `users.id`, the Keycloak id; names
@@ -108,16 +113,46 @@ endpoints need in the database, and enough dev data to try them. No endpoint, no
   `spring.flyway.locations`): Sousse, Sfax and Tunis clinics; Médecine générale, Cardiologie, Pédiatrie; three
   practitioners in two clinics each; free 30-minute slots Monday to Friday, 08:00–12:00 and 13:00–17:00 Tunis
   time, for the next 14 days. Every insert skips what exists, so the seed can run again.
-- Realm: three dev practitioners with **fixed ids** (`generalist.dev`, `cardiologist.dev`, `pediatrician.dev`,
-  ids `d0c70000-0000-4000-8000-00000000000{1,2,3}`), so they log in onto their seeded rows.
-  `practitioner.dev` is unchanged.
+- Dev practitioners: three Keycloak users with **fixed ids** (`generalist.dev`, `cardiologist.dev`,
+  `pediatrician.dev`, ids `d0c70000-0000-4000-8000-00000000000{1,2,3}`), so they log in onto their seeded rows.
+  They are **not** in the shared realm file: they live in `keycloak/dev/dev-practitioners.json` and are added by
+  the dev-only compose service `keycloak-dev-users` (see the review below). `practitioner.dev` is unchanged.
+
+**Code owner's review on draft PR #87 (2026-10-22):**
+- *One active appointment per slot, enforced by the database.* V9 (not merged yet, so changed in place) gains
+  `CREATE UNIQUE INDEX appointments_one_active_per_slot ON appointments (slot_id) WHERE status = 'BOOKED'`: two
+  racing bookings cannot both hold a slot, and a cancelled appointment does not block a new booking. MLink-103
+  (27.2) keeps the API side: translate the violation into 409 `SLOT_TAKEN` and prove the race through the API.
+- *No dev users in what deployed environments import.* `keycloak/realm-medlink.json` (copied to the servers by
+  `.github/actions/deploy-compose`, mounted by `docker-compose.yml`) is back to `master`'s content. The three
+  practitioners moved to `keycloak/dev/dev-practitioners.json`; a one-shot service in `compose.yaml` only,
+  `keycloak-dev-users` (Keycloak image, `keycloak/dev/import-dev-users.sh`), waits for Keycloak, logs in as the dev
+  admin and runs Keycloak's partial import (`kcadm.sh create partialImport`, existing users skipped), which keeps
+  the fixed ids. The partial import does not resolve `${...}`, so the script fills `${KC_DEV_USERS_PASSWORD}` from
+  its environment; the file holds no password. The setup scripts are unchanged: they start every service of
+  `compose.yaml`. `ComposeFilesTest` (MLink-113) gains a `DEV_ONLY` list, left out of the dev/full comparison.
+- New `RealmImportSeparationTest` (reads the files, no Docker): the dev file holds the three practitioners with
+  fixed ids and a password placeholder; the shared realm holds none of their usernames or ids;
+  `docker-compose.yml` and the deploy action never mention `keycloak/dev` or the service; in `compose.yaml` only
+  `keycloak-dev-users` mounts `keycloak/dev`. Red first (dev file and service missing: 3 of 4 red, the "nothing
+  used to deploy mentions the dev folder" guard green), then green with `ComposeFilesTest` (9 tests, 0 failures).
+  Mutation check: a dev practitioner put back into the shared realm turns
+  `theSharedRealmHoldsNoneOfTheDevPractitioners` red.
+- Proof of the review fixes (Ubuntu VM with Docker): red first with the new tests only, `AppointmentSchemaTest`,
+  `DevSeedTest` and `RealmImportSeparationTest` give 21 tests, 2 failures and 3 errors, all expected
+  (`aSlotHoldsOneActiveAppointmentOnly`: a second active appointment is still accepted; the dev users file and the
+  dev-only service do not exist yet). With the fixes, `./mvnw -B clean verify`: **228 tests, 0 failures**; reverse
+  order: 228, 0 failures. Mutation check: without `appointments_one_active_per_slot`,
+  `aSlotHoldsOneActiveAppointmentOnly` turns red. `scripts/setup-dev.sh --reset --skip-tests`: 0 warnings;
+  `keycloak-dev-users` logs show the partial import `ADDED` each user **with its fixed id**; the three practitioners
+  log in (200 ×3) onto their seeded rows (160 free slots each).
 
 **Proof** (run in an Ubuntu 22.04 VM with Docker; the Windows machine has no Docker):
 - Red first (6f0676d): `AppointmentSchemaTest` (9) and `DevSeedTest` (6) fail on missing tables and on the realm
   users not existing yet; only the "practitioner.dev unchanged" guard passes.
 - Green: those 15 plus `AppointmentDomainRepositoryTest` (2: the entities read and write the tables, a saved
-  practitioner writes `users` and `practitioners` under one id). `DevSeedTest` reads the realm file: the seeded
-  practitioners have the realm's ids, emails and the expected specialties, slots are weekday office hours in Tunis
+  practitioner writes `users` and `practitioners` under one id). `DevSeedTest` reads the dev users file (the realm
+  file before the review): the seeded practitioners have its ids, emails and the expected specialties, slots are weekday office hours in Tunis
   time, and running the seed again adds nothing; without the `dev` profile there is no seed data.
 - Mutation check: without `UNIQUE (practitioner_id, starts_at)`,
   `onePractitionerCannotHaveTwoSlotsStartingAtTheSameTime` turns red.
@@ -132,8 +167,13 @@ repeatable SQL migration in its own dev-only location; fixed ids for new dev use
 **Limits:**
 - Seeded slots are computed when the seed runs: after two weeks they are in the past. Run the setup script with
   `--reset` (`-Reset`) before a demo.
-- The realm is imported in every environment: like the other `*.dev` users, the three new practitioners must be
-  deleted in staging and prod after the first start.
+- The older dev users `staff.dev`, `practitioner.dev` and `patient.dev` are still in the shared realm file, so
+  they still reach deployed environments. Moving them touches `FunctionalTestBase` and the team's tests: raised on
+  PR #87, a separate ticket proposed.
+- In full-stack mode (`docker-compose.yml`, setup `--full-stack`) the three dev practitioners are not created, on
+  purpose; the dev seed still inserts their rows, they just cannot log in there.
+- `docker compose up -d` does not fail when `keycloak-dev-users` fails (it exits after its job): check
+  `docker compose logs keycloak-dev-users` if a dev practitioner cannot log in.
 - `appointments` has no `ON DELETE CASCADE` (an appointment is a medical record): deleting a patient who has
   appointments (`DELETE /api/users/{id}`) would be refused by the database and answer 500 `INTERNAL_ERROR` (read
   from the code, not tested: no endpoint creates appointments yet). To settle with account management (MLink-20,
@@ -771,7 +811,9 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 |---|---|---|---|
 | 2026-10-21 | Appointment tables take V9, after V8 `rate_limits` | The code owner settled it on PR #60: the PR merged first holds the lower number, or Flyway refuses the older one on databases that already ran the newer (MLink-97) | "Whoever merges second renumbers" |
 | 2026-10-21 | Practitioners' first and last names live in `practitioners`, like patients' in `patients` | The slot search shows them without asking Keycloak; only Ela's code changes (MLink-97) | Names moved to `users` (touches `Patient` and registration); asking Keycloak per result |
-| 2026-10-21 | Dev data for appointments: a repeatable SQL migration in `db/dev-seed`, enabled by the `dev` profile only; three new dev practitioners with fixed ids in the realm | Tests and prod never see it; the seeded rows and the Keycloak users share the same ids, so the practitioners log in onto them (MLink-97) | A Java seeder that asks Keycloak for the ids (more code, needs Keycloak at startup); practitioners with generated ids (forbidden: a user id comes from Keycloak) |
+| 2026-10-22 | One active appointment per slot is a database rule: partial unique index `appointments(slot_id) WHERE status = 'BOOKED'` in V9 | Code owner's review on #87: the slot status alone does not stop two racing bookings; cancelled appointments must not block the slot (MLink-97) | Leaving it to the booking service (MLink-103) only |
+| 2026-10-22 | Dev practitioners are imported in dev only, by a one-shot `compose.yaml` service (`keycloak-dev-users`, Keycloak partial import), from `keycloak/dev/`; the shared realm file holds none of them | Code owner's review on #87: the shared realm reaches staging and prod, and "delete them by hand" is not a security boundary; one container works the same on Windows and Linux and leaves the setup scripts unchanged (MLink-97) | Importing them from the two setup scripts (two copies of the logic, the Windows one untestable without Docker); keeping them in the realm and deleting them after deployment |
+| 2026-10-21 | Dev data for appointments: a repeatable SQL migration in `db/dev-seed`, enabled by the `dev` profile only, for dev practitioners with fixed Keycloak ids | Tests and prod never see it; the seeded rows and the Keycloak users share the same ids, so the practitioners log in onto them (MLink-97) | A Java seeder that asks Keycloak for the ids (more code, needs Keycloak at startup); practitioners with generated ids (forbidden: a user id comes from Keycloak) |
 | 2026-10-20 | The role × route matrix asserts past security / 401 / 403, not exact statuses, and reads the routes from Spring | It proves access rules only, so a feature's answers (200, 400, 404) can change without touching it; a route missing from the matrix fails the build (MLink-60) | Exact status per cell; a hand-kept list of routes |
 | 2026-10-19 | The login keeps the OAuth password grant, as a consciously accepted exception: [decision record 0001](../../decisions/0001-login-password-grant.md) | Keeps "the frontend never talks to Keycloak"; decided by the plan owner and the code owner on PR #58 (GitHub #50); its conditions: per-IP rate limiting (done, #60) and this link | Authorization Code + PKCE with a themed Keycloak login page |
 | 2026-10-18 | Rate limits counted in Postgres (`rate_limits`, one atomic upsert per hit), not Redis | Shared by every instance and race-free with the database we already run; no new service to deploy and secure (GitHub #51) | Redis; the in-memory map (one instance, racy) |
