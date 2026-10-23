@@ -29,7 +29,13 @@ CREATE TABLE practitioner_clinics (
     PRIMARY KEY (practitioner_id, clinic_id)
 );
 
--- One practitioner never has two slots starting at the same time (this also indexes the practitioner's agenda).
+-- Lets a GiST index hold the practitioner id (equality) next to the time range (overlap), for slots_no_overlap.
+-- A trusted extension: the database owner may create it.
+CREATE EXTENSION IF NOT EXISTS btree_gist;
+
+-- One practitioner is in one place at a time: two of their slots never overlap, in any clinic (review on PR #87).
+-- Ranges are [start, end): a slot ending at 09:30 and one starting at 09:30 are adjacent, not overlapping.
+-- The unique start time stays: it indexes the practitioner's agenda and is the dev seed's ON CONFLICT target.
 CREATE TABLE slots (
     id              UUID        PRIMARY KEY,
     practitioner_id UUID        NOT NULL REFERENCES practitioners (id),
@@ -38,6 +44,8 @@ CREATE TABLE slots (
     ends_at         TIMESTAMPTZ NOT NULL,
     status          VARCHAR(10) NOT NULL DEFAULT 'FREE',
     CONSTRAINT slots_practitioner_starts_at_unique UNIQUE (practitioner_id, starts_at),
+    CONSTRAINT slots_no_overlap EXCLUDE USING gist
+        (practitioner_id WITH =, tstzrange(starts_at, ends_at, '[)') WITH &&),
     CONSTRAINT slots_ends_after_start CHECK (ends_at > starts_at),
     CONSTRAINT slots_status_check CHECK (status IN ('FREE', 'BOOKED'))
 );
