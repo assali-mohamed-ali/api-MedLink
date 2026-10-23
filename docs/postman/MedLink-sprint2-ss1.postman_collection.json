@@ -2478,6 +2478,133 @@
               }
             }
           ]
+        },
+        {
+          "name": "GET /slots with the end before the start → 400 (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotTo}}&to={{slotFrom}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"to\": \"La date de fin doit être après la date de début.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots over more than 31 days → 400 (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTooFar}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const from = Date.parse(pm.collectionVariables.get(\"slotFrom\"));",
+                  "pm.collectionVariables.set(\"slotTooFar\", new Date(from + 32 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"to\": \"La période ne peut pas dépasser 31 jours.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots?clinicId=abc → 400, the field is named (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&clinicId=abc"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"clinicId\": \"Identifiant invalide.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots?size=51 → 400 (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&size=51"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"size\": \"La taille de page doit être comprise entre 1 et 50.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots next year (nothing seeded) → 200, a message suggests widening (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotNextYear}}&to={{slotNextYearEnd}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const start = Date.now() + 365 * 86400000;",
+                  "pm.collectionVariables.set(\"slotNextYear\", new Date(start).toISOString());",
+                  "pm.collectionVariables.set(\"slotNextYearEnd\", new Date(start + 7 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"no slot\", () => { pm.expect(body.items).to.eql([]); pm.expect(body.total).to.eql(0); });",
+                  "pm.test(\"the message suggests widening the search\", () => pm.expect(body.message).to.eql(\"Aucun créneau disponible. Élargissez la recherche (dates, clinique ou spécialité).\"));"
+                ]
+              }
+            }
+          ]
         }
       ]
     }
@@ -2589,6 +2716,18 @@
     },
     {
       "key": "practitionerId",
+      "value": ""
+    },
+    {
+      "key": "slotTooFar",
+      "value": ""
+    },
+    {
+      "key": "slotNextYear",
+      "value": ""
+    },
+    {
+      "key": "slotNextYearEnd",
       "value": ""
     }
   ]

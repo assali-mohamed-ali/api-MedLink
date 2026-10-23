@@ -24,7 +24,13 @@ public final class SlotMapper {
                 practitioner.getSpecialty().getName());
     }
 
+    /** Shown when the search matches nothing at all (not on a page past the last one). */
+    static final String NOTHING_FOUND = "Aucun créneau disponible. Élargissez la recherche (dates, clinique ou spécialité).";
+
     public static SlotSearchResponse toSearchResponse(Page<Slot> page) {
-        return new SlotSearchResponse(page.getContent().stream().map(SlotMapper::toDto).toList(), page.getTotalElements());
+        return new SlotSearchResponse(
+                page.getContent().stream().map(SlotMapper::toDto).toList(),
+                page.getTotalElements(),
+                page.getTotalElements() == 0 ? NOTHING_FOUND : null);
     }
 }
