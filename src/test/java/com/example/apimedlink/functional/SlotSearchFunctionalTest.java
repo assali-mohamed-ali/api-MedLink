@@ -119,6 +119,80 @@ class SlotSearchFunctionalTest extends FunctionalTestBase {
         assertThat(response.body()).contains("\"from\"");
     }
 
+    // ---- MLink-100: wrong input is refused clearly, an empty search says so ---------------------------
+
+    @Test
+    void theEndMustComeAfterTheStart() throws Exception {
+        Browser patient = patient();
+
+        HttpResponse<String> same = patient.call("/api/slots?from=" + DAY + "&to=" + DAY);
+        HttpResponse<String> reversed = patient.call("/api/slots?from=" + DAY.plus(1, ChronoUnit.DAYS) + "&to=" + DAY);
+
+        assertRefused(same, "to", "La date de fin doit être après la date de début.");
+        assertRefused(reversed, "to", "La date de fin doit être après la date de début.");
+    }
+
+    @Test
+    void thePeriodIsThirtyOneDaysAtMost() throws Exception {
+        Browser patient = patient();
+        Instant end = DAY.plus(31, ChronoUnit.DAYS);
+
+        HttpResponse<String> exactly = patient.call("/api/slots?from=" + DAY + "&to=" + end);
+        HttpResponse<String> longer = patient.call("/api/slots?from=" + DAY + "&to=" + end.plusSeconds(1));
+
+        assertThat(exactly.statusCode()).as("31 days exactly").isEqualTo(200);
+        assertRefused(longer, "to", "La période ne peut pas dépasser 31 jours.");
+    }
+
+    @Test
+    void unreadableIdsAndDatesAreNamedInOurErrorBody() throws Exception {
+        Browser patient = patient();
+
+        assertRefused(patient.call(searchTomorrow() + "&clinicId=abc"), "clinicId", "Identifiant invalide.");
+        assertRefused(patient.call(searchTomorrow() + "&specialtyId=abc"), "specialtyId", "Identifiant invalide.");
+        assertRefused(patient.call("/api/slots?from=demain&to=" + DAY), "from",
+                "Date invalide (format attendu : 2026-10-27T09:00:00Z).");
+    }
+
+    @Test
+    void pagesStartAtZeroAndHoldOneToFiftySlots() throws Exception {
+        Browser patient = patient();
+
+        assertRefused(patient.call(searchTomorrow() + "&size=0"), "size", "La taille de page doit être comprise entre 1 et 50.");
+        assertRefused(patient.call(searchTomorrow() + "&size=51"), "size", "La taille de page doit être comprise entre 1 et 50.");
+        assertRefused(patient.call(searchTomorrow() + "&page=-1"), "page", "Le numéro de page ne peut pas être négatif.");
+        assertThat(patient.call(searchTomorrow() + "&size=50").statusCode()).isEqualTo(200);
+        assertThat(patient.call(searchTomorrow() + "&size=1").statusCode()).isEqualTo(200);
+    }
+
+    @Test
+    void anEmptySearchSuggestsWideningItAndOnlyThen() throws Exception {
+        UUID practitioner = insertPractitioner("Hela", "Mansour", insertSpecialty("Dermatologie (aucun résultat)"));
+        UUID clinic = insertClinic("Clinique Sfax");
+        insertSlot(practitioner, clinic, DAY.plus(3, ChronoUnit.DAYS), "FREE");
+        Browser patient = patient();
+
+        Map<String, Object> empty = body(patient.call("/api/slots?practitionerId=" + practitioner
+                + "&from=" + DAY + "&to=" + DAY.plus(1, ChronoUnit.DAYS)));
+        Map<String, Object> found = body(patient.call("/api/slots?practitionerId=" + practitioner
+                + "&from=" + DAY + "&to=" + DAY.plus(5, ChronoUnit.DAYS)));
+
+        assertThat(items(empty)).isEmpty();
+        assertThat(((Number) empty.get("total")).longValue()).isZero();
+        assertThat(empty.get("message"))
+                .isEqualTo("Aucun créneau disponible. Élargissez la recherche (dates, clinique ou spécialité).");
+        assertThat(items(found)).hasSize(1);
+        assertThat(found).doesNotContainKey("message");
+    }
+
+    /** A 400 in our error body: code VALIDATION_FAILED and the French message under the field's name. */
+    private void assertRefused(HttpResponse<String> response, String field, String message) {
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(400);
+        Map<String, Object> body = body(response);
+        assertThat(body.get("code")).isEqualTo("VALIDATION_FAILED");
+        assertThat(body.get("details")).as("details").isEqualTo(Map.of(field, message));
+    }
+
     @Test
     void anAnonymousVisitorIsAskedToLogIn() throws Exception {
         HttpResponse<String> response = new Browser().call(searchTomorrow());
