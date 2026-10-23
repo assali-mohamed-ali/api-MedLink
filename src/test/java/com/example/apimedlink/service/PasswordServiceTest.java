@@ -89,6 +89,16 @@ class PasswordServiceTest {
     }
 
     @Test
+    void noAnswerFromKeycloakKeepsTheMark() {
+        when(login.passwordGrant(EMAIL, CURRENT)).thenReturn(new KeycloakTokens(null, null, "refresh", null));
+        doThrow(new KeycloakUnavailableException("set password: ReadTimeout")).when(admin).setPassword(id, NEXT);
+
+        assertThatThrownBy(() -> passwords.change(id, CURRENT, NEXT)).isInstanceOf(KeycloakUnavailableException.class);
+        verify(revocations, never()).undo(any(), any(), any());
+        verify(login).endSession("refresh");
+    }
+
+    @Test
     void aResetInsideAFreshSessionAsksToLogInAgain() {
         when(login.passwordGrant(EMAIL, CURRENT)).thenThrow(new PasswordChangeRequiredException());
 

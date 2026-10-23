@@ -76,16 +76,21 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
     answers `403 ACCOUNT_SETUP_INCOMPLETE` before any change, logged for an admin. Only the password's
     owner sees it, as with `ACCOUNT_DISABLED`.
   - The forced change is one Keycloak write (`clearPasswordChange` removed): nothing left half done.
-  - The staff reset blocks new logins first, then ends the sessions; both steps are idempotent, so a
-    503 means "send it again" and nothing is rolled back.
-  - A normal change ends every session (decided with the lead): this API session at once, Keycloak's
-    all at once, other API sessions at their next renewal. If Keycloak fails after the new password is
-    set, the change stands (password history forbids putting the old one back) and an error is logged.
-    A reset landing in a still-fresh session answers `401 SESSION_EXPIRED` instead of a 500.
+  - The staff reset blocks new logins first, then refuses the old API sessions, then ends Keycloak's;
+    every step is idempotent, so an error means "send it again" and nothing is rolled back.
+  - A normal change ends every session (decided with the lead). Fail closed, whatever Keycloak does:
+    `V9__session_revocations.sql` adds one mark per user, set *before* the password changes;
+    `SessionValidityFilter` refuses any session opened at or before it, on every call (one primary-key
+    read). A password Keycloak refused puts the mark back (a weak attempt logs no one out); no answer
+    keeps it (the password may have changed). Keycloak's sign-out still runs; if only it fails, the
+    leftover Keycloak sessions are unusable (the browser never holds Keycloak's tokens) and a warning is
+    logged. A separate table, not a `users` column: a login saving the users row never writes an old
+    mark back. A reset landing in a still-fresh session answers `401 SESSION_EXPIRED` instead of a 500.
   - Only Keycloak's exact wording opens the forced change; another wording fails closed as `401`.
-  - Proof: new functional tests (every session ends; another action refused; a reset sent twice) and
-    unit tests for the Keycloak failures between two calls, each seen red first; Postman folder 6
-    checks that the change ends the session (67 requests, 178 assertions, 0 failure); full suite 232/232 in
+  - Proof: new functional tests (every session ends; an old session refused while Keycloak still
+    accepts it; another action refused; a reset sent twice), `SessionRevocationStoreTest` and unit tests
+    for the Keycloak failures between two calls, each committed red first; Postman folder 6
+    checks that the change ends the session (67 requests, 178 assertions, 0 failure); full suite 243/243 in
     normal and reverse class order.
 
 ## MLink-87 - password history (2026-10-22, feat/ss4-password-history)
@@ -771,7 +776,7 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
 | 2026-10-23 | A password change ends every session of the user, this one included; the user logs in again | A change made because a session may be compromised must close it; same ending as the forced change (review on #89) | Keeping the current session only (more calls, more partial failures); keeping all |
-| 2026-10-23 | After the new password is set, a failure to end the sessions keeps the change (204) and logs an error | The old password cannot be put back (history policy) and the user cannot retry with it | 503 after a change that did happen |
+| 2026-10-23 | Old sessions are refused by the API itself (`session_revocations`, set before the password changes), not only by Keycloak's sign-out | Fail closed: a Keycloak failure after the change can no longer leave a stolen session open; the browser only reaches Keycloak through the API (review on #89) | 204 + an error log when Keycloak's sign-out fails (left a window until Keycloak's idle timeout); 503 after a change that did happen (the old password cannot be put back) |
 | 2026-10-23 | Login with a Keycloak required action other than `UPDATE_PASSWORD` alone: 403 `ACCOUNT_SETUP_INCOMPLETE` | The API finishes only the forced change; starting it would leave the account blocked after the change; Keycloak checked the password first, so it reveals nothing | Running the change and leaving the user locked out; 401 (looks like a wrong password) |
 | 2026-10-20 | The role × route matrix asserts past security / 401 / 403, not exact statuses, and reads the routes from Spring | It proves access rules only, so a feature's answers (200, 400, 404) can change without touching it; a route missing from the matrix fails the build (MLink-60) | Exact status per cell; a hand-kept list of routes |
 | 2026-10-19 | The login keeps the OAuth password grant, as a consciously accepted exception: [decision record 0001](../../decisions/0001-login-password-grant.md) | Keeps "the frontend never talks to Keycloak"; decided by the plan owner and the code owner on PR #58 (GitHub #50); its conditions: per-IP rate limiting (done, #60) and this link | Authorization Code + PKCE with a themed Keycloak login page |

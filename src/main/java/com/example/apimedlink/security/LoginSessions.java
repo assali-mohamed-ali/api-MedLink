@@ -5,6 +5,7 @@ import com.example.apimedlink.service.Login;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
+import java.time.Instant;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
@@ -65,6 +66,7 @@ public class LoginSessions {
             request.getSession(true);
         }
         request.getSession().removeAttribute(PasswordChangePending.ATTRIBUTE);
+        request.getSession().setAttribute(OPENED_AT, Instant.now());
         KeycloakTokens tokens = login.tokens();
         List<GrantedAuthority> authorities = login.roles().stream()
                 .<GrantedAuthority>map(role -> new SimpleGrantedAuthority("ROLE_" + role))

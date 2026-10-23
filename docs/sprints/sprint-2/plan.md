@@ -205,19 +205,23 @@ TOTP: 30 s, 6 digits, one step of tolerance either side.
 ### 10 · `POST /api/auth/password`
 - With a session: `{ "currentPassword", "newPassword" }` → **204** · **401** `INVALID_CURRENT_PASSWORD` · **400** `PASSWORD_POLICY`.
   Every session of the user ends (review of PR #89, 2026-10-23): this one at once (cookie dropped),
-  Keycloak's all at once, the user's other API sessions at their next token renewal. React sends the
-  user to the login page. **401** `SESSION_EXPIRED` when staff forced a reset meanwhile.
+  every older API session at its next call, whatever Keycloak does (the user's mark in
+  `session_revocations`, set before the password changes), and Keycloak's sessions are signed out too.
+  React sends the user to the login page. **401** `SESSION_EXPIRED` when staff forced a reset meanwhile.
 - With a pending forced change (from endpoint 5): `{ "newPassword" }` → **204**; then the user logs in again.
 The API checks the current password with Keycloak and sets the new one through the admin API; a
 permanent password also removes `UPDATE_PASSWORD` in that same call (one write, nothing half done).
-Policy errors are mapped to French. If Keycloak fails after the new password is set, the change
-stands (it cannot be put back: password history) and the error is logged for an admin.
+Policy errors are mapped to French; a refused password puts the mark back, so a weak attempt logs
+no one out. No answer from Keycloak keeps the mark (the password may have changed: fail closed). If
+only Keycloak's sign-out fails, the change stands (password history forbids putting the old one back)
+and the old sessions are refused anyway: the browser never holds Keycloak's tokens.
 Not a forgot-password flow: that needs a mailed single-use link and is out of scope (§8).
 
 ### 11 · `POST /api/admin/users/{id}/force-password-reset` (staff)
 → **204** · **404** · **503** `IDENTITY_UNAVAILABLE`. Adds `UPDATE_PASSWORD` in Keycloak (first, so no
-new login gets past it), then ends the user's Keycloak sessions. Both steps are idempotent: after a
-503 staff send it again, nothing is rolled back.
+new login gets past it), then sets the user's mark (every older API session refused at its next
+call), then ends the user's Keycloak sessions. Every step is idempotent: after an error staff send it
+again, nothing is rolled back.
 
 ### 12 · `GET /api/admin/users?search=&page=0&size=20` (staff)
 → **200** `{ "items": [ { "id", "email", "firstName", "lastName", "role", "enabled", "emailVerified" } ], "total": 0 }`.
@@ -253,7 +257,7 @@ Existing `/api/users` endpoints become staff-only in sub-sprint 5.
 | 1 | `users.username` → `varchar(254)`; `patients(id PK/FK users, first_name, last_name, birth_date, phone, address, created_at)`; `email_tokens(id, user_id FK, purpose VERIFY_EMAIL\|ACTIVATE_ACCOUNT, token_hash char(64) unique, expires_at, used_at, created_at)` | client `medlink-admin` (service account: `manage-users`, `view-users`, `query-users`, `query-groups`; secret `${KC_ADMIN_CLIENT_SECRET}`) | `keycloak.admin.*`, `spring.mail.*`, `app.frontend-url`; Mailpit in both compose files (inbox 8025); setup scripts generate the new secret and add missing `.env` keys |
 | 2 | — | `medlink-bff`: direct grants on, standard flow off; `ssoSessionIdleTimeout 900`; lockout 5 failures → 900 s; login events stored | `server.servlet.session.timeout=15m`, cookie flags; `oauth2Login` removed; setup scripts log in through endpoint 5 |
 | 3 | `user_mfa(user_id PK/FK users, secret_enc, enabled, enrolled_at)` | — | `app.mfa.encryption-key` (env, 32 bytes base64) |
-| 4 | — | `passwordHistory(3)` added to the policy | French messages for Keycloak policy errors |
+| 4 | `session_revocations(user_id PK/FK users, revoked_at)` (V9, review of #89) | `passwordHistory(3)` added to the policy | French messages for Keycloak policy errors |
 | 5 | `audit_entries(id, timestamp, user_id, action, resource_type, resource_id, ip_address, outcome)` | — | — |
 | #51 | `rate_limits(key PK, hits, expires_at)` (V8) | — | `app.rate-limit.*`, `TRUSTED_PROXIES` (staging/prod: the reverse proxy's address) |
 

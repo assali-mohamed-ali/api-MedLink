@@ -7,9 +7,10 @@ import org.springframework.stereotype.Service;
 /**
  * Endpoint 11: staff force a user to choose a new password at the next login.
  *
- * <p>UPDATE_PASSWORD first, so no new login gets past it, then the open sessions. Both steps are
- * idempotent: a failure in either answers 503 and staff send the reset again. Nothing is rolled
- * back, since undoing the reset is the unsafe side.
+ * <p>UPDATE_PASSWORD first, so no new login gets past it; then the API refuses the old sessions
+ * itself (session_revocations), whatever Keycloak does; then Keycloak signs them out. Every step is
+ * idempotent: a failure answers 503 or 500 and staff send the reset again. Nothing is rolled back,
+ * since undoing the reset is the unsafe side.
  */
 @Service
 public class PasswordResetService {
@@ -24,6 +25,7 @@ public class PasswordResetService {
 
     public void force(UUID userId) {
         keycloak.requirePasswordChange(userId);
+        revocations.revoke(userId);
         keycloak.endSessions(userId);
     }
 }

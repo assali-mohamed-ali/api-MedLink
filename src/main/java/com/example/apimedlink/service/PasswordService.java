@@ -1,10 +1,13 @@
 package com.example.apimedlink.service;
 
 import com.example.apimedlink.exception.ApiException;
+import com.example.apimedlink.exception.InvalidPasswordException;
 import com.example.apimedlink.exception.KeycloakUnavailableException;
 import com.example.apimedlink.exception.PasswordChangeRequiredException;
 import com.example.apimedlink.repository.SessionRevocationStore;
+import java.time.Instant;
 import java.util.Map;
+import java.util.Optional;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -13,8 +16,8 @@ import org.springframework.stereotype.Service;
 
 /**
  * Endpoint 10: the current password is checked by Keycloak (password grant), then the new one is
- * set through the admin API. A change ends every Keycloak session of the user (the check's one
- * too); the controller closes the caller's API session, the others follow at their next renewal.
+ * set through the admin API. A change ends every session of the user: the API refuses the old ones
+ * itself (session_revocations), whatever Keycloak does, and Keycloak's are signed out too.
  */
 @Service
 public class PasswordService {
@@ -42,12 +45,28 @@ public class PasswordService {
         KeycloakUser user = keycloak.getUser(userId);
         KeycloakTokens tokens = currentPassword(user, currentPassword);
         try {
-            keycloak.setPassword(userId, newPassword);
-        } catch (RuntimeException refused) {
+            setPasswordClosingOldSessions(userId, newPassword);
+        } catch (RuntimeException failed) {
             login.endSession(tokens.refreshToken());
-            throw refused;
+            throw failed;
         }
         endSessions(userId);
+    }
+
+    /**
+     * The old sessions are refused before the password changes, so none outlives the old password, even
+     * if Keycloak fails afterwards. A password Keycloak refused puts the mark back; no answer keeps it,
+     * since the password may have changed (fail closed: the user logs in again).
+     */
+    private void setPasswordClosingOldSessions(UUID userId, String newPassword) {
+        Optional<Instant> previous = revocations.revokedAt(userId);
+        Instant mark = revocations.revoke(userId);
+        try {
+            keycloak.setPassword(userId, newPassword);
+        } catch (InvalidPasswordException refused) {
+            revocations.undo(userId, mark, previous);
+            throw refused;
+        }
     }
 
     /**
@@ -60,15 +79,15 @@ public class PasswordService {
     }
 
     /**
-     * The new password is set and cannot be put back (password history), so a failure here does not
-     * undo the change: it is logged for an admin to sign the user out in the console.
+     * The API already refuses the old sessions and the browser never holds Keycloak's tokens, so a
+     * failure here leaves only unusable Keycloak sessions until their idle timeout: logged, not undone.
      */
     private void endSessions(UUID userId) {
         try {
             keycloak.endSessions(userId);
         } catch (KeycloakUnavailableException e) {
-            log.error("Password changed for user {} but its Keycloak sessions could not be ended: "
-                    + "sign the user out in the Keycloak console", userId);
+            log.warn("Password changed for user {}: its Keycloak sessions could not be ended, "
+                    + "they end at Keycloak's idle timeout", userId);
         }
     }
 
