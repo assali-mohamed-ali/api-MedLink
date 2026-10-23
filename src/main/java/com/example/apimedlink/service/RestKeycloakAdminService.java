@@ -11,7 +11,9 @@ import jakarta.persistence.EntityNotFoundException;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
 import org.slf4j.Logger;
@@ -128,8 +130,60 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
         if (user == null) {
             throw new KeycloakUnavailableException("get user: empty body");
         }
+        return toUser(id, user);
+    }
+
+    @Override
+    public Optional<KeycloakUser> findByEmail(String email) {
+        UserRepresentation[] found = call("find user by email", bearer -> http.get()
+                .uri(users + "?email={email}&exact=true&briefRepresentation=false", email)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .accept(MediaType.APPLICATION_JSON)
+                .retrieve()
+                .body(UserRepresentation[].class));
+        return found == null || found.length == 0
+                ? Optional.empty()
+                : Optional.of(toUser(UUID.fromString(found[0].id()), found[0]));
+    }
+
+    @Override
+    public void requirePasswordChange(UUID id) {
+        KeycloakUser user = getUser(id);
+        List<String> actions = new ArrayList<>(user.requiredActions());
+        if (!actions.contains("UPDATE_PASSWORD")) {
+            actions.add("UPDATE_PASSWORD");
+        }
+        updateRequiredActions(id, actions);
+    }
+
+    @Override
+    public void endSessions(UUID id) {
+        call("end user sessions", bearer -> http.post().uri(users + "/{id}/logout", id)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .exchange((request, response) -> {
+                    expectFound(response.getStatusCode(), id);
+                    expectSuccess(response.getStatusCode(), "end user sessions");
+                    return null;
+                }));
+    }
+
+    private static KeycloakUser toUser(UUID id, UserRepresentation user) {
+        List<String> actions = user.requiredActions() == null ? List.of() : user.requiredActions();
         return new KeycloakUser(id, user.email(), user.firstName(), user.lastName(),
-                Boolean.TRUE.equals(user.enabled()), Boolean.TRUE.equals(user.emailVerified()));
+                Boolean.TRUE.equals(user.enabled()), Boolean.TRUE.equals(user.emailVerified()), actions);
+    }
+
+    private void updateRequiredActions(UUID id, List<String> actions) {
+        RequiredActionsRepresentation body = new RequiredActionsRepresentation(actions);
+        call("update required actions", bearer -> http.put().uri(users + "/{id}", id)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange((request, response) -> {
+                    expectFound(response.getStatusCode(), id);
+                    expectSuccess(response.getStatusCode(), "update required actions");
+                    return null;
+                }));
     }
 
     /** Runs an admin call with the cached token; on a 401 gets a new token and tries once more. */
@@ -208,9 +262,17 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
     @JsonIgnoreProperties(ignoreUnknown = true)
     record UserRepresentation(
             String id, String username, String email, String firstName, String lastName,
-            Boolean enabled, Boolean emailVerified, List<String> groups) {}
+            Boolean enabled, Boolean emailVerified, List<String> groups, List<String> requiredActions) {
+
+        UserRepresentation(String id, String username, String email, String firstName, String lastName,
+                           Boolean enabled, Boolean emailVerified, List<String> groups) {
+            this(id, username, email, firstName, lastName, enabled, emailVerified, groups, null);
+        }
+    }
 
     record CredentialRepresentation(String type, String value, boolean temporary) {}
+
+    record RequiredActionsRepresentation(List<String> requiredActions) {}
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record ErrorRepresentation(String error, @JsonProperty("error_description") String description) {}
