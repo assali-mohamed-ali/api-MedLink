@@ -499,6 +499,24 @@ scripts and Terraform, so it is a separate GitHub issue. Behind a reverse proxy 
 rate limit, so a flood of forged writes grows the table (per-IP limits: GitHub #51). Reading the trail
 (MLink-33) and account operations (MLink-72) are other tasks; they add their own `AuditAction` values.
 
+## MLink-114 — audit sensitive actions
+
+**Built:** `AuditAction` now includes `LOGIN`, `ACCOUNT_UPDATED` and `DATA_READ`; `AuditOutcome`
+includes `SUCCESS` and `FAILURE`. `UserService` records successful user-list and single-user reads
+(`USER` / `ALL` or the user's UUID). `UserProvisioningService` records a successful account update
+when it synchronizes an existing user's email or username from Keycloak. `LoginService` records
+successful and refused login attempts; where Keycloak refuses credentials before identifying a user,
+the resource id is the fixed value `UNKNOWN`, never the submitted email. No migration or endpoint was
+added.
+
+**Proof:** `SensitiveActionsAuditFunctionalTest` checks read events, successful login events and
+failed attempts without storing the submitted email. `ConsoleUserProvisioningFunctionalTest` checks
+that an email synchronized from Keycloak creates an `ACCOUNT_UPDATED` / `SUCCESS` audit entry.
+`.\mvnw.cmd -B test "-Dsurefire.runOrder=reversealphabetical"`: **247 tests, 0 failures, 0 errors**.
+
+**Scope:** the existing API has no general account-edit endpoint; the update event covers the
+existing account synchronization path. A user deletion is not mislabeled as an account update.
+
 ## MLink-58 — current user and ownership check (2026-10-17, epic/MLink-6)
 
 **Built:** `security/CurrentUser` (the caller's id is the Keycloak id the login saved in the session, =

@@ -1,5 +1,14 @@
 package com.example.apimedlink.service;
 
+<<<<<<< HEAD
+=======
+import com.example.apimedlink.exception.ApiException;
+import com.example.apimedlink.exception.PasswordChangeRequiredException;
+import com.example.apimedlink.model.AuditAction;
+import com.example.apimedlink.model.AuditOutcome;
+import com.example.apimedlink.model.User;
+import com.example.apimedlink.security.Roles;
+>>>>>>> 7dbf59d (feat: audit login and account changes)
 import java.util.List;
 import java.util.UUID;
 
@@ -32,16 +41,22 @@ public class LoginService {
 
     private static final Logger log = LoggerFactory.getLogger(LoginService.class);
     private static final String UPDATE_PASSWORD = "UPDATE_PASSWORD";
+    private static final String UNKNOWN_LOGIN_USER = "UNKNOWN";
 
     private final KeycloakLoginClient keycloak;
     private final KeycloakAdminService admin;
     private final UserProvisioningService provisioning;
     private final AuditService audit;
 
+<<<<<<< HEAD
     public LoginService(KeycloakLoginClient keycloak,
             KeycloakAdminService admin,
             UserProvisioningService provisioning,
             AuditService audit) {
+=======
+    public LoginService(KeycloakLoginClient keycloak, KeycloakAdminService admin,
+                        UserProvisioningService provisioning, AuditService audit) {
+>>>>>>> 7dbf59d (feat: audit login and account changes)
         this.keycloak = keycloak;
         this.admin = admin;
         this.provisioning = provisioning;
@@ -66,22 +81,35 @@ public class LoginService {
             // missing.
             KeycloakUser user = admin.findByEmail(email.trim()).orElseThrow(LoginService::invalidCredentials);
             if (user.requiredActions().equals(List.of(UPDATE_PASSWORD))) {
+                audit.record(AuditAction.LOGIN, "USER", user.id().toString(), AuditOutcome.SUCCESS);
                 return new LoginResult.PasswordChange(user.id());
             }
             log.warn("Login refused for user {}: not fully set up in Keycloak (required actions {})",
                     user.id(), user.requiredActions());
+<<<<<<< HEAD
             auditLoginFailure(); // refus → FAILURE / UNKNOWN
             throw new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_SETUP_INCOMPLETE",
                     "Votre compte n'est pas encore prêt. Contactez l'administration.");
         } catch (RuntimeException refused) {
             // Mauvais mot de passe / user inconnu / etc. → jamais l'email dans resource_id
             auditLoginFailure();
+=======
+            audit.record(AuditAction.LOGIN, "USER", user.id().toString(), AuditOutcome.FAILURE);
+            throw new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_SETUP_INCOMPLETE",
+                    "Votre compte n'est pas encore prêt. Contactez l'administration.");
+        } catch (ApiException refused) {
+            audit.record(AuditAction.LOGIN, "USER", UNKNOWN_LOGIN_USER, AuditOutcome.FAILURE);
+>>>>>>> 7dbf59d (feat: audit login and account changes)
             throw refused;
         }
 
         Jwt token = tokens.accessToken();
+<<<<<<< HEAD
         String subject = token.getSubject();
 
+=======
+        User user;
+>>>>>>> 7dbf59d (feat: audit login and account changes)
         try {
             // Keycloak accepts an unverified email: refusing it is ours
             if (!Boolean.TRUE.equals(token.getClaimAsBoolean("email_verified"))) {
@@ -89,6 +117,7 @@ public class LoginService {
                 throw new ApiException(HttpStatus.FORBIDDEN, "EMAIL_NOT_VERIFIED",
                         "Confirmez votre adresse e-mail avant de vous connecter : utilisez le lien reçu par e-mail.");
             }
+<<<<<<< HEAD
 
             // Our row for this account, created at first login for console-made accounts
             // (GitHub #29)
@@ -122,8 +151,27 @@ public class LoginService {
                 log.warn("Failed to end Keycloak session after refused login for subject={}", subject, endEx);
             }
 
+=======
+            // Our row for this account, created at first login for console-made accounts (GitHub #29)
+            user = provisioning.provision(
+                    UUID.fromString(token.getSubject()),
+                    token.getClaimAsString("email"),
+                    token.getClaimAsString("preferred_username"));
+        } catch (RuntimeException refused) {
+            // Keycloak accepted the password and opened a session: no session of ours, so none of theirs
+            audit.record(AuditAction.LOGIN, "USER", token.getSubject(), AuditOutcome.FAILURE);
+            keycloak.endSession(tokens.refreshToken());
+>>>>>>> 7dbf59d (feat: audit login and account changes)
             throw refused;
         }
+        try {
+            audit.record(AuditAction.LOGIN, "USER", user.getId().toString(), AuditOutcome.SUCCESS);
+        } catch (RuntimeException auditFailure) {
+            keycloak.endSession(tokens.refreshToken());
+            throw auditFailure;
+        }
+        return new LoginResult.Success(new Login(user, token.getClaimAsString("given_name"),
+                token.getClaimAsString("family_name"), ourRoles(token), tokens));
     }
 
     /** Audit LOGIN FAILURE avec resource_id=UNKNOWN (best-effort). */

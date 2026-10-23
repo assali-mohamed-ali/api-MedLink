@@ -41,6 +41,36 @@ class SensitiveActionsAuditFunctionalTest extends FunctionalTestBase {
         assertAudited(id.toString());
     }
 
+    @Test
+    void successfulLoginIsAuditedByTheKeycloakUserId() throws Exception {
+        String email = uniqueEmail("audit-login-success");
+        UUID id = console.createUser(email, PASSWORD);
+        Browser browser = new Browser();
+
+        assertThat(browser.apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+
+        assertThat(db.queryForObject(
+                "select outcome from audit_entries where action = 'LOGIN' "
+                        + "and resource_type = 'USER' and resource_id = ?",
+                String.class, id.toString())).isEqualTo("SUCCESS");
+    }
+
+    @Test
+    void failedLoginIsAuditedWithoutStoringTheSubmittedEmail() throws Exception {
+        String email = uniqueEmail("audit-login-failure");
+        String unknownEmail = uniqueEmail("audit-login-unknown");
+        console.createUser(email, PASSWORD);
+        int before = loginFailureAuditRows();
+
+        assertThat(new Browser().apiLogin(email, "Wrong-Pass-2026!").statusCode()).isEqualTo(401);
+        assertThat(new Browser().apiLogin(unknownEmail, PASSWORD).statusCode()).isEqualTo(401);
+
+        assertThat(loginFailureAuditRows()).isEqualTo(before + 2);
+        assertThat(db.queryForObject(
+                "select count(*) from audit_entries where resource_id in (?, ?)",
+                Integer.class, email, unknownEmail)).isZero();
+    }
+
     private Browser loggedInStaff() throws Exception {
         Browser staff = new Browser();
         assertThat(staff.apiLogin("staff.dev@medlink.local", DEV_USERS_PASSWORD).statusCode()).isEqualTo(200);
@@ -52,6 +82,13 @@ class SensitiveActionsAuditFunctionalTest extends FunctionalTestBase {
                 "select count(*) from audit_entries where action = 'DATA_READ' "
                         + "and resource_type = 'USER' and resource_id = ?",
                 Integer.class, resourceId);
+    }
+
+    private int loginFailureAuditRows() {
+        return db.queryForObject(
+                "select count(*) from audit_entries where action = 'LOGIN' "
+                        + "and resource_type = 'USER' and resource_id = 'UNKNOWN' and outcome = 'FAILURE'",
+                Integer.class);
     }
 
     private void assertAudited(String resourceId) {
