@@ -20,7 +20,8 @@ import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * The appointment domain tables (MLink-97), checked in SQL: practitioners share their user's id,
- * slots cannot overlap for one practitioner or end before they start, appointments belong to a patient.
+ * slots cannot overlap for one practitioner or end before they start, appointments belong to a patient,
+ * and a slot holds one active appointment at most (review on PR #87).
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -115,10 +116,38 @@ class AppointmentSchemaTest {
     }
 
     @Test
+    void aSlotHoldsOneActiveAppointmentOnly() {
+        UUID slot = insertSlot(insertPractitioner(), insertClinic(),
+                NINE_AM, NINE_AM.plus(30, ChronoUnit.MINUTES), "BOOKED");
+        insertAppointment(slot, insertPatient(), "BOOKED");
+        UUID secondPatient = insertPatient();
+
+        assertThatThrownBy(() -> insertAppointment(slot, secondPatient, "BOOKED"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void aCancelledAppointmentDoesNotBlockANewBookingOfItsSlot() {
+        UUID slot = insertSlot(insertPractitioner(), insertClinic(),
+                NINE_AM, NINE_AM.plus(30, ChronoUnit.MINUTES), "BOOKED");
+        insertAppointment(slot, insertPatient(), "CANCELLED");
+
+        insertAppointment(slot, insertPatient(), "BOOKED");
+
+        assertThat(jdbc.queryForObject("select count(*) from appointments where slot_id = ?", Integer.class, slot))
+                .isEqualTo(2);
+    }
+
+    @Test
     void outsideTheDevProfileThereIsNoSeedData() {
         assertThat(jdbc.queryForObject("select count(*) from clinics", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("select count(*) from practitioners", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("select count(*) from slots", Integer.class)).isZero();
+    }
+
+    private void insertAppointment(UUID slot, UUID patient, String status) {
+        jdbc.update("insert into appointments (id, slot_id, patient_id, booked_by, status) values (?, ?, ?, ?, ?)",
+                UUID.randomUUID(), slot, patient, patient, status);
     }
 
     private UUID insertUser() {

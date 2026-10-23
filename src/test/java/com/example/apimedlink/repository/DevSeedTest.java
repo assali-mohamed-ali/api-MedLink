@@ -22,8 +22,9 @@ import org.springframework.test.context.ActiveProfiles;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
- * The dev seed (MLink-97): loaded by the {@code dev} profile only, its practitioners are the realm's
- * dev practitioners (same ids, so they log in onto their seeded rows), slots look like office hours.
+ * The dev seed (MLink-97): loaded by the {@code dev} profile only, its practitioners are the dev Keycloak
+ * users of {@code keycloak/dev/dev-practitioners.json} (same ids, so they log in onto their seeded rows),
+ * slots look like office hours.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -58,13 +59,13 @@ class DevSeedTest {
     }
 
     @Test
-    void eachSeededPractitionerIsTheRealmUserWithTheSameIdEmailAndSpecialty() throws Exception {
-        Map<String, Map<String, Object>> realmUsers = realmUsersByUsername();
+    void eachSeededPractitionerIsTheDevKeycloakUserWithTheSameIdEmailAndSpecialty() throws Exception {
+        Map<String, Map<String, Object>> devUsers = devUsersByUsername();
 
         for (Map.Entry<String, String> expected : PRACTITIONERS.entrySet()) {
-            Map<String, Object> realmUser = realmUsers.get(expected.getKey());
-            assertThat(realmUser).as("realm user %s", expected.getKey()).isNotNull();
-            assertThat(realmUser.get("id")).as("fixed id of %s in the realm", expected.getKey()).isNotNull();
+            Map<String, Object> realmUser = devUsers.get(expected.getKey());
+            assertThat(realmUser).as("dev user %s", expected.getKey()).isNotNull();
+            assertThat(realmUser.get("id")).as("fixed id of %s in the dev users file", expected.getKey()).isNotNull();
             assertThat(realmUser.get("groups")).isEqualTo(List.of("/practitioners"));
             UUID id = UUID.fromString((String) realmUser.get("id"));
 
@@ -120,11 +121,20 @@ class DevSeedTest {
         return jdbc.queryForObject("select count(*) from " + table, Integer.class);
     }
 
-    @SuppressWarnings("unchecked")
+    /** The users of the shared realm file (every environment). */
     private static Map<String, Map<String, Object>> realmUsersByUsername() throws Exception {
-        Map<String, Object> realm = JsonMapper.builder().build()
-                .readValue(Files.readString(Path.of("keycloak", "realm-medlink.json")), Map.class);
-        return ((List<Map<String, Object>>) realm.get("users")).stream()
+        return usersByUsername(Path.of("keycloak", "realm-medlink.json"));
+    }
+
+    /** The dev practitioners, imported in dev only (compose.yaml, service keycloak-dev-users). */
+    private static Map<String, Map<String, Object>> devUsersByUsername() throws Exception {
+        return usersByUsername(Path.of("keycloak", "dev", "dev-practitioners.json"));
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Map<String, Object>> usersByUsername(Path file) throws Exception {
+        Map<String, Object> json = JsonMapper.builder().build().readValue(Files.readString(file), Map.class);
+        return ((List<Map<String, Object>>) json.get("users")).stream()
                 .collect(Collectors.toMap(user -> (String) user.get("username"), user -> user));
     }
 }
