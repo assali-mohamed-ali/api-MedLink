@@ -9,7 +9,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
-| 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
+| 3 | Staff code, TOTP (endpoints 8–9) | **In progress** on `feat/ss3-staff-totp`: plan and progress in [ss3-staff-totp.md](ss3-staff-totp.md) | — | 2026-10-24 |
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
