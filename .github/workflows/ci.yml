@@ -49,6 +49,17 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
+      - name: Set up Python for pre-commit
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install pre-commit
+        run: python -m pip install --disable-pip-version-check pre-commit
+
+      - name: Run repository pre-commit hooks
+        run: pre-commit run --all-files
+
       # Blocking gate: test/build failures fail the job.
       - name: Build + tests
         run: ./mvnw --no-transfer-progress --fail-fast verify
