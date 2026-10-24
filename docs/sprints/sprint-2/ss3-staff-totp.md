@@ -11,8 +11,8 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | # | Subtask | Ticket | State | Commits |
 |---|---|---|---|---|
 | 0 | Handoff file, branch, coordination comments | — | Done; comments postponed to subtasks 4 and 6 (Mohamed, 2026-10-25) | 5c13854 |
-| 1 | `Totp`: RFC 6238 maths | MLink-62 | Done | 0ca2232 (red), next commit (green) |
-| 2 | `MfaSecretCipher`: AES-256-GCM, key from env | MLink-62 | To do | |
+| 1 | `Totp`: RFC 6238 maths | MLink-62 | Done | 0ca2232 (red), c038f55 (green) |
+| 2 | `MfaSecretCipher`: AES-256-GCM, key from env | MLink-62 | Done (class; key wiring in subtask 6) | b89af4e (red), next commit (green) |
 | 3 | `QrCodes`: otpauth URL → PNG data URI | MLink-62 | To do | |
 | 4 | `V11__user_mfa.sql`, entity, repository (atomic failure counter) | MLink-62 | To do | |
 | 5 | `PendingStep<T>` shared by the two pending steps (refactor) | MLink-62 | To do | |
@@ -22,7 +22,7 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | To do | |
 | 10 | Checks and PR | MLink-62/63 | To do | |
 
-**Next step:** subtask 2 (`MfaSecretCipher` class and unit test only; config wiring waits, see log).
+**Next step:** subtask 3 (`QrCodes`, adds ZXing `core` to `pom.xml`).
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
@@ -46,6 +46,10 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 - **2026-10-25:** subtask 1 done. `Totp` (own RFC 6238 with `javax.crypto`, Base32 per RFC 4648, otpauth URL):
   27 unit tests on the published vectors. A stub let the red commit compile. Mutation checks: truncation mask
   `0x07` → 5 failures; tolerance 2 → 6 failures.
+- **2026-10-25:** subtask 2 done. `MfaSecretCipher` (AES-256-GCM, new 12-byte IV per write, user id as associated
+  data, key checked in the constructor and never echoed): 14 unit tests. A plain class for now, not a bean: the
+  application does not need the key until subtask 6. Mutation checks: no associated data → only
+  `aSecretCopiedToAnotherUserDoesNotDecrypt` fails; fixed IV → only `eachEncryptionUsesANewIv` fails.
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
 
