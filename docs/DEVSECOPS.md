@@ -37,10 +37,15 @@
 
 ## Local pre-commit hooks
 
-Install and enable the repository hooks once:
+Prerequisites: Python/pipx and Go (the Gitleaks and actionlint hooks build Go tools). Install and enable the repository hooks once:
 
 ```bash
+sudo apt update
+sudo apt install -y pipx golang-go
+pipx ensurepath
+# Open a new shell if pipx added a PATH entry.
 pipx install pre-commit
+pre-commit validate-config
 pre-commit install
 ```
 
