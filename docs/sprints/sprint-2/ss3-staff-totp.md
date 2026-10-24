@@ -10,8 +10,8 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 
 | # | Subtask | Ticket | State | Commits |
 |---|---|---|---|---|
-| 0 | Handoff file, branch, coordination comments | — | Done (comments to post on Mohamed's go) | see log |
-| 1 | `Totp`: RFC 6238 maths | MLink-62 | To do | |
+| 0 | Handoff file, branch, coordination comments | — | Done; comments postponed to subtasks 4 and 6 (Mohamed, 2026-10-25) | 5c13854 |
+| 1 | `Totp`: RFC 6238 maths | MLink-62 | Done | 0ca2232 (red), next commit (green) |
 | 2 | `MfaSecretCipher`: AES-256-GCM, key from env | MLink-62 | To do | |
 | 3 | `QrCodes`: otpauth URL → PNG data URI | MLink-62 | To do | |
 | 4 | `V11__user_mfa.sql`, entity, repository (atomic failure counter) | MLink-62 | To do | |
@@ -22,7 +22,7 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | To do | |
 | 10 | Checks and PR | MLink-62/63 | To do | |
 
-**Next step:** subtask 1.
+**Next step:** subtask 2 (`MfaSecretCipher` class and unit test only; config wiring waits, see log).
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
@@ -39,6 +39,13 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
   both class orders). CI on GitHub is blocked by billing (jobs not started); proposal for a local runner posted
   on #91, waiting for the code owner. Flyway: `master` has V9, #87 holds V10 → we take **V11**. Postman: `master`
   has folders 0–6, #87 adds 7 → we take **8**.
+- **2026-10-25:** decided with Mohamed: subtasks 1–3 first (new standalone classes: no schema, no shared file, no
+  teammate affected); the #87/#90 comments are posted just before subtasks 4 and 6, after checking the open PRs
+  again. Subtask 2 builds only the cipher class and its unit test; the key wiring (`application-dev.yml`, setup
+  scripts, compose, `FunctionalTestBase`) moves to subtask 6, when the cipher becomes a bean.
+- **2026-10-25:** subtask 1 done. `Totp` (own RFC 6238 with `javax.crypto`, Base32 per RFC 4648, otpauth URL):
+  27 unit tests on the published vectors. A stub let the red commit compile. Mutation checks: truncation mask
+  `0x07` → 5 failures; tolerance 2 → 6 failures.
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
 
