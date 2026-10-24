@@ -33,3 +33,23 @@
 - Run staging integration and authenticated DAST tests before production promotion.
 - Preserve the previous image digest and Compose configuration for rollback.
 - Review scheduled scanner findings and Dependabot alerts; document any accepted risk.
+
+
+## Local pre-commit hooks
+
+Install and enable the repository hooks once:
+
+```bash
+pipx install pre-commit
+pre-commit install
+```
+
+Run the entire configured hook set before opening a PR:
+
+```bash
+pre-commit run --all-files
+```
+
+The hooks check whitespace/newline hygiene, YAML/JSON/XML/TOML syntax, merge markers, private keys, large files, staged secrets with Gitleaks, IaC configuration with Checkov, workflow syntax with actionlint, and Maven project-model validation when Maven files change. CI runs the same `pre-commit run --all-files` check.
+
+Gitleaks' local hook checks staged changes; the existing GitHub Secrets-Scan workflow remains responsible for repository-history scanning. Hooks are a fast local feedback layer, not a replacement for the complete CI security gates.
