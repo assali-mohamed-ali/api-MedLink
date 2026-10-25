@@ -1,66 +1,142 @@
 name: CD
 
-# Promotion model: feature PR -> master, promote master -> staging,
-# validate, then staging -> prod (or tag v* for release).
-# SAFEGUARD: master pushes do NOT auto-deploy prod. Only the prod
-# branch and v* tags reach the production environment.
-#
-# Deployment uses Docker Compose over SSH: the workflow builds one image,
-# records its immutable digest, then asks the target host to pull that exact
-# digest. The GitHub Environment (staging/production) holds the host, key and
-# environment file; `production` must require reviewers in the repository
-# settings. See docs/DEPLOYMENT.md.
+# Release lifecycle: verify, build once, scan the exact image, generate an SBOM,
+# publish by digest, attest/sign, verify before deployment, then deploy by digest.
+# Deployment uses Docker Compose over SSH. Kubernetes and Argo CD are not used.
 
 on:
+  pull_request:
+    branches: [master, main, staging, prod]
   push:
     branches: [staging, prod]
     tags: ['v*']
   workflow_dispatch:
     inputs:
       target:
-        description: 'Environment to deploy (re-run safeguards apply)'
+        description: Environment to deploy after security checks
         required: true
-        default: 'staging'
+        default: staging
         type: choice
         options: [staging, production]
 
 permissions:
   contents: read
 
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
-
 concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build-push:
+  build-and-scan:
+    name: Verify, build and scan exact image
+    if: github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && (github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v')))))
     runs-on: ubuntu-latest
+    timeout-minutes: 45
     permissions:
       contents: read
-      packages: write
     outputs:
-      image: ${{ steps.image.outputs.ref }}
+      image_tag: ${{ steps.image.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Validate Maven wrapper
-        run: |
-          test -f mvnw || (echo "mvnw missing" && exit 1)
-          chmod +x mvnw
-          ./mvnw --version
 
       - name: Set up JDK 17
         uses: actions/setup-java@v6
         with:
           java-version: '17'
-          distribution: 'temurin'
+          distribution: temurin
           cache: maven
 
-      - name: Build jar
-        run: ./mvnw --no-transfer-progress --fail-fast -DskipTests package
+      - name: Verify and test the application
+        run: |
+          test -f mvnw
+          chmod +x mvnw
+          ./mvnw --no-transfer-progress --fail-fast verify
+
+      - name: Define immutable image tag
+        id: image
+        env:
+          SHA: ${{ github.sha }}
+        run: echo "tag=ghcr.io/assali-mohamed-ali/api-medlink:${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the runtime image once
+        env:
+          IMAGE: ${{ steps.image.outputs.tag }}
+        run: docker build --pull --file docker/Dockerfile --tag "$IMAGE" .
+
+      - name: Scan exact image (block on HIGH/CRITICAL)
+        id: trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.tag }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+          scanners: vuln,secret,misconfig
+
+      - name: Generate CycloneDX SBOM from exact image
+        if: steps.trivy.outcome == 'success' || steps.trivy.outcome == 'failure'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.tag }}
+          format: cyclonedx
+          output: sbom.cdx.json
+          exit-code: '0'
+          scanners: vuln
+
+      - name: Save the scanned image for promotion
+        if: success()
+        env:
+          IMAGE: ${{ steps.image.outputs.tag }}
+        run: docker save --output image.tar "$IMAGE"
+
+      - name: Upload SBOM for audit even when the vulnerability gate blocks
+        if: always() && hashFiles('sbom.cdx.json') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-medlink-sbom-${{ github.sha }}
+          path: sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload exact scanned image
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-medlink-image-${{ github.sha }}
+          path: image.tar
+          if-no-files-found: error
+          retention-days: 2
+
+  publish-and-attest:
+    name: Publish and attest the scanned image
+    needs: build-and-scan
+    if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && (github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v')))))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+      image: ${{ steps.publish.outputs.ref }}
+    steps:
+      - name: Download the exact scanned image
+        uses: actions/download-artifact@v7
+        with:
+          name: api-medlink-image-${{ github.sha }}
+          path: bundle
+
+      - name: Download the SBOM for the same image
+        uses: actions/download-artifact@v7
+        with:
+          name: api-medlink-sbom-${{ github.sha }}
+          path: bundle
+
+      - name: Load the scanned image
+        run: docker load --input bundle/image.tar
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -69,40 +145,46 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha
-            type=ref,event=branch
-            type=semver,pattern={{version}}
-
-      - name: Build & push
-        id: build
-        uses: docker/build-push-action@v7
-        with:
-          context: .
-          file: docker/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-
-      - name: Immutable image reference
-        id: image
+      - name: Publish the already-scanned image and capture digest
+        id: publish
+        env:
+          IMAGE: ${{ needs.build-and-scan.outputs.image_tag }}
         run: |
-          test -n "${{ steps.build.outputs.digest }}" || {
-            echo "::error::The build did not produce an image digest."
-            exit 1
-          }
-          echo "ref=${REGISTRY}/${IMAGE_NAME,,}@${{ steps.build.outputs.digest }}" >> "$GITHUB_OUTPUT"
+          set -o pipefail
+          docker push "$IMAGE" 2>&1 | tee push.log
+          DIGEST="$(grep -Eo 'digest: sha256:[0-9a-f]{64}' push.log | tail -n 1 | cut -d' ' -f2)"
+          test -n "$DIGEST" || { echo "::error::Could not obtain the GHCR digest from docker push."; exit 1; }
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "ref=ghcr.io/assali-mohamed-ali/api-medlink@$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v3
+        with:
+          subject-name: ghcr.io/assali-mohamed-ali/api-medlink
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest SBOM for the published digest
+        uses: actions/attest-sbom@v3
+        with:
+          subject-name: ghcr.io/assali-mohamed-ali/api-medlink
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          sbom-path: bundle/sbom.cdx.json
+          push-to-registry: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.10.0
+
+      - name: Sign the published image digest
+        env:
+          IMAGE: ${{ steps.publish.outputs.ref }}
+        run: cosign sign --yes "$IMAGE"
 
   deploy-staging:
-    needs: build-push
-    if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging')
+    needs: publish-and-attest
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'))
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: staging
     permissions:
       contents: read
@@ -110,7 +192,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Deploy the compose stack
+      - name: Log in to GHCR for signature verification
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.10.0
+
+      - name: Verify image signature before deployment
+        env:
+          IMAGE: ${{ needs.publish-and-attest.outputs.image }}
+        run: |
+          test -n "$IMAGE"
+          cosign verify --certificate-identity-regexp '^https://github.com/assali-mohamed-ali/api-MedLink/.github/workflows/cd.yml@refs/(heads/(master|main|staging|prod)|tags/v.*)$' --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
+
+      - name: Deploy the verified immutable image
         uses: ./.github/actions/deploy-compose
         with:
           host: ${{ vars.DEPLOY_HOST }}
@@ -120,17 +219,14 @@ jobs:
           ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
           known_hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           env_file: ${{ secrets.DEPLOY_ENV_FILE }}
-          image: ${{ needs.build-push.outputs.image }}
+          image: ${{ needs.publish-and-attest.outputs.image }}
           ghcr_token: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-prod:
-    needs: build-push
-    # SAFEGUARD: prod deploys only from prod branch, v* tags, or explicit
-    # manual dispatch to production (still gated by the environment's
-    # required reviewers). master is intentionally excluded.
-    if: github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.target == 'production')
+    needs: publish-and-attest
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.target == 'production' && (github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     environment: production
     permissions:
       contents: read
@@ -138,7 +234,24 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Deploy the compose stack
+      - name: Log in to GHCR for signature verification
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3.10.0
+
+      - name: Verify image signature before deployment
+        env:
+          IMAGE: ${{ needs.publish-and-attest.outputs.image }}
+        run: |
+          test -n "$IMAGE"
+          cosign verify --certificate-identity-regexp '^https://github.com/assali-mohamed-ali/api-MedLink/.github/workflows/cd.yml@refs/(heads/(master|main|staging|prod)|tags/v.*)$' --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
+
+      - name: Deploy the verified immutable image
         uses: ./.github/actions/deploy-compose
         with:
           host: ${{ vars.DEPLOY_HOST }}
@@ -148,5 +261,5 @@ jobs:
           ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
           known_hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
           env_file: ${{ secrets.DEPLOY_ENV_FILE }}
-          image: ${{ needs.build-push.outputs.image }}
+          image: ${{ needs.publish-and-attest.outputs.image }}
           ghcr_token: ${{ secrets.GITHUB_TOKEN }}

@@ -11,6 +11,7 @@ import static org.springframework.test.web.client.response.MockRestResponseCreat
 
 import com.example.apimedlink.config.KeycloakProperties;
 import com.example.apimedlink.exception.KeycloakUnavailableException;
+import com.example.apimedlink.exception.PasswordChangeRequiredException;
 import java.io.IOException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -70,6 +71,27 @@ class KeycloakLoginClientTest {
         assertThatThrownBy(() -> client.passwordGrant("a@example.com", "Some-Pass-2026!"))
                 .as("a wrong client secret must not look like a wrong password")
                 .isInstanceOf(KeycloakUnavailableException.class);
+    }
+
+    @Test
+    void keycloaksExactWordingMeansAPendingAction() {
+        keycloak.expect(requestTo(TOKEN_URL)).andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"error\":\"invalid_grant\",\"error_description\":\"Account is not fully set up\"}"));
+
+        assertThatThrownBy(() -> client.passwordGrant("a@example.com", "Some-Pass-2026!"))
+                .isInstanceOf(PasswordChangeRequiredException.class);
+    }
+
+    @Test
+    void anyOtherWordingFailsClosedAsAWrongPassword() {
+        keycloak.expect(requestTo(TOKEN_URL)).andRespond(withStatus(HttpStatus.BAD_REQUEST)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body("{\"error\":\"invalid_grant\",\"error_description\":\"Account is not fully set up yet\"}"));
+
+        assertThatThrownBy(() -> client.passwordGrant("a@example.com", "Some-Pass-2026!"))
+                .as("a Keycloak upgrade that rewords the answer must not open the forced change")
+                .hasFieldOrPropertyWithValue("code", "INVALID_CREDENTIALS");
     }
 
     @Test

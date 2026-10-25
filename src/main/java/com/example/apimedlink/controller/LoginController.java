@@ -4,7 +4,8 @@ import com.example.apimedlink.dto.LoginRequest;
 import com.example.apimedlink.dto.LoginResponse;
 import com.example.apimedlink.mapper.LoginMapper;
 import com.example.apimedlink.security.LoginSessions;
-import com.example.apimedlink.service.Login;
+import com.example.apimedlink.security.PasswordChangePending;
+import com.example.apimedlink.service.LoginResult;
 import com.example.apimedlink.service.LoginService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -24,17 +25,24 @@ public class LoginController {
 
     private final LoginService logins;
     private final LoginSessions sessions;
+    private final PasswordChangePending pending;
 
-    public LoginController(LoginService logins, LoginSessions sessions) {
+    public LoginController(LoginService logins, LoginSessions sessions, PasswordChangePending pending) {
         this.logins = logins;
         this.sessions = sessions;
+        this.pending = pending;
     }
 
     @PostMapping("/login")
     public LoginResponse login(
             @Valid @RequestBody LoginRequest body, HttpServletRequest request, HttpServletResponse response) {
-        Login login = logins.login(body.email(), body.password());
-        sessions.open(login, request, response);
-        return LoginMapper.toResponse(login);
+        LoginResult result = logins.login(body.email(), body.password());
+        if (result instanceof LoginResult.Success success) {
+            sessions.open(success.login(), request, response);
+            return LoginMapper.toResponse(success.login());
+        }
+        LoginResult.PasswordChange change = (LoginResult.PasswordChange) result;
+        pending.start(change.userId(), request);
+        return LoginResponse.forcedPasswordChange();
     }
 }

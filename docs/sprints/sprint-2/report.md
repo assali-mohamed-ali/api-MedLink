@@ -10,13 +10,16 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
 | 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
-| 4 | Passwords (endpoints 10–11) | **In progress** (MLink-87 in review) | [#88](https://github.com/assali-mohamed-ali/api-MedLink/pull/88) | 2026-10-22 |
+| 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
 **2026-10-25:** MLink-122 (GitHub #49): in staging and prod, Actuator (metrics, `/actuator/health`) moves to the
 private management port 9000; the public port keeps `/livez` and `/readyz`. **Every health check now calls `/readyz`**
 (Dockerfile, Terraform, the deploy action's `DEPLOY_HEALTH_URL`): the code owner sets the GitHub variable
 `DEPLOY_HEALTH_URL` to `https://<api-host>/readyz` before the next deployment. Dev unchanged. No migration, no endpoint.
+
+**2026-10-23:** MLink-91, MLink-88 and MLink-90 on `feat/ss4-password-change`, one PR based on `master`.
+Endpoints 10 and 11 work end to end; see the section below for the proofs.
 
 **2026-10-20:** MLink-119 (GitHub #66, part 1) in review (#78): README rewritten to match `master` (password-grant
 login, auth flow diagram, endpoints, security rules, team workflow, CI). No code change. Part 2:
@@ -75,6 +78,54 @@ and `/actuator/health` on the main port refused to anonymous callers, metrics se
 `staging` and `production`. A proxy must not route port 9000.
 
 **Limits:** Swagger and `/v3/api-docs` are not Actuator and stay public in production: GitHub #65.
+
+## MLink-91, MLink-88, MLink-90 - password changes (2026-10-23, feat/ss4-password-change, [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89))
+
+- **MLink-91:** `POST /api/auth/password` changes the logged-in user's password. The current password
+  is checked by a Keycloak password grant, then `KeycloakAdminService.setPassword` applies the new one;
+  every session of the user then ends (see the review below). Wrong current password -> `401 INVALID_CURRENT_PASSWORD`;
+  Keycloak policy -> `400 PASSWORD_POLICY` with the existing French messages. No password or token is
+  logged; the browser keeps only its session cookie.
+- **MLink-88:** `POST /api/admin/users/{id}/force-password-reset` is staff-only (`204`, unknown id
+  `404`). It adds Keycloak's `UPDATE_PASSWORD` and ends the user's Keycloak sessions. The next password
+  login returns `200 {"passwordChangeRequired":true}` in a five-minute pending session that carries no
+  authenticated principal. `POST /api/auth/password` then needs only the new password and is single-use.
+  A normal login clears the pending marker.
+- **MLink-90:** the two routes are in `AccessMatrixFunctionalTest` (anonymous 401, patient/practitioner
+  403, staff allowed; a missing pending session is 401). The forced test also covers a weak forced
+  password (pending stays usable), the single-use rule, session shutdown and a normal login afterwards.
+- **Proof:** `PasswordChangeFunctionalTest` 5/5 green; `ForcePasswordResetFunctionalTest` 3/3 green;
+  full suite 222/222 in normal and reverse class order. Postman folder 6 (66 requests, 176 assertions,
+  0 failure) runs the complete scenario: normal change, wrong current, policy refusal, staff reset,
+  pending login, forced change, reuse refusal.
+- **Known scope:** only Keycloak sessions are ended by the reset. API sessions end at their next token
+  renewal through `SessionValidityFilter`; the access token lifespan is five minutes.
+- **Code owner's review (2026-10-23).** Scope: endpoint 10 is a password change (with a session, or the
+  pending step after a staff reset), not forgot password, which stays out of scope (plan.md §8); a
+  comment on the PR had said otherwise. Keycloak 26.8.1 checked on the dev stack first: "Account is not
+  fully set up" comes only after the right password, for any required action and for an incomplete
+  profile; `reset-password` with `temporary=false` drops `UPDATE_PASSWORD` itself and keeps the other
+  actions. Changes:
+  - Another required action next to `UPDATE_PASSWORD` (or none, an incomplete profile): the login
+    answers `403 ACCOUNT_SETUP_INCOMPLETE` before any change, logged for an admin. Only the password's
+    owner sees it, as with `ACCOUNT_DISABLED`.
+  - The forced change is one Keycloak write (`clearPasswordChange` removed): nothing left half done.
+  - The staff reset blocks new logins first, then refuses the old API sessions, then ends Keycloak's;
+    every step is idempotent, so an error means "send it again" and nothing is rolled back.
+  - A normal change ends every session (decided with the lead). Fail closed, whatever Keycloak does:
+    `V9__session_revocations.sql` adds one mark per user, set *before* the password changes;
+    `SessionValidityFilter` refuses any session opened at or before it, on every call (one primary-key
+    read). A password Keycloak refused puts the mark back (a weak attempt logs no one out); no answer
+    keeps it (the password may have changed). Keycloak's sign-out still runs; if only it fails, the
+    leftover Keycloak sessions are unusable (the browser never holds Keycloak's tokens) and a warning is
+    logged. A separate table, not a `users` column: a login saving the users row never writes an old
+    mark back. A reset landing in a still-fresh session answers `401 SESSION_EXPIRED` instead of a 500.
+  - Only Keycloak's exact wording opens the forced change; another wording fails closed as `401`.
+  - Proof: new functional tests (every session ends; an old session refused while Keycloak still
+    accepts it; another action refused; a reset sent twice), `SessionRevocationStoreTest` and unit tests
+    for the Keycloak failures between two calls, each committed red first; Postman folder 6
+    checks that the change ends the session (67 requests, 178 assertions, 0 failure); full suite 243/243 in
+    normal and reverse class order.
 
 ## MLink-87 - password history (2026-10-22, feat/ss4-password-history)
 
@@ -758,6 +809,9 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-23 | A password change ends every session of the user, this one included; the user logs in again | A change made because a session may be compromised must close it; same ending as the forced change (review on #89) | Keeping the current session only (more calls, more partial failures); keeping all |
+| 2026-10-23 | Old sessions are refused by the API itself (`session_revocations`, set before the password changes), not only by Keycloak's sign-out | Fail closed: a Keycloak failure after the change can no longer leave a stolen session open; the browser only reaches Keycloak through the API (review on #89) | 204 + an error log when Keycloak's sign-out fails (left a window until Keycloak's idle timeout); 503 after a change that did happen (the old password cannot be put back) |
+| 2026-10-23 | Login with a Keycloak required action other than `UPDATE_PASSWORD` alone: 403 `ACCOUNT_SETUP_INCOMPLETE` | The API finishes only the forced change; starting it would leave the account blocked after the change; Keycloak checked the password first, so it reveals nothing | Running the change and leaving the user locked out; 401 (looks like a wrong password) |
 | 2026-10-20 | The role × route matrix asserts past security / 401 / 403, not exact statuses, and reads the routes from Spring | It proves access rules only, so a feature's answers (200, 400, 404) can change without touching it; a route missing from the matrix fails the build (MLink-60) | Exact status per cell; a hand-kept list of routes |
 | 2026-10-19 | The login keeps the OAuth password grant, as a consciously accepted exception: [decision record 0001](../../decisions/0001-login-password-grant.md) | Keeps "the frontend never talks to Keycloak"; decided by the plan owner and the code owner on PR #58 (GitHub #50); its conditions: per-IP rate limiting (done, #60) and this link | Authorization Code + PKCE with a themed Keycloak login page |
 | 2026-10-18 | Rate limits counted in Postgres (`rate_limits`, one atomic upsert per hit), not Redis | Shared by every instance and race-free with the database we already run; no new service to deploy and secure (GitHub #51) | Redis; the in-memory map (one instance, racy) |

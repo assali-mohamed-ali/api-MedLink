@@ -3,6 +3,7 @@ package com.example.apimedlink.service;
 import com.example.apimedlink.config.KeycloakProperties;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.KeycloakUnavailableException;
+import com.example.apimedlink.exception.PasswordChangeRequiredException;
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import java.time.Duration;
@@ -35,13 +36,16 @@ import org.springframework.web.client.RestTemplate;
  * <p>How Keycloak answers the password grant (checked against Keycloak 26.7.5, see report.md):
  * a wrong password, an unknown email and a locked account all give 400 {@code invalid_grant}
  * "Invalid user credentials"; a disabled account gives "Account disabled", and only with the
- * right password; an unverified email is accepted.
+ * right password; an unverified email is accepted. "Account is not fully set up" also comes only
+ * with the right password, for any required action or an incomplete profile (checked on 26.8.1):
+ * a hint that LoginService confirms through the admin API. Any other wording fails closed.
  */
 @Service
 public class KeycloakLoginClient {
 
     private static final Logger log = LoggerFactory.getLogger(KeycloakLoginClient.class);
     private static final String ACCOUNT_DISABLED = "Account disabled";
+    private static final String NOT_FULLY_SET_UP = "Account is not fully set up";
 
     private final RestClient http;
     private final KeycloakProperties keycloak;
@@ -156,7 +160,9 @@ public class KeycloakLoginClient {
                 return new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_DISABLED",
                         "Ce compte est désactivé. Contactez l'administration.");
             }
-            // Sub-sprint 4 (forced password change) adds Keycloak's "account not fully set up" here.
+            if (NOT_FULLY_SET_UP.equals(error.description())) {
+                return new PasswordChangeRequiredException();
+            }
             // A locked account answers exactly like a wrong password: a 423 would tell anyone that the
             // email has an account (Keycloak never locks an unknown email). Decided on MLink-55.
             return new ApiException(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS",

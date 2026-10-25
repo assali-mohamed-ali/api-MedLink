@@ -36,7 +36,7 @@ flowchart LR
   API["api-MedLink (BFF) :8080<br/>Spring Boot 4.1 · Java 17<br/>server session holds the tokens<br/>deny by default, JSON 401/403<br/>Flyway owns the schema"]
   KC["Keycloak :8180<br/>realm medlink<br/>passwords, policy, lockout,<br/>roles via groups, events"]
   KCDB[("keycloak-db<br/>own container and volume")]
-  APPDB[("Postgres · app data<br/>users, patients, email tokens,<br/>audit_entries, rate_limits")]
+  APPDB[("Postgres · app data<br/>users, patients, email tokens,<br/>audit_entries, rate_limits,<br/>session_revocations")]
   MAIL["SMTP<br/>(Mailpit in dev)"]
   PROM["Prometheus :9090"]
   BR -- "1 every call: JSON + session cookie<br/>(login: email + password)" --> API

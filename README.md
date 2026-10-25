@@ -223,6 +223,17 @@ host with Docker Compose over SSH; setup, secrets, rollback and recovery are in
 
 ## 8. Dev setup in detail
 
+### Local pre-commit hooks
+
+Install the local Git hook once by following [CONTRIBUTING.md](CONTRIBUTING.md) and running:
+
+```bash
+bash scripts/setup-pre-commit.sh
+```
+
+The hook checks staged files before each commit. CI also runs the complete pre-commit configuration across the repository.
+
+
 <details>
 <summary><b>Setup script options</b></summary>
 
