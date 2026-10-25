@@ -194,13 +194,19 @@ a failure is only logged) and invalidates our session.
 
 ### 8 · `POST /api/auth/mfa/setup` (pending code step, first time only)
 → **200** `{ "otpauthUrl": "otpauth://totp/MedLink:…", "qrCode": "data:image/png;base64,…", "secret": "…" }`
-· **409** when a code is already enrolled · **401** without a pending step.
-Stores the secret encrypted, not yet active; the first valid code at endpoint 9 activates it.
+· **409** `MFA_ALREADY_ENROLLED` when a code is already enrolled · **401** `UNAUTHORIZED` without a pending step.
+Stores the secret encrypted (AES-256-GCM, `app.mfa.encryption-key`), not yet active; the first valid code at
+endpoint 9 activates it. A second setup before that replaces the secret. The pending step (from endpoint 5) lasts
+5 minutes and holds no session: every other endpoint stays closed.
 
 ### 9 · `POST /api/auth/mfa/verify` (pending code step)
-`{ "code": "123456" }` → **200** `{ "user": {…} }` + session · **401** `INVALID_CODE` ·
-**423** `MFA_LOCKED` after 5 wrong codes (the pending step is dropped; log in again).
-TOTP: 30 s, 6 digits, one step of tolerance either side.
+`{ "code": "123456" }` → **200** `{ "user": {…} }` + session (new session id, 15 idle minutes) ·
+**401** `INVALID_CODE` (wrong, already used, or no secret enrolled; the step goes on) ·
+**401** `UNAUTHORIZED` without a pending step (checked before the body) · **400** `VALIDATION_FAILED` when the
+code is not 6 digits · **423** `MFA_LOCKED` from the 5th wrong code: the lock is **per user, for 15 minutes,
+across logins** (a new login reaches the code step but even the right code gets 423); the pending step is dropped
+and the Keycloak session ended (log in again). A good code resets the count.
+TOTP: RFC 6238, SHA-1, 30 s, 6 digits, one step of tolerance either side; each code works once.
 
 ### 10 · `POST /api/auth/password`
 - With a session: `{ "currentPassword", "newPassword" }` → **204** · **401** `INVALID_CURRENT_PASSWORD` · **400** `PASSWORD_POLICY`.
@@ -256,7 +262,7 @@ Existing `/api/users` endpoints become staff-only in sub-sprint 5.
 |---|---|---|---|
 | 1 | `users.username` → `varchar(254)`; `patients(id PK/FK users, first_name, last_name, birth_date, phone, address, created_at)`; `email_tokens(id, user_id FK, purpose VERIFY_EMAIL\|ACTIVATE_ACCOUNT, token_hash char(64) unique, expires_at, used_at, created_at)` | client `medlink-admin` (service account: `manage-users`, `view-users`, `query-users`, `query-groups`; secret `${KC_ADMIN_CLIENT_SECRET}`) | `keycloak.admin.*`, `spring.mail.*`, `app.frontend-url`; Mailpit in both compose files (inbox 8025); setup scripts generate the new secret and add missing `.env` keys |
 | 2 | — | `medlink-bff`: direct grants on, standard flow off; `ssoSessionIdleTimeout 900`; lockout 5 failures → 900 s; login events stored | `server.servlet.session.timeout=15m`, cookie flags; `oauth2Login` removed; setup scripts log in through endpoint 5 |
-| 3 | `user_mfa(user_id PK/FK users, secret_enc, enabled, enrolled_at)` | — | `app.mfa.encryption-key` (env, 32 bytes base64) |
+| 3 | `user_mfa(user_id PK/FK users ON DELETE CASCADE, secret_enc, enabled, enrolled_at, last_used_step, failed_attempts, locked_until)` (V11; the last three: a code works once, 5 wrong codes lock for 15 min) | — | `app.mfa.encryption-key` = `APP_MFA_ENCRYPTION_KEY` (32 bytes base64, required: the API does not start without it); compose, `.env` examples, Terraform; setup scripts generate it |
 | 4 | `session_revocations(user_id PK/FK users, revoked_at)` (V9, review of #89) | `passwordHistory(3)` added to the policy | French messages for Keycloak policy errors |
 | 5 | `audit_entries(id, timestamp, user_id, action, resource_type, resource_id, ip_address, outcome)` | — | — |
 | #51 | `rate_limits(key PK, hits, expires_at)` (V8) | — | `app.rate-limit.*`, `TRUSTED_PROXIES` (staging/prod: the reverse proxy's address) |

@@ -19,10 +19,11 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 6a | Key wiring: cipher bean, `APP_MFA_ENCRYPTION_KEY` (config, compose, env, Terraform, setup scripts, docs) | MLink-62 | Done | 897ef4b (red), e744ce8 (green) |
 | 6b | `MfaService`: enrol, verify, lock (no HTTP yet) | MLink-62/63 | Done | d1853b0 (red), dae733d (green) |
 | 7 | HTTP, in one green commit: staff branch of login + `MfaPending` + endpoints 8 and 9 + `Browser.login()` helper | MLink-62/63 | Done (regrouping OK'd by Mohamed) | 9398f1b (red), abe58dc (green); idle-time fix e914835 (red), 0c100e6 (green) |
-| 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | To do | |
+| 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | Done | a720111 (Postman); log of an unreadable secret cd4ecb7 (red), 0370c1c (green); docs next commit |
 | 10 | Checks and PR | MLink-62/63 | To do | |
 
-**Next step:** subtask 9 (Postman folder 6 staff step + new folder 8; plan.md §4/§5, report.md, README/ARCHITECTURE).
+**Next step:** subtask 10: gitleaks on the branch, the other CI checks locally, Mohamed's manual login with an
+authenticator app on the dev stack, then the PR to `master`.
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
@@ -122,6 +123,21 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
     (`PendingStep`), and the full session opened in it after the code kept 5 instead of 15 (MLink-86). Red test
     `theSessionOpenedByTheCodeLastsFifteenIdleMinutesNotFive` (300 instead of 900), then `LoginSessions.open`
     sets `server.servlet.session.timeout` again. Full suite 348/348 in both class orders. Pushed.
+- **2026-10-25 (late):** subtask 9 done.
+  - **Postman** (a720111): one collection-level pre-request script computes `{{totpCode}}` from `{{totpSecret}}`
+    (RFC 6238 with CryptoJS HmacSHA1). Folder 6's staff step and folder 8 use disposable users made in the
+    Keycloak console (default `/patients` group taken off): `staff.dev` may hold a code from an earlier manual
+    run, whose secret the collection cannot know. Folder 6 needs its own admin token (folder 4's expires during
+    folder 5's 61 s wait). The file is hand-formatted, so the change was spliced in (8 lines removed, all meant).
+    newman 6.2.1 on the dev stack (API from this branch on 8080, `.dev/start-dev.ps1`): 101 requests, 240
+    assertions, 0 failures, twice in a row. Running folders 6 and 8 alone fails by design (folder 6 reuses
+    folder 4's account): run the whole collection.
+  - **The agreed 500 for an unreadable secret** had no log naming the user (no generic handler): red test
+    (`OutputCaptureExtension`), then `MfaService` logs the user and the likely cause, never the secret.
+  - **Docs:** plan.md §4 (endpoints 8–9: errors, lock per user across logins, 400 after the step check) and §5
+    (V11 columns, the required key); report.md (Status, dated note, MLink-62/63 section); README (test users,
+    staff code, endpoint rows); ARCHITECTURE (login section, ISO rows); threat model (S2 ✅, priority list).
+  - Full suite **349/349** in both class orders.
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
 

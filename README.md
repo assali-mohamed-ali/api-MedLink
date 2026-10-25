@@ -55,7 +55,8 @@ team's realm file. All options: [§8](#8-dev-setup-in-detail).
 | Prometheus (full-stack mode only) | http://localhost:9090 |
 
 **Test users** (dev only): `patient.dev`, `practitioner.dev`, `staff.dev`, all `@medlink.local`, password
-`MedLink-Dev-2026!` (the value of `KC_DEV_USERS_PASSWORD`).
+`MedLink-Dev-2026!` (the value of `KC_DEV_USERS_PASSWORD`). `practitioner.dev` and `staff.dev` also need a code
+from an authenticator app (Google Authenticator, Aegis, …): their first login enrols it with a QR code.
 
 **Stack:** Spring Boot 4.1 · Java 17 · Keycloak 26 · PostgreSQL · Flyway · Testcontainers. Package
 `com.example.apimedlink`. Do not downgrade a version to make code compile.
@@ -82,6 +83,10 @@ sequenceDiagram
 
 - **Session:** a new HttpOnly cookie at login (`SameSite=Strict`, `Secure` in staging/prod). It ends after
   **15 idle minutes**, or as soon as Keycloak refuses to renew the token (account disabled, signed out).
+- **Staff code:** for practitioners and staff, the login answers `{ "mfaRequired": true, "mfaSetupRequired": … }`
+  and no session yet; the browser then calls `/api/auth/mfa/setup` (first time: a QR code for an authenticator
+  app) and `/api/auth/mfa/verify` with the 6-digit code, which opens the session. 5 wrong codes lock the code step
+  for 15 minutes. The secrets are encrypted with `APP_MFA_ENCRYPTION_KEY` (the API does not start without it).
 - **CSRF:** every write (`POST`, `PUT`, `DELETE`) echoes the `XSRF-TOKEN` cookie in `X-XSRF-TOKEN`, or gets 403.
 - **Password grant:** a consciously accepted exception to the OAuth best practice, so the login stays a
   MedLink page. Why, and what it still needs: [decision record 0001](docs/decisions/0001-login-password-grant.md).
@@ -94,7 +99,9 @@ sequenceDiagram
 | `POST /api/auth/register` | anyone | 201, the same whether or not the email is taken (the owner gets a mail) |
 | `POST /api/auth/verify-email` | anyone | 204 · 400 `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
 | `POST /api/auth/verify-email/resend` | anyone | 202, the same whether or not the account exists |
-| `POST /api/auth/login` | anyone | 200 · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
+| `POST /api/auth/login` | anyone | 200 (`user`, or `mfaRequired` for practitioners and staff) · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
+| `POST /api/auth/mfa/setup` | at the code step | 200 QR code, otpauth URL, secret · 401 · 409 `MFA_ALREADY_ENROLLED` |
+| `POST /api/auth/mfa/verify` | at the code step | 200 `user` + session · 400 · 401 `INVALID_CODE` · 423 `MFA_LOCKED` |
 | `POST /api/auth/logout` | logged in | 204 |
 | `GET /api/users` | staff | 200 |
 | `GET /api/users/{id}` | the user themself, or staff | 200 · 403 for anyone else, whether the id exists or not |
