@@ -15,21 +15,21 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 2 | `MfaSecretCipher`: AES-256-GCM, key from env | MLink-62 | Done (class; key wiring in subtask 6) | b89af4e (red), a5f1952 (green) |
 | 3 | `QrCodes`: otpauth URL → PNG data URI | MLink-62 | Done | 7760e68 (red), 7535327 (green) |
 | 4 | `V11__user_mfa.sql`, `UserMfa` record, `UserMfaStore` (atomic counters) | MLink-62 | Done | f1b90db (red), f82669e (green) |
-| 5 | `PendingStep<T>` shared by the two pending steps (refactor) + `Clock` bean | MLink-62 | Done | 1655a4d (red), next commit (green) |
-| 6 | Staff branch of login + test helper | MLink-62 | To do | |
-| 7 | `POST /api/auth/mfa/setup` | MLink-62 | To do | |
-| 8 | `POST /api/auth/mfa/verify` | MLink-63 | To do | |
+| 5 | `PendingStep<T>` shared by the two pending steps (refactor) + `Clock` bean | MLink-62 | Done | 1655a4d (red), d366288 (green) |
+| 6a | Key wiring: cipher bean, `APP_MFA_ENCRYPTION_KEY` (config, compose, env, Terraform, setup scripts, docs) | MLink-62 | Done | 897ef4b (red), e744ce8 (green) |
+| 6b | `MfaService`: enrol, verify, lock (no HTTP yet) | MLink-62/63 | Done | d1853b0 (red), next commit (green) |
+| 7 | HTTP, in one green commit: staff branch of login + `MfaPending` + endpoints 8 and 9 + `Browser.login()` helper | MLink-62/63 | To do (needs Mohamed's OK on the regrouping) | |
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | To do | |
 | 10 | Checks and PR | MLink-62/63 | To do | |
 
-**Next step:** post the #90 comment (Mohamed’s go), then subtask 6 (staff branch of login, `MfaPending`, key wiring, `Browser.login()` helper).
+**Next step:** Mohamed's OK on the regrouping of subtasks 6–8 (session log, 2026-10-25 evening), then subtask 7.
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
 | When | Move |
 |---|---|
 | Subtask 0 | MLink-62 → *In Progress* |
-| Subtask 8 starts | MLink-63 → *In Progress* |
+| Subtask 6b (the code check's rules start) | MLink-63 → *In Progress* |
 | PR opened | MLink-62, MLink-63 → *To Verify*, with the PR link |
 | PR merged | MLink-62, MLink-63 → *Done* |
 
@@ -75,6 +75,30 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
   `PendingStepTest` (7, fake clock) instead of none, because expiry cannot be waited for in a functional test.
   Safety net unchanged and green: `PasswordChangeFunctionalTest` 7, `ForcePasswordResetFunctionalTest` 5,
   `LoginFunctionalTest` 8. Mutation checks: no expiry, old session kept: each turns its test red.
+- **2026-10-25 (evening):** coordination posted. #90:
+  https://github.com/assali-mohamed-ali/api-MedLink/pull/90#issuecomment-6402788305. Findings there: Chourouk's
+  `loggedInStaff()` uses `apiLogin()` and would get 401 on `/api/users` once staff need a code (asked her to use
+  `login()`; if our PR merges second we change it), and her `LOGIN` SUCCESS audit runs after the password alone
+  (proposed: for staff, after the code, in a follow-up). MLink-65 comment posted by Mohamed (which script lines
+  change). New open PR **#94** (MLink-122, management port) also edits `SecurityConfig`, `application.properties`,
+  `DEPLOYMENT.md`, `threat-model.md`: other lines, whoever merges second rebases.
+- **2026-10-25 (evening):** subtask 6a done (key wiring). The setup scripts' `new_secret` gives 24 bytes in hex, so a
+  `new_key` / `New-Key` (32 bytes, base64) is added, also used when an existing `.env` lacks the key. Every test
+  context gets a test key from `src/test/resources/config/application.properties` (instead of a `registry.add` in
+  `FunctionalTestBase`: the other `@SpringBootTest` classes need it too). Dev values carry `# gitleaks:allow`
+  (base64 cannot hold the allow-listed `dev-only-`). Terraform `fmt -check` and `validate` pass (1.9.8 in Docker);
+  gitleaks on the changed files: only `master`'s reviewed `KC_DB_URL` line. 3 tests (`MfaKeyStartupTest`);
+  mutation: binding another property name → red. Full suite 312/312. **For the PR:** staging and prod deploys
+  need `APP_MFA_ENCRYPTION_KEY` in `DEPLOY_ENV_FILE` before merge (compose refuses to start without it).
+- **2026-10-25 (evening):** subtask 6b done. `MfaService` (`startEnrolment`, `verify`, `isEnrolled`), 8 tests on a real
+  database with a movable clock (shared `MovableClock`, also used by `PendingStepTest`). The store's atomic
+  statements are the only lock check (an extra early check could not be caught by any test, so it was dropped).
+  Mutations: 6 wrong codes instead of 5, a 14-minute lock, the lock ignored: each turns its tests red.
+  **Regrouping proposed (needs Mohamed's OK):** subtasks 6–8 as planned cannot each end green. Once login answers
+  `mfaRequired` for staff, every existing staff and practitioner test needs `Browser.login()` to finish the code
+  step, which needs endpoints 8 and 9. So the HTTP part (login branch, `MfaPending`, both endpoints, helper,
+  `MfaFunctionalTest`) is one subtask 7: red commit(s) first, then one green commit, every commit before it green.
+  Open point for 7: a secret that no longer decrypts (key changed) gives a 500 today; to decide (re-enrol?).
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
 
