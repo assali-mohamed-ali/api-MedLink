@@ -83,7 +83,8 @@ class OwnershipFunctionalTest extends FunctionalTestBase {
 
     private Browser loggedIn(String email, String password) throws Exception {
         Browser browser = new Browser();
-        assertThat(browser.apiLogin(email, password).statusCode()).as("logged in").isEqualTo(200);
+        // Staff through the code step too (MLink-62/63)
+        assertThat(browser.login(email, password).call("/api/users/_health").statusCode()).as("logged in").isEqualTo(200);
         return browser;
     }
 
