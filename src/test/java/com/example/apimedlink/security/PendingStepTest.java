@@ -2,11 +2,11 @@ package com.example.apimedlink.security;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.apimedlink.MovableClock;
 import jakarta.servlet.http.HttpSession;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.ZoneOffset;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -22,33 +22,13 @@ class PendingStepTest {
 
     static final Instant T0 = Instant.parse("2026-10-25T10:00:00Z");
 
-    /** A clock the test moves forward. */
-    static final class MovableClock extends Clock {
-        Instant now = T0;
-
-        @Override
-        public Instant instant() {
-            return now;
-        }
-
-        @Override
-        public ZoneOffset getZone() {
-            return ZoneOffset.UTC;
-        }
-
-        @Override
-        public Clock withZone(java.time.ZoneId zone) {
-            return this;
-        }
-    }
-
     static final class TestStep extends PendingStep<String> {
         TestStep(Clock clock) {
             super(clock);
         }
     }
 
-    final MovableClock clock = new MovableClock();
+    final MovableClock clock = new MovableClock(T0);
     final TestStep step = new TestStep(clock);
     final MockHttpServletRequest request = new MockHttpServletRequest();
 
@@ -60,7 +40,7 @@ class PendingStepTest {
     @Test
     void whatWasStartedIsReadBackWithinFiveMinutes() {
         step.start("value", request);
-        clock.now = T0.plus(Duration.ofMinutes(5));
+        clock.set(T0.plus(Duration.ofMinutes(5)));
 
         assertThat(step.current(request)).contains("value");
     }
@@ -69,7 +49,7 @@ class PendingStepTest {
     void afterFiveMinutesItIsGoneWithItsSession() {
         step.start("value", request);
         HttpSession session = request.getSession(false);
-        clock.now = T0.plus(Duration.ofMinutes(5)).plusSeconds(1);
+        clock.set(T0.plus(Duration.ofMinutes(5)).plusSeconds(1));
 
         assertThat(step.current(request)).isEmpty();
         assertThat(((MockHttpSession) session).isInvalid()).isTrue();
