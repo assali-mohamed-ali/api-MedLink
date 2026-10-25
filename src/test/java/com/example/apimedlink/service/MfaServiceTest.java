@@ -13,10 +13,14 @@ import com.example.apimedlink.repository.UserMfaStore;
 import com.example.apimedlink.repository.UserRepository;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 
@@ -26,6 +30,7 @@ import org.springframework.http.HttpStatus;
  * cannot wait for: the lock running out (the clock is moved here).
  */
 @SpringBootTest
+@ExtendWith(OutputCaptureExtension.class)
 @Import(TestcontainersConfiguration.class)
 class MfaServiceTest {
 
@@ -145,6 +150,21 @@ class MfaServiceTest {
         clock.set(T0.plus(Duration.ofMinutes(15)));
         assertThatCode(() -> service().verify(id, codeNow(enrolment))).doesNotThrowAnyException();
         assertThat(store.find(id).orElseThrow().failedAttempts()).isZero();
+    }
+
+    @Test
+    void aSecretSealedWithAnotherKeyFailsLoudlyNamingOnlyTheUser(CapturedOutput output) {
+        UUID id = aUser();
+        byte[] secret = Totp.newSecret();
+        MfaSecretCipher otherKey = new MfaSecretCipher(Base64.getEncoder().encodeToString(new byte[] {
+                1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 24, 25, 26, 27, 28,
+                29, 30, 31, 32}));
+        store.saveSecret(id, otherKey.encrypt(id, secret));
+
+        assertThatThrownBy(() -> service().verify(id, "123456")).isInstanceOf(IllegalStateException.class);
+
+        // The key changed (an operations mistake): the log says whose code and why, never the secret
+        assertThat(output).contains("user " + id).contains("APP_MFA_ENCRYPTION_KEY").doesNotContain(Totp.base32(secret));
     }
 
     @Test
