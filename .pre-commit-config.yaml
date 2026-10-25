@@ -1,19 +1,45 @@
+minimum_pre_commit_version: '4.6.0'
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
-    rev: v4.6.0
+    rev: v6.0.0
     hooks:
       - id: trailing-whitespace
       - id: end-of-file-fixer
       - id: check-yaml
-      - id: check-added-large-files
+      - id: check-json
+      - id: check-xml
+      - id: check-toml
       - id: check-merge-conflict
+      - id: check-case-conflict
+      - id: detect-private-key
+      - id: check-added-large-files
+        args: [--maxkb=1024]
+
   - repo: https://github.com/gitleaks/gitleaks
-    rev: v8.24.0
+    rev: v8.30.1
     hooks:
+      # The hook's entry already runs "gitleaks git --pre-commit --redact --staged".
+      # Pass only the custom repository configuration here.
       - id: gitleaks
-        args: ['protect', '--source=.', '--config=security/.gitleaks.toml', '--redact', '-v']
+        args: [--config=security/.gitleaks.toml]
+
   - repo: https://github.com/bridgecrewio/checkov
-    rev: '3.2.5'
+    rev: '3.3.30'
     hooks:
       - id: checkov
-        args: ['--config-file', 'security/checkov.yaml', '--directory', '.']
+        args: ['--config-file', 'security/checkov.yaml']
+
+  - repo: https://github.com/rhysd/actionlint
+    rev: v1.7.12
+    hooks:
+      - id: actionlint
+
+  - repo: local
+    hooks:
+      - id: maven-validate
+        name: Validate Maven project model
+        entry: ./mvnw --no-transfer-progress -q validate
+        language: system
+        files: '^(pom\.xml|mvnw|\.mvn/.*)$'
+        pass_filenames: false
