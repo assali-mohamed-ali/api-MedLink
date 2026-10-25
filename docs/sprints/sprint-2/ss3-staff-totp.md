@@ -14,15 +14,15 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 1 | `Totp`: RFC 6238 maths | MLink-62 | Done | 0ca2232 (red), c038f55 (green) |
 | 2 | `MfaSecretCipher`: AES-256-GCM, key from env | MLink-62 | Done (class; key wiring in subtask 6) | b89af4e (red), a5f1952 (green) |
 | 3 | `QrCodes`: otpauth URL → PNG data URI | MLink-62 | Done | 7760e68 (red), 7535327 (green) |
-| 4 | `V11__user_mfa.sql`, `UserMfa` record, `UserMfaStore` (atomic counters) | MLink-62 | Done | f1b90db (red), next commit (green) |
-| 5 | `PendingStep<T>` shared by the two pending steps (refactor) | MLink-62 | To do | |
+| 4 | `V11__user_mfa.sql`, `UserMfa` record, `UserMfaStore` (atomic counters) | MLink-62 | Done | f1b90db (red), f82669e (green) |
+| 5 | `PendingStep<T>` shared by the two pending steps (refactor) + `Clock` bean | MLink-62 | Done | 1655a4d (red), next commit (green) |
 | 6 | Staff branch of login + test helper | MLink-62 | To do | |
 | 7 | `POST /api/auth/mfa/setup` | MLink-62 | To do | |
 | 8 | `POST /api/auth/mfa/verify` | MLink-63 | To do | |
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | To do | |
 | 10 | Checks and PR | MLink-62/63 | To do | |
 
-**Next step:** subtask 5 (`PendingStep<T>` refactor of `PasswordChangePending`, no behaviour change).
+**Next step:** post the #90 comment (Mohamed’s go), then subtask 6 (staff branch of login, `MfaPending`, key wiring, `Browser.login()` helper).
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
@@ -65,6 +65,16 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
   restarts after). Limits and times come from the caller. 15 tests (Testcontainers), including 10 wrong codes
   at once (exactly 1..5, then 5) and the same code twice at once (works once). Mutation checks: no replay guard,
   code accepted while locked, counting while locked: each turns its tests red.
+- **2026-10-25:** #91 (DevSecOps: pre-commit hooks, CI steps) merged on `master` (`5b3def7`); merged into this
+  branch (`7aad48c`, no conflict), full suite 302/302, pushed. Our files pass the trailing-whitespace and
+  final-newline hooks. The code owner has not answered the local-runner proposal on #91.
+- **2026-10-25:** subtask 5 done. `security/PendingStep<T>`: start (drops the old session and login), current
+  (ends the session once 5 min have run out), clear; the attribute is the user class name (a Spring proxy keeps
+  it). `PasswordChangePending` is now a 3-line subclass; `PasswordController` calls `current`. New `config/ClockConfig`
+  (`Clock.systemUTC()`), used by the pending steps and later by `MfaService`. **Change from the plan:** a unit test
+  `PendingStepTest` (7, fake clock) instead of none, because expiry cannot be waited for in a functional test.
+  Safety net unchanged and green: `PasswordChangeFunctionalTest` 7, `ForcePasswordResetFunctionalTest` 5,
+  `LoginFunctionalTest` 8. Mutation checks: no expiry, old session kept: each turns its test red.
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
 
