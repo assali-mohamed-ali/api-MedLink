@@ -364,9 +364,20 @@ public abstract class FunctionalTestBase {
             return createUser(email, password, emailVerified, "/patients");
         }
 
-        /** A practitioner ({@code /practitioners}) or staff member ({@code /administrative-staff}) made in the console. */
+        /**
+         * A practitioner ({@code /practitioners}) or staff member ({@code /administrative-staff}) made in the
+         * console. The realm's default group {@code /patients} is added to every new user, so the admin takes it
+         * off: a person holds one role only.
+         */
         UUID createUser(String email, String password, String group) {
-            return createUser(email, password, true, group);
+            UUID id = createUser(email, password, true, group);
+            List<?> patients = (List<?>) read("/groups?search=patients&exact=true");
+            String patientsGroup = (String) ((Map<?, ?>) patients.get(0)).get("id");
+            http.delete().uri("/admin/realms/medlink/users/{id}/groups/{group}", id, patientsGroup)
+                    .header(HttpHeaders.AUTHORIZATION, token())
+                    .retrieve()
+                    .toBodilessEntity();
+            return id;
         }
 
         private UUID createUser(String email, String password, boolean emailVerified, String group) {

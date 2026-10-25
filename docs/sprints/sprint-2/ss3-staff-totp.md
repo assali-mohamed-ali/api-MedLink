@@ -17,12 +17,12 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 4 | `V11__user_mfa.sql`, `UserMfa` record, `UserMfaStore` (atomic counters) | MLink-62 | Done | f1b90db (red), f82669e (green) |
 | 5 | `PendingStep<T>` shared by the two pending steps (refactor) + `Clock` bean | MLink-62 | Done | 1655a4d (red), d366288 (green) |
 | 6a | Key wiring: cipher bean, `APP_MFA_ENCRYPTION_KEY` (config, compose, env, Terraform, setup scripts, docs) | MLink-62 | Done | 897ef4b (red), e744ce8 (green) |
-| 6b | `MfaService`: enrol, verify, lock (no HTTP yet) | MLink-62/63 | Done | d1853b0 (red), next commit (green) |
-| 7 | HTTP, in one green commit: staff branch of login + `MfaPending` + endpoints 8 and 9 + `Browser.login()` helper | MLink-62/63 | To do (needs Mohamed's OK on the regrouping) | |
+| 6b | `MfaService`: enrol, verify, lock (no HTTP yet) | MLink-62/63 | Done | d1853b0 (red), dae733d (green) |
+| 7 | HTTP, in one green commit: staff branch of login + `MfaPending` + endpoints 8 and 9 + `Browser.login()` helper | MLink-62/63 | Done (regrouping OK'd by Mohamed) | 9398f1b (red), next commit (green) |
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | To do | |
 | 10 | Checks and PR | MLink-62/63 | To do | |
 
-**Next step:** Mohamed's OK on the regrouping of subtasks 6–8 (session log, 2026-10-25 evening), then subtask 7.
+**Next step:** subtask 9 (Postman folder 6 staff step + new folder 8; plan.md §4/§5, report.md, README/ARCHITECTURE).
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
@@ -99,6 +99,25 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
   step, which needs endpoints 8 and 9. So the HTTP part (login branch, `MfaPending`, both endpoints, helper,
   `MfaFunctionalTest`) is one subtask 7: red commit(s) first, then one green commit, every commit before it green.
   Open point for 7: a secret that no longer decrypts (key changed) gives a 500 today; to decide (re-enrol?).
+- **2026-10-25 (night):** Mohamed OK'd the regrouping and keeping the 500 for an undecryptable secret (a key change
+  is an operations mistake; re-enrolment would come with an admin reset, later). Subtask 7 done:
+  - `LoginResult.MfaRequired`, returned for `PRACTITIONER`/`ADMINISTRATIVE_STAFF` just before `Success`;
+    `security/MfaPending extends PendingStep<Login>`; `LoginResponse.mfaRequired(setupRequired)`;
+    `LoginSessions.open` removes both pending attributes.
+  - `controller/MfaController`: `/setup` (`MfaMapper` builds the QR code) and `/verify`. The pending step is
+    checked **before** the code format, so a caller without one gets 401 whatever it sends (like endpoint 10);
+    that is why the 6-digit check is `MfaVerifyRequest.isSixDigits()` in the controller, not `@Valid`. On 423
+    the pending step is cleared and the Keycloak session ended. `SecurityConfig` permits both routes.
+  - Tests: `MfaFunctionalTest` 19 (every contract line of endpoints 5-staff, 8 and 9). `FunctionalTestBase`:
+    a shifted clock (`CLOCK`, the API's `Clock` bean in functional tests) so each staff login uses a fresh
+    30 s code and a test can let the 15-min lock and the 5-min step run out; `Browser.login()` does the code
+    step; console users in a group. Matrix: 2 lines (L for every caller), 57 cells; Matrix and Ownership log in
+    through `login()`.
+  - Mutations: lock not ending the login, no 6-digit check, a full session keeping the pending step: each
+    turns its tests red.
+  - **Finding (not our ticket):** the realm's `defaultGroups: ["/patients"]` adds every console-made user to
+    `/patients`, so a practitioner made in the console also gets `PATIENT` (CLAUDE.md: one role only). The test
+    console removes it, as an admin must today. To report to the team (realm file owner).
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
 

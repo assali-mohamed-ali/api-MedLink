@@ -16,24 +16,28 @@ import org.springframework.stereotype.Service;
  * Endpoint 5 (plan.md §3 "Login"), the decisions: Keycloak checks the password, then our rules
  * decide whether a session may open. Opening it is {@code security/LoginSessions}' job.
  *
- * <p>Sub-sprint 3 adds the staff code step for practitioners and staff after the email check;
- * sub-sprint 4 the forced password change.
+ * <p>A practitioner or staff member then needs a code from their authenticator app (sub-sprint 3,
+ * MLink-62/63): the password alone opens no session. Sub-sprint 4 added the forced password change.
  */
 @Service
 public class LoginService {
 
     private static final Logger log = LoggerFactory.getLogger(LoginService.class);
     private static final String UPDATE_PASSWORD = "UPDATE_PASSWORD";
+    /** The roles whose login needs the staff code. */
+    private static final List<String> CODE_ROLES = List.of(Roles.PRACTITIONER, Roles.ADMINISTRATIVE_STAFF);
 
     private final KeycloakLoginClient keycloak;
     private final KeycloakAdminService admin;
     private final UserProvisioningService provisioning;
+    private final MfaService mfa;
 
     public LoginService(KeycloakLoginClient keycloak, KeycloakAdminService admin,
-                        UserProvisioningService provisioning) {
+                        UserProvisioningService provisioning, MfaService mfa) {
         this.keycloak = keycloak;
         this.admin = admin;
         this.provisioning = provisioning;
+        this.mfa = mfa;
     }
 
     /**
@@ -71,8 +75,12 @@ public class LoginService {
                     UUID.fromString(token.getSubject()),
                     token.getClaimAsString("email"),
                     token.getClaimAsString("preferred_username"));
-            return new LoginResult.Success(new Login(user, token.getClaimAsString("given_name"),
-                    token.getClaimAsString("family_name"), ourRoles(token), tokens));
+            Login login = new Login(user, token.getClaimAsString("given_name"),
+                    token.getClaimAsString("family_name"), ourRoles(token), tokens);
+            if (login.roles().stream().anyMatch(CODE_ROLES::contains)) {
+                return new LoginResult.MfaRequired(login, !mfa.isEnrolled(user.getId()));
+            }
+            return new LoginResult.Success(login);
         } catch (RuntimeException refused) {
             // Keycloak accepted the password and opened a session: no session of ours, so none of theirs
             keycloak.endSession(tokens.refreshToken());

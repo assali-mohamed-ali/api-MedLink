@@ -66,6 +66,7 @@ public class LoginSessions {
             request.getSession(true);
         }
         request.getSession().removeAttribute(PasswordChangePending.ATTRIBUTE);
+        request.getSession().removeAttribute(MfaPending.ATTRIBUTE);
         request.getSession().setAttribute(OPENED_AT, Instant.now());
         KeycloakTokens tokens = login.tokens();
         List<GrantedAuthority> authorities = login.roles().stream()

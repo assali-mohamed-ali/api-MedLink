@@ -4,6 +4,7 @@ import com.example.apimedlink.dto.LoginRequest;
 import com.example.apimedlink.dto.LoginResponse;
 import com.example.apimedlink.mapper.LoginMapper;
 import com.example.apimedlink.security.LoginSessions;
+import com.example.apimedlink.security.MfaPending;
 import com.example.apimedlink.security.PasswordChangePending;
 import com.example.apimedlink.service.LoginResult;
 import com.example.apimedlink.service.LoginService;
@@ -25,12 +26,15 @@ public class LoginController {
 
     private final LoginService logins;
     private final LoginSessions sessions;
-    private final PasswordChangePending pending;
+    private final PasswordChangePending passwordChange;
+    private final MfaPending mfaPending;
 
-    public LoginController(LoginService logins, LoginSessions sessions, PasswordChangePending pending) {
+    public LoginController(LoginService logins, LoginSessions sessions, PasswordChangePending passwordChange,
+                           MfaPending mfaPending) {
         this.logins = logins;
         this.sessions = sessions;
-        this.pending = pending;
+        this.passwordChange = passwordChange;
+        this.mfaPending = mfaPending;
     }
 
     @PostMapping("/login")
@@ -41,8 +45,12 @@ public class LoginController {
             sessions.open(success.login(), request, response);
             return LoginMapper.toResponse(success.login());
         }
+        if (result instanceof LoginResult.MfaRequired code) {
+            mfaPending.start(code.login(), request);
+            return LoginResponse.mfaRequired(code.setupRequired());
+        }
         LoginResult.PasswordChange change = (LoginResult.PasswordChange) result;
-        pending.start(change.userId(), request);
+        passwordChange.start(change.userId(), request);
         return LoginResponse.forcedPasswordChange();
     }
 }
