@@ -443,6 +443,19 @@ different hash case (PowerShell `Get-FileHash` upper case, `sha256sum` lower cas
 with both scripts the stamps never match, so every switch of script wipes the dev volumes (the realm is
 saved first). One user runs one script, so it only bites when both are used on one machine.
 
+## MLink-115 — audit-log query API
+
+**Built:** staff-only `GET /api/admin/audit-entries`, with inclusive ISO-8601 `from`/`to` timestamps,
+`userId` and `action` filters. Results are sorted newest first (timestamp, then id) and returned as
+`items` plus `page`, `size`, `totalElements` and `totalPages`; page size defaults to 50 and is capped at
+100. Invalid date ranges, page values, page sizes and action names return `400 VALIDATION_FAILED`.
+The query service only reads from the append-only audit repository.
+
+**Proof:** `AuditQueryFunctionalTest` checks all filters together, inclusive date bounds, stable ordering,
+pagination, invalid parameters and actions; `AccessMatrixFunctionalTest` verifies anonymous `401`,
+patient/practitioner `403`, and staff access. `.\mvnw -B "-Dtest=AuditQueryFunctionalTest,AuditFunctionalTest,AccessMatrixFunctionalTest" test`:
+**62 tests, 0 failures**.
+
 ## MLink-59 — audit trail, every refusal recorded (2026-10-17, epic/MLink-6)
 
 **Built:** migration **V7** `audit_entries` (id, timestamp, user_id, action, resource_type, resource_id,
