@@ -19,11 +19,15 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 6a | Key wiring: cipher bean, `APP_MFA_ENCRYPTION_KEY` (config, compose, env, Terraform, setup scripts, docs) | MLink-62 | Done | 897ef4b (red), e744ce8 (green) |
 | 6b | `MfaService`: enrol, verify, lock (no HTTP yet) | MLink-62/63 | Done | d1853b0 (red), dae733d (green) |
 | 7 | HTTP, in one green commit: staff branch of login + `MfaPending` + endpoints 8 and 9 + `Browser.login()` helper | MLink-62/63 | Done (regrouping OK'd by Mohamed) | 9398f1b (red), abe58dc (green); idle-time fix e914835 (red), 0c100e6 (green) |
-| 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | Done | a720111 (Postman); log of an unreadable secret cd4ecb7 (red), 0370c1c (green); docs next commit |
-| 10 | Checks and PR | MLink-62/63 | To do | |
+| 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | Done | a720111 (Postman); log of an unreadable secret cd4ecb7 (red), 0370c1c (green); docs 97351d5 |
+| 10 | Checks and PR | MLink-62/63 | **In progress**: manual check done; gitleaks, local CI checks, PR left | |
 
-**Next step:** subtask 10: gitleaks on the branch, the other CI checks locally, Mohamed's manual login with an
-authenticator app on the dev stack, then the PR to `master`.
+**Next step (new session):** subtask 10. (1) `git fetch` and check `master` moved (merge it in if so, re-run
+both test orders); (2) gitleaks on the whole branch (`zricethezav/gitleaks:v8.28.0`, config
+`security/.gitleaks.toml`); (3) the other CI checks locally (Terraform fmt/validate in Docker, `check-prod-config.sh`,
+actionlint if a workflow changed: none did); (4) open the PR to `master` with the template: AI box checked, the
+"relu" box left for Mohamed, real outputs in "Preuves", the deploy note (`APP_MFA_ENCRYPTION_KEY` in staging/prod
+`DEPLOY_ENV_FILE` before merge); (5) give Mohamed the YouTrack moves and the comments below.
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
@@ -138,6 +142,21 @@ authenticator app on the dev stack, then the PR to `master`.
     (V11 columns, the required key); report.md (Status, dated note, MLink-62/63 section); README (test users,
     staff code, endpoint rows); ARCHITECTURE (login section, ISO rows); threat model (S2 ✅, priority list).
   - Full suite **349/349** in both class orders.
+- **2026-10-25 (night):** **manual check passed.** Mohamed logged in as `practitioner.dev` through Swagger, scanned
+  the QR code with Google Authenticator and entered the code: 200 and a session. The first codes were refused
+  (`INVALID_CODE`) because **the phone's clock was off**; the server's was right (checked against an HTTP `Date`
+  header). Found by computing, from the stored secret and the dev key, the codes the server accepted at that minute
+  and comparing (codes printed, never the secret). Added to README troubleshooting (`INVALID_CODE`, `MFA_LOCKED`).
+  `practitioner.dev` is now enrolled on Mohamed's phone in the dev database.
+- **Open items carried to the new session:**
+  - Comments to post after merge (Claude writes, Mohamed posts on YouTrack): MLink-64 (Ahlem: contract + error
+    codes, the QR is a data URI, codes are 6 digits, `MFA_LOCKED` lasts 15 min), MLink-65 (Youssef: the staff
+    code check in the setup scripts now possible; `practitioner.dev` needs a code, the scripts cannot compute it
+    without a secret: suggest a disposable console user like Postman does), #87 and #90 ("it is on `master`").
+  - The realm's `defaultGroups: ["/patients"]` finding: draft a comment once Mohamed says where (realm owner).
+  - Follow-up after #90 merges: MFA audit entries and `LOGIN` SUCCESS after the code for staff.
+  - #92 (report v2) and #91 (local runner): waiting for the code owner. The untracked
+    `docs/sprints/sprint-2/MedLink-sprint2-report.pdf` must not be committed (Mohamed moves it).
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
 

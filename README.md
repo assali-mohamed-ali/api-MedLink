@@ -322,6 +322,8 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 | `... must be set` from compose | `.env` is missing or incomplete: run the setup script, or copy `.env.example` |
 | roles look wrong, or `staff.dev` cannot log in | your Keycloak holds an old realm: re-run the setup script, or `-Reset` |
 | 401 with the right password | 5 wrong passwords lock the account for 15 minutes, answered like a wrong password: wait, or unlock it in the console |
+| `INVALID_CODE` with the code from the authenticator app | the phone's clock is off (a code lives 30 s, one step of tolerance): set the phone to automatic date and time. Also check you scanned the QR code of the last setup (a new setup replaces the secret) |
+| `MFA_LOCKED` | 5 wrong codes lock the code step for 15 minutes, even after a new login: wait |
 | a file shows fully modified after pull | line endings, normalized by `.gitattributes`; a `chore: normalize` commit is fine |
 | `permission denied: ./scripts/setup-dev.sh` | `chmod +x scripts/setup-dev.sh` |
 | a Spring Boot test class "is missing" | Spring Boot 4 moved them (`AutoConfigureMockMvc` → `org.springframework.boot.webmvc.test.autoconfigure`); don't downgrade |
