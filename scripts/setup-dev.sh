@@ -133,6 +133,8 @@ stop_containers() {
 read_env() { sed -n "s/^$1=//p" "$REPO/.env" | head -n 1 | tr -d '\r'; }
 
 new_secret() { LC_ALL=C od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
+# The staff code key (APP_MFA_ENCRYPTION_KEY): exactly 32 random bytes, in base64
+new_key() { LC_ALL=C head -c 32 /dev/urandom | base64 | tr -d '\n'; }
 
 file_hash() {
     if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | cut -d' ' -f1; else shasum -a 256 "$1" | cut -d' ' -f1; fi
@@ -276,12 +278,13 @@ if [ -f .env ]; then
 else
     tr -d '\r' < .env.example | awk \
         -v pg="$(new_secret)" -v kcdb="$(new_secret)" -v kcadmin="$(new_secret)" \
-        -v bff="$(new_secret)" -v kcapi="$(new_secret)" -v users="$DEV_USERS_PASSWORD" '
+        -v bff="$(new_secret)" -v kcapi="$(new_secret)" -v mfa="$(new_key)" -v users="$DEV_USERS_PASSWORD" '
         /^POSTGRES_PASSWORD=/       { print "POSTGRES_PASSWORD=" pg; next }
         /^KEYCLOAK_DB_PASSWORD=/    { print "KEYCLOAK_DB_PASSWORD=" kcdb; next }
         /^KEYCLOAK_ADMIN_PASSWORD=/ { print "KEYCLOAK_ADMIN_PASSWORD=" kcadmin; next }
         /^KC_BFF_CLIENT_SECRET=/    { print "KC_BFF_CLIENT_SECRET=" bff; next }
         /^KC_ADMIN_CLIENT_SECRET=/  { print "KC_ADMIN_CLIENT_SECRET=" kcapi; next }
+        /^APP_MFA_ENCRYPTION_KEY=/  { print "APP_MFA_ENCRYPTION_KEY=" mfa; next }
         /^KC_DEV_USERS_PASSWORD=/   { print "KC_DEV_USERS_PASSWORD=" users; next }
         { print }' > .env
     chmod 600 .env
@@ -292,6 +295,7 @@ ADDED=''
 for key in $(tr -d '\r' < .env.example | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do
     grep -q "^$key=" .env && continue
     case "$key" in
+        APP_MFA_ENCRYPTION_KEY) value="$(new_key)" ;;
         *SECRET* | *PASSWORD*) value="$(new_secret)" ;;
         *) value="$(tr -d '\r' < .env.example | sed -n "s/^$key=//p" | head -n 1)" ;;
     esac
@@ -300,7 +304,7 @@ for key in $(tr -d '\r' < .env.example | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.
 done
 [ -n "$ADDED" ] && ok "added to .env:$ADDED"
 if [ "$FULL_STACK" -eq 1 ]; then
-    for key in KC_BFF_CLIENT_SECRET KC_ADMIN_CLIENT_SECRET KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD; do
+    for key in KC_BFF_CLIENT_SECRET KC_ADMIN_CLIENT_SECRET APP_MFA_ENCRYPTION_KEY KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD; do
         value="$(read_env "$key")"
         case "$value" in
             '' | change-me*) abort "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." ;;

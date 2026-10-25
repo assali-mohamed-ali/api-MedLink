@@ -48,7 +48,7 @@ flowchart LR
 | Personal and health data (PII/PHI) | app database (`users`, `patients`, later appointments and records) | confidentiality, GDPR, health-data rules |
 | Audit trail | `audit_entries` (append-only) | proof of who was refused what (MLink-17) |
 | Email tokens | `email_tokens` (SHA-256 hash only, 24 h, single use) | verify someone else's email |
-| Secrets | environment variables, GitHub Environments: `KC_BFF_CLIENT_SECRET`, `KC_ADMIN_CLIENT_SECRET`, DB and Keycloak admin passwords | full access to identity or data |
+| Secrets | environment variables, GitHub Environments: `KC_BFF_CLIENT_SECRET`, `KC_ADMIN_CLIENT_SECRET`, `APP_MFA_ENCRYPTION_KEY` (staff code secrets), DB and Keycloak admin passwords | full access to identity or data |
 
 ## 3. Assumptions
 

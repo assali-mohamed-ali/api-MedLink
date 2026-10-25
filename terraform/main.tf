@@ -51,6 +51,7 @@ resource "docker_container" "app" {
     "KEYCLOAK_CLIENT_SECRET=${var.keycloak_client_secret}",
     "KEYCLOAK_ADMIN_CLIENT_ID=${var.keycloak_admin_client_id}",
     "KEYCLOAK_ADMIN_CLIENT_SECRET=${var.keycloak_admin_client_secret}",
+    "APP_MFA_ENCRYPTION_KEY=${var.mfa_encryption_key}",
     "MAIL_HOST=${var.mail_host}",
     "MAIL_PORT=${var.mail_port}",
     "MAIL_USERNAME=${var.mail_username}",

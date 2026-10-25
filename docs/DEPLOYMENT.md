@@ -56,6 +56,11 @@ Do not set `APP_IMAGE`: the workflow appends the immutable image reference for t
 must match the compose service names (`postgres`, `keycloak`, `keycloak-db`, `mailpit`) and the
 Keycloak realm placeholders. Keep the SMTP and Keycloak secrets only in this secret, never in git.
 
+`APP_MFA_ENCRYPTION_KEY` seals the practitioners' and staff members' code secrets (MLink-62). Generate it once
+per environment with `openssl rand -base64 32` (32 bytes, base64) and keep it with the other secrets: the API
+does not start without a valid key. Never share it between staging and prod, and do not change it casually: a
+new key makes every enrolled code unreadable, so each practitioner and staff member would enrol again.
+
 ## What the workflow does
 
 On a push to `staging` (or a manual dispatch to `staging`):

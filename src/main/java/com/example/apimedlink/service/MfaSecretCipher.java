@@ -10,6 +10,8 @@ import javax.crypto.Cipher;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.GCMParameterSpec;
 import javax.crypto.spec.SecretKeySpec;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.stereotype.Component;
 
 /**
  * MLink-62: the staff code secret at rest, AES-256-GCM. Stored as base64(IV ‖ ciphertext ‖ tag), a new
@@ -17,6 +19,7 @@ import javax.crypto.spec.SecretKeySpec;
  * decrypt. The key ({@code app.mfa.encryption-key}, 32 bytes in base64) comes from the environment and is
  * checked when the application starts; it is never logged or echoed.
  */
+@Component
 public final class MfaSecretCipher {
 
     private static final String TRANSFORMATION = "AES/GCM/NoPadding";
@@ -28,7 +31,7 @@ public final class MfaSecretCipher {
     private final SecretKey key;
 
     /** @throws IllegalArgumentException when the key is missing, not base64 or not 32 bytes */
-    public MfaSecretCipher(String base64Key) {
+    public MfaSecretCipher(@Value("${app.mfa.encryption-key:}") String base64Key) {
         if (base64Key == null || base64Key.isBlank()) {
             throw new IllegalArgumentException("app.mfa.encryption-key is missing (APP_MFA_ENCRYPTION_KEY)");
         }
