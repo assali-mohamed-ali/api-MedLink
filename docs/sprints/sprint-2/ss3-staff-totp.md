@@ -13,8 +13,8 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 0 | Handoff file, branch, coordination comments | — | Done; comments postponed to subtasks 4 and 6 (Mohamed, 2026-10-25) | 5c13854 |
 | 1 | `Totp`: RFC 6238 maths | MLink-62 | Done | 0ca2232 (red), c038f55 (green) |
 | 2 | `MfaSecretCipher`: AES-256-GCM, key from env | MLink-62 | Done (class; key wiring in subtask 6) | b89af4e (red), a5f1952 (green) |
-| 3 | `QrCodes`: otpauth URL → PNG data URI | MLink-62 | Done | 7760e68 (red), next commit (green) |
-| 4 | `V11__user_mfa.sql`, entity, repository (atomic failure counter) | MLink-62 | To do | |
+| 3 | `QrCodes`: otpauth URL → PNG data URI | MLink-62 | Done | 7760e68 (red), 7535327 (green) |
+| 4 | `V11__user_mfa.sql`, `UserMfa` record, `UserMfaStore` (atomic counters) | MLink-62 | Done | f1b90db (red), next commit (green) |
 | 5 | `PendingStep<T>` shared by the two pending steps (refactor) | MLink-62 | To do | |
 | 6 | Staff branch of login + test helper | MLink-62 | To do | |
 | 7 | `POST /api/auth/mfa/setup` | MLink-62 | To do | |
@@ -22,7 +22,7 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | To do | |
 | 10 | Checks and PR | MLink-62/63 | To do | |
 
-**Next step:** before subtask 4, check the open PRs again for Flyway numbers and post the #87 comment (on Mohamed’s go); then subtask 4 (`V11__user_mfa.sql`).
+**Next step:** subtask 5 (`PendingStep<T>` refactor of `PasswordChangePending`, no behaviour change).
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
@@ -55,6 +55,16 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
   text → only `scanningTheQrCodeGivesBackTheUrl` fails. No open PR touched `pom.xml`. New open PR **#93**
   (Chourouk, MLink-115 audit log API) also edits `AccessMatrixFunctionalTest` and `report.md`: expect small
   merge conflicts there in subtasks 7–9.
+- **2026-10-25:** #92 review fixed (a6f9f04: figures dated to `d7b0585`, PDF no longer committed); branch
+  `feat/ss3-staff-totp` pushed as a backup (no PR); V11 and folder 8 re-checked and announced on #87
+  (https://github.com/assali-mohamed-ali/api-MedLink/pull/87#issuecomment-6397863639).
+- **2026-10-25:** subtask 4 done. **Change from the plan:** a `JdbcClient` store (`repository/UserMfaStore`) and a
+  `model/UserMfa` record instead of a JPA entity + repository, like `SessionRevocationStore` and `RateLimitStore`:
+  every rule is one SQL statement (`saveSecret` never replaces an enabled secret; `markUsed` refuses a used or
+  older step and any code while locked; `registerFailure` counts, locks at the max, freezes while locked and
+  restarts after). Limits and times come from the caller. 15 tests (Testcontainers), including 10 wrong codes
+  at once (exactly 1..5, then 5) and the same code twice at once (works once). Mutation checks: no replay guard,
+  code accepted while locked, counting while locked: each turns its tests red.
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
 
