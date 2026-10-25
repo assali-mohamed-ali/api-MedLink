@@ -12,8 +12,8 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 |---|---|---|---|---|
 | 0 | Handoff file, branch, coordination comments | — | Done; comments postponed to subtasks 4 and 6 (Mohamed, 2026-10-25) | 5c13854 |
 | 1 | `Totp`: RFC 6238 maths | MLink-62 | Done | 0ca2232 (red), c038f55 (green) |
-| 2 | `MfaSecretCipher`: AES-256-GCM, key from env | MLink-62 | Done (class; key wiring in subtask 6) | b89af4e (red), next commit (green) |
-| 3 | `QrCodes`: otpauth URL → PNG data URI | MLink-62 | To do | |
+| 2 | `MfaSecretCipher`: AES-256-GCM, key from env | MLink-62 | Done (class; key wiring in subtask 6) | b89af4e (red), a5f1952 (green) |
+| 3 | `QrCodes`: otpauth URL → PNG data URI | MLink-62 | Done | 7760e68 (red), next commit (green) |
 | 4 | `V11__user_mfa.sql`, entity, repository (atomic failure counter) | MLink-62 | To do | |
 | 5 | `PendingStep<T>` shared by the two pending steps (refactor) | MLink-62 | To do | |
 | 6 | Staff branch of login + test helper | MLink-62 | To do | |
@@ -22,7 +22,7 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | To do | |
 | 10 | Checks and PR | MLink-62/63 | To do | |
 
-**Next step:** subtask 3 (`QrCodes`, adds ZXing `core` to `pom.xml`).
+**Next step:** before subtask 4, check the open PRs again for Flyway numbers and post the #87 comment (on Mohamed’s go); then subtask 4 (`V11__user_mfa.sql`).
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
@@ -50,6 +50,11 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
   data, key checked in the constructor and never echoed): 14 unit tests. A plain class for now, not a bean: the
   application does not need the key until subtask 6. Mutation checks: no associated data → only
   `aSecretCopiedToAnotherUserDoesNotDecrypt` fails; fixed IV → only `eachEncryptionUsesANewIv` fails.
+- **2026-10-25:** subtask 3 done. `QrCodes`: ZXing `core` 3.5.3 (no transitive dependency) draws a 240 px QR
+  code, error correction M, the JDK writes the PNG; 3 tests read it back with ZXing. Mutation: encoding another
+  text → only `scanningTheQrCodeGivesBackTheUrl` fails. No open PR touched `pom.xml`. New open PR **#93**
+  (Chourouk, MLink-115 audit log API) also edits `AccessMatrixFunctionalTest` and `report.md`: expect small
+  merge conflicts there in subtasks 7–9.
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
 
