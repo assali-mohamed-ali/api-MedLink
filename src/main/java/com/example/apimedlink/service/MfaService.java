@@ -71,7 +71,7 @@ public class MfaService {
         if (mfa.isEmpty()) {
             throw invalidCode();
         }
-        OptionalLong step = Totp.matchingStep(cipher.decrypt(userId, mfa.get().secretEnc()), code, now);
+        OptionalLong step = Totp.matchingStep(secretOf(userId, mfa.get()), code, now);
         // The store decides atomically: markUsed refuses a used step and any code while locked, and
         // registerFailure counts nothing more during a lock but returns it
         if (step.isPresent() && store.markUsed(userId, step.getAsLong(), now)) {
@@ -85,6 +85,17 @@ public class MfaService {
         }
         log.info("Staff code refused for user {}: wrong or already used", userId);
         throw invalidCode();
+    }
+
+    /** A secret that no longer decrypts means the key changed: a 500 for the caller, the reason in the log. */
+    private byte[] secretOf(UUID userId, UserMfa mfa) {
+        try {
+            return cipher.decrypt(userId, mfa.secretEnc());
+        } catch (IllegalStateException unreadable) {
+            log.error("Staff code secret of user {} cannot be decrypted: was APP_MFA_ENCRYPTION_KEY changed? "
+                    + "The user must enrol again", userId);
+            throw unreadable;
+        }
     }
 
     private static boolean lockedAt(Instant lockedUntil, Instant now) {
