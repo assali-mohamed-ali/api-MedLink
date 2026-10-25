@@ -18,7 +18,7 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 5 | `PendingStep<T>` shared by the two pending steps (refactor) + `Clock` bean | MLink-62 | Done | 1655a4d (red), d366288 (green) |
 | 6a | Key wiring: cipher bean, `APP_MFA_ENCRYPTION_KEY` (config, compose, env, Terraform, setup scripts, docs) | MLink-62 | Done | 897ef4b (red), e744ce8 (green) |
 | 6b | `MfaService`: enrol, verify, lock (no HTTP yet) | MLink-62/63 | Done | d1853b0 (red), dae733d (green) |
-| 7 | HTTP, in one green commit: staff branch of login + `MfaPending` + endpoints 8 and 9 + `Browser.login()` helper | MLink-62/63 | Done (regrouping OK'd by Mohamed) | 9398f1b (red), next commit (green) |
+| 7 | HTTP, in one green commit: staff branch of login + `MfaPending` + endpoints 8 and 9 + `Browser.login()` helper | MLink-62/63 | Done (regrouping OK'd by Mohamed) | 9398f1b (red), abe58dc (green); idle-time fix e914835 (red), 0c100e6 (green) |
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | To do | |
 | 10 | Checks and PR | MLink-62/63 | To do | |
 
@@ -118,6 +118,10 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
   - **Finding (not our ticket):** the realm's `defaultGroups: ["/patients"]` adds every console-made user to
     `/patients`, so a practitioner made in the console also gets `PATIENT` (CLAUDE.md: one role only). The test
     console removes it, as an admin must today. To report to the team (realm file owner).
+  - **Bug found and fixed after the green commit:** the code step shortens its session's idle time to 5 minutes
+    (`PendingStep`), and the full session opened in it after the code kept 5 instead of 15 (MLink-86). Red test
+    `theSessionOpenedByTheCodeLastsFifteenIdleMinutesNotFive` (300 instead of 900), then `LoginSessions.open`
+    sets `server.servlet.session.timeout` again. Full suite 348/348 in both class orders. Pushed.
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
 
