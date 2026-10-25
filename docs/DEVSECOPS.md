@@ -5,7 +5,7 @@
 1. Pull requests run CI, CodeQL, secret scanning, dependency analysis, container/configuration scanning and the existing ZAP baseline workflow.
 2. Release builds run Maven verification, build the runtime image once, scan that exact local image, generate a CycloneDX SBOM, and only then publish it to GHCR.
 3. The workflow records the registry digest and creates a GitHub build-provenance attestation for that digest.
-4. Staging/production deployment consumes the immutable image digest through the existing Docker Compose-over-SSH action. Kubernetes and Argo CD are intentionally not used.
+4. Staging/production deployment consumes the immutable image digest through the existing Docker Compose-over-SSH action. Kubernetes and Argo CD are intentionally not used(this will be planned in sprint 3).
 
 ## Required repository/environment configuration
 
