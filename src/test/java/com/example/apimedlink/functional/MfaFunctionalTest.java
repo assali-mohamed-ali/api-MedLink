@@ -8,10 +8,14 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import org.apache.catalina.Context;
+import org.apache.catalina.Session;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.tomcat.TomcatWebServer;
+import org.springframework.boot.web.server.context.WebServerApplicationContext;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
@@ -28,6 +32,9 @@ class MfaFunctionalTest extends FunctionalTestBase {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @Autowired
+    WebServerApplicationContext server;
 
     private String newPractitioner() {
         String email = uniqueEmail("practitioner");
@@ -148,6 +155,24 @@ class MfaFunctionalTest extends FunctionalTestBase {
     }
 
     // ---- endpoint 9, verify ----------------------------------------------------------------------
+
+    @Test
+    void theSessionOpenedByTheCodeLastsFifteenIdleMinutesNotFive() throws Exception {
+        String email = enrolledPractitioner();
+        Browser browser = atCodeStep(email);
+        assertThat(tomcatSession(browser).getMaxInactiveInterval()).as("the code step: 5 minutes").isEqualTo(300);
+
+        assertThat(browser.mfaVerify(CLOCK.nextCode(secretOf(email))).statusCode()).isEqualTo(200);
+
+        // Same rule as a patient's session (SessionExpiryFunctionalTest, MLink-86)
+        assertThat(tomcatSession(browser).getMaxInactiveInterval()).as("15 minutes, in seconds").isEqualTo(900);
+    }
+
+    /** The session Tomcat really keeps for this browser. */
+    private Session tomcatSession(Browser browser) throws Exception {
+        Context app = (Context) ((TomcatWebServer) server.getWebServer()).getTomcat().getHost().findChildren()[0];
+        return app.getManager().findSession(browser.cookies.value("JSESSIONID"));
+    }
 
     @Test
     void theRightCodeOpensTheSessionWithTheRole() throws Exception {
