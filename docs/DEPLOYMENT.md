@@ -29,7 +29,7 @@ below in each environment, so the same workflow reads different hosts and secret
 | `DEPLOY_HOST` | variable | SSH host or IP of the target |
 | `DEPLOY_USER` | variable | SSH user allowed to run Docker Compose |
 | `DEPLOY_PATH` | variable | Absolute directory for `docker-compose.yml`, `.env`, `keycloak/`, `monitoring/` |
-| `DEPLOY_HEALTH_URL` | variable | Full `/actuator/health` URL reachable **from the GitHub runner** |
+| `DEPLOY_HEALTH_URL` | variable | Full `/readyz` URL on the API's public port, reachable **from the GitHub runner** (e.g. `https://<api-host>/readyz`); `/actuator/health` is on the private management port in staging and prod |
 | `DEPLOY_SSH_KEY` | secret | Private ed25519 key of the deploy user |
 | `DEPLOY_KNOWN_HOSTS` | secret | Pinned host key line(s), preferably hashed |
 | `DEPLOY_ENV_FILE` | secret | Full content of `.env.staging` / `.env.prod` (see below) |
@@ -102,7 +102,7 @@ cd "$DEPLOY_PATH"
 sed -i 's|^APP_IMAGE=.*|APP_IMAGE=ghcr.io/<owner>/<repo>@sha256:<previous-digest>|' .env
 docker compose --env-file .env -f docker-compose.yml pull app
 docker compose --env-file .env -f docker-compose.yml up -d --no-build app
-curl -fsS https://<api-host>/actuator/health
+curl -fsS https://<api-host>/readyz
 ```
 
 Do not edit the workflow retry to fake a digest. A re-run builds the same commit again; the digest is
@@ -141,3 +141,7 @@ docker compose --env-file .env -f docker-compose.yml ps
 - Secrets live in GitHub Environments, not in the repository or the compose file.
 - The production environment requires reviewers; the branch/tag guard is a second, independent gate.
 - The GHCR package can stay private; the target logs in per deployment.
+- Staging and prod serve Actuator (metrics, `/actuator/health`) only on the management port **9000**. Never publish it
+  (no `9000:` under `ports:`, no proxy route, no firewall opening): Prometheus reaches it as `app:9000` on the
+  Docker network. The public port keeps only `/livez` and `/readyz`, which answer `{"status":"UP"}` and nothing else
+  (GitHub #49). `ManagementPortConfigTest` fails the build if a compose file publishes the port.

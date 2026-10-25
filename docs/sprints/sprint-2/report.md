@@ -13,6 +13,11 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress** (MLink-87 in review) | [#88](https://github.com/assali-mohamed-ali/api-MedLink/pull/88) | 2026-10-22 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-25:** MLink-122 (GitHub #49): in staging and prod, Actuator (metrics, `/actuator/health`) moves to the
+private management port 9000; the public port keeps `/livez` and `/readyz`. **Every health check now calls `/readyz`**
+(Dockerfile, Terraform, the deploy action's `DEPLOY_HEALTH_URL`): the code owner sets the GitHub variable
+`DEPLOY_HEALTH_URL` to `https://<api-host>/readyz` before the next deployment. Dev unchanged. No migration, no endpoint.
+
 **2026-10-20:** MLink-119 (GitHub #66, part 1) in review (#78): README rewritten to match `master` (password-grant
 login, auth flow diagram, endpoints, security rules, team workflow, CI). No code change. Part 2:
 `docs/ARCHITECTURE.md` and `security/threat-model.md`.
@@ -41,6 +46,35 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-122 — metrics not public in production, GitHub #49 (2026-10-25, fix/49-management-port)
+
+Design agreed with the code owner on #49 (a separate management port, not authentication).
+
+**Built:**
+- `application-staging.yml`, `application-prod.yml`: `management.server.port: 9000`. All of Actuator lives there; the
+  public port no longer serves `/actuator/**`. Port 9000 is never published: Prometheus scrapes `app:9000` and
+  `app-staging:9000` over the Docker network (`monitoring/prometheus/prometheus.yml`).
+- `application.properties` (every profile): `/livez` and `/readyz` on the main port
+  (`management.endpoint.health.probes.*`); they answer `{"status":"UP"}` and nothing else.
+- `SecurityConfig` (shared file): `GET /livez` and `/readyz` public. The `/actuator/prometheus` rule stays: Spring
+  Security also guards the management port, so Prometheus (no login) needs it there; what keeps the metrics private
+  in staging and prod is the unpublished port. Mutation check: without the rule, Prometheus gets 401 on port 9000.
+- Health checks → `/readyz`: `docker/Dockerfile` `HEALTHCHECK`, `terraform/main.tf` healthcheck and its README,
+  the deploy-compose action and `docs/DEPLOYMENT.md` (with a "never publish 9000" security note), as the code owner
+  asked on #49. Dev (setup scripts, DAST with the dev profile) keeps Actuator on 8080.
+
+**Proof:** `ManagementPortIntegrationTest` (real API, real profile files): staging and prod, `/actuator/prometheus`
+and `/actuator/health` on the main port refused to anonymous callers, metrics served on the management port,
+`/livez` and `/readyz` UP on the main port with no detail; dev keeps metrics and health on the main port and gains
+`/readyz`. The management port is random there, so `ManagementPortConfigTest` reads the files: staging and prod set
+9000, every Prometheus target uses it, no compose file publishes it. Committed red first (9 failures), then green.
+`scripts/ci/check-prod-config.sh` passes.
+
+**For whoever deploys:** set the GitHub Environment variable `DEPLOY_HEALTH_URL` to the API's `/readyz` URL in
+`staging` and `production`. A proxy must not route port 9000.
+
+**Limits:** Swagger and `/v3/api-docs` are not Actuator and stay public in production: GitHub #65.
 
 ## MLink-87 - password history (2026-10-22, feat/ss4-password-history)
 
