@@ -5,6 +5,7 @@ import com.example.apimedlink.service.Login;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.servlet.http.HttpSession;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
@@ -50,13 +51,16 @@ public class LoginSessions {
     private final SecurityContextRepository contexts = new HttpSessionSecurityContextRepository();
     private final SecurityContextHolderStrategy holder = SecurityContextHolder.getContextHolderStrategy();
     private final String sessionCookieName;
+    private final Duration idleTimeout;
 
     public LoginSessions(ClientRegistrationRepository registrations,
                          OAuth2AuthorizedClientRepository authorizedClients,
-                         @Value("${server.servlet.session.cookie.name:JSESSIONID}") String sessionCookieName) {
+                         @Value("${server.servlet.session.cookie.name:JSESSIONID}") String sessionCookieName,
+                         @Value("${server.servlet.session.timeout:30m}") Duration idleTimeout) {
         this.registrations = registrations;
         this.authorizedClients = authorizedClients;
         this.sessionCookieName = sessionCookieName;
+        this.idleTimeout = idleTimeout;
     }
 
     public void open(Login login, HttpServletRequest request, HttpServletResponse response) {
@@ -67,6 +71,8 @@ public class LoginSessions {
         }
         request.getSession().removeAttribute(PasswordChangePending.ATTRIBUTE);
         request.getSession().removeAttribute(MfaPending.ATTRIBUTE);
+        // A pending step shortened this session's idle time (PendingStep): a full session gets the usual one
+        request.getSession().setMaxInactiveInterval((int) idleTimeout.toSeconds());
         request.getSession().setAttribute(OPENED_AT, Instant.now());
         KeycloakTokens tokens = login.tokens();
         List<GrantedAuthority> authorities = login.roles().stream()
