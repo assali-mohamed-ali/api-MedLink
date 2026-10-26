@@ -155,7 +155,10 @@ actionlint if a workflow changed: none did); (4) open the PR to `master` with th
     without a secret: suggest a disposable console user like Postman does), #87 and #90 ("it is on `master`").
   - The realm's `defaultGroups: ["/patients"]` finding: draft a comment once Mohamed says where (realm owner).
   - Follow-up after #90 merges: MFA audit entries and `LOGIN` SUCCESS after the code for staff.
-  - #92 (report v2) and #91 (local runner): waiting for the code owner. The untracked
+  - **#92 (report v2), code owner 2026-10-26:** rewrite the PR's commits so `report-v2.pdf` (`47c91bc`) never
+    enters history, update to current `master`, re-run the checks. Needs a force-push of
+    `docs/sprint-2-report-v2`: only with Mohamed's go. CI failures there are runner allocation (billing), not tests.
+  - #91 (local runner proposal): still unanswered. The untracked
     `docs/sprints/sprint-2/MedLink-sprint2-report.pdf` must not be committed (Mohamed moves it).
 
 ## Coordination comments (post on Mohamed's go, then note the link here)
