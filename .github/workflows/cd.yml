@@ -124,13 +124,13 @@ jobs:
       image: ${{ steps.publish.outputs.ref }}
     steps:
       - name: Download the exact scanned image
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: api-medlink-image-${{ github.sha }}
           path: bundle
 
       - name: Download the SBOM for the same image
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           name: api-medlink-sbom-${{ github.sha }}
           path: bundle
@@ -158,14 +158,14 @@ jobs:
           echo "ref=ghcr.io/assali-mohamed-ali/api-medlink@$DIGEST" >> "$GITHUB_OUTPUT"
 
       - name: Attest build provenance
-        uses: actions/attest-build-provenance@v3
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/assali-mohamed-ali/api-medlink
           subject-digest: ${{ steps.publish.outputs.digest }}
           push-to-registry: true
 
       - name: Attest SBOM for the published digest
-        uses: actions/attest-sbom@v3
+        uses: actions/attest-sbom@v4
         with:
           subject-name: ghcr.io/assali-mohamed-ali/api-medlink
           subject-digest: ${{ steps.publish.outputs.digest }}
@@ -173,7 +173,7 @@ jobs:
           push-to-registry: true
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.10.0
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Sign the published image digest
         env:
@@ -200,7 +200,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.10.0
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Verify image signature before deployment
         env:
@@ -242,7 +242,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Install Cosign
-        uses: sigstore/cosign-installer@v3.10.0
+        uses: sigstore/cosign-installer@v4.1.2
 
       - name: Verify image signature before deployment
         env:
