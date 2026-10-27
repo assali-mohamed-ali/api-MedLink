@@ -20,14 +20,11 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 6b | `MfaService`: enrol, verify, lock (no HTTP yet) | MLink-62/63 | Done | d1853b0 (red), dae733d (green) |
 | 7 | HTTP, in one green commit: staff branch of login + `MfaPending` + endpoints 8 and 9 + `Browser.login()` helper | MLink-62/63 | Done (regrouping OK'd by Mohamed) | 9398f1b (red), abe58dc (green); idle-time fix e914835 (red), 0c100e6 (green) |
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | Done | a720111 (Postman); log of an unreadable secret cd4ecb7 (red), 0370c1c (green); docs 97351d5 |
-| 10 | Checks and PR | MLink-62/63 | **In progress**: manual check done; gitleaks, local CI checks, PR left | |
+| 10 | Checks and PR | MLink-62/63 | Done: [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), in review | merge 482cb99 |
 
-**Next step (new session):** subtask 10. (1) `git fetch` and check `master` moved (merge it in if so, re-run
-both test orders); (2) gitleaks on the whole branch (`zricethezav/gitleaks:v8.28.0`, config
-`security/.gitleaks.toml`); (3) the other CI checks locally (Terraform fmt/validate in Docker, `check-prod-config.sh`,
-actionlint if a workflow changed: none did); (4) open the PR to `master` with the template: AI box checked, the
-"relu" box left for Mohamed, real outputs in "Preuves", the deploy note (`APP_MFA_ENCRYPTION_KEY` in staging/prod
-`DEPLOY_ENV_FILE` before merge); (5) give Mohamed the YouTrack moves and the comments below.
+**Next step (new session):** answer the code owner's review on #97. Mohamed ticks the "relu" box in the PR
+(the `ai-disclosure` check fails until then) and adds the #97 link on MLink-62/63. After merge: the comments in
+"Open items" below, then the MFA audit follow-up once #90 merges.
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
@@ -148,6 +145,13 @@ actionlint if a workflow changed: none did); (4) open the PR to `master` with th
   header). Found by computing, from the stored secret and the dev key, the codes the server accepted at that minute
   and comparing (codes printed, never the secret). Added to README troubleshooting (`INVALID_CODE`, `MFA_LOCKED`).
   `practitioner.dev` is now enrolled on Mohamed's phone in the dev database.
+- **2026-10-27:** subtask 10 done. `master` had moved (#94, management port): merged in (482cb99); one conflict,
+  `report.md` (both notes kept). Then: `./mvnw -B clean verify` 368/368 and reverse order 368/368 (349 + 19 from
+  #94); gitleaks v8.28.0 on `origin/master..HEAD`: no leaks; `pre-commit run --all-files` in a python:3.12
+  container on a clean clone: all hooks passed (`maven-validate` skipped there, covered by verify); Terraform
+  1.9.8 fmt/validate, `check-prod-config.sh`, `sca-policy.test.sh`: pass. PR
+  [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) opened to `master`, review asked from the code
+  owner. Not run locally: the OWASP/Trivy SCA workflow (its CI result is the proof).
 - **Open items carried to the new session:**
   - Comments to post after merge (Claude writes, Mohamed posts on YouTrack): MLink-64 (Ahlem: contract + error
     codes, the QR is a data URI, codes are 6 digits, `MFA_LOCKED` lasts 15 min), MLink-65 (Youssef: the staff
