@@ -19,6 +19,11 @@ without it; staging and prod need it in `DEPLOY_ENV_FILE` before the merge (see 
 Practitioners and staff now log in with a code: tests that log in as them use `Browser.login()`, which does the
 code step.
 
+**2026-10-25:** MLink-122 (GitHub #49): in staging and prod, Actuator (metrics, `/actuator/health`) moves to the
+private management port 9000; the public port keeps `/livez` and `/readyz`. **Every health check now calls `/readyz`**
+(Dockerfile, Terraform, the deploy action's `DEPLOY_HEALTH_URL`): the code owner sets the GitHub variable
+`DEPLOY_HEALTH_URL` to `https://<api-host>/readyz` before the next deployment. Dev unchanged. No migration, no endpoint.
+
 **2026-10-23:** MLink-91, MLink-88 and MLink-90 on `feat/ss4-password-change`, one PR based on `master`.
 Endpoints 10 and 11 work end to end; see the section below for the proofs.
 
@@ -96,6 +101,42 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
   session to Keycloak's idle timeout. No second factor for patients (not planned).
 - **Before merging:** add `APP_MFA_ENCRYPTION_KEY` (`openssl rand -base64 32`, one per environment) to the
   staging and prod `DEPLOY_ENV_FILE`; compose refuses to start without it. Local `.env`: the setup scripts add it.
+
+## MLink-122 — metrics not public in production, GitHub #49 (2026-10-25, fix/49-management-port)
+
+Design agreed with the code owner on #49 (a separate management port, not authentication).
+
+**Built:**
+- `application-staging.yml`, `application-prod.yml`: `management.server.port: 9000`. All of Actuator lives there; the
+  public port no longer serves `/actuator/**`. Port 9000 is never published: Prometheus scrapes `app:9000` and
+  `app-staging:9000` over the Docker network (`monitoring/prometheus/prometheus.yml`).
+- `application.properties` (every profile): `/livez` and `/readyz` on the main port
+  (`management.endpoint.health.probes.*`); they answer `{"status":"UP"}` and nothing else.
+- `SecurityConfig` (shared file): `GET /livez` and `/readyz` public. The `/actuator/prometheus` rule stays: Spring
+  Security also guards the management port, so Prometheus (no login) needs it there; what keeps the metrics private
+  in staging and prod is the unpublished port. Mutation check: without the rule, Prometheus gets 401 on port 9000.
+- Health checks → `/readyz`: `docker/Dockerfile` `HEALTHCHECK`, `terraform/main.tf` healthcheck and its README,
+  the deploy-compose action and `docs/DEPLOYMENT.md` (with a "never publish 9000" security note), as the code owner
+  asked on #49. Dev (setup scripts, DAST with the dev profile) keeps Actuator on 8080.
+
+**Proof:** `ManagementPortIntegrationTest` (real API, real profile files): staging and prod, `/actuator/prometheus`
+and `/actuator/health` on the main port refused to anonymous callers, metrics served on the management port,
+`/livez` and `/readyz` UP on the main port with no detail; dev keeps metrics and health on the main port and gains
+`/readyz`. The management port is random there, so `ManagementPortConfigTest` reads the files: staging and prod set
+9000, every Prometheus target uses it, no compose file publishes it. Committed red first (9 failures), then green.
+`scripts/ci/check-prod-config.sh` passes.
+
+**For whoever deploys:** set the GitHub Environment variable `DEPLOY_HEALTH_URL` to the API's `/readyz` URL in
+`staging` and `production`. A proxy must not route port 9000.
+
+**Code owner's review on #94:** the default readiness group holds only `readinessState`, so with every health check
+moved to `/readyz` a database outage still looked healthy. Now `management.endpoint.health.group.readiness.include =
+readinessState,db` (every profile); `/livez` stays the process only, so a database outage never restarts the API.
+`ReadinessProbeIntegrationTest` (prod profile) stops its own Postgres container: `/readyz` 200 → **503 DOWN** (no
+detail), `/livez` still 200 UP. Committed red first (33b634d: `/readyz` still 200 without the database), then green
+(297a5ef).
+
+**Limits:** Swagger and `/v3/api-docs` are not Actuator and stay public in production: GitHub #65.
 
 ## MLink-91, MLink-88, MLink-90 - password changes (2026-10-23, feat/ss4-password-change, [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89))
 

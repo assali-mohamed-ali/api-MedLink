@@ -52,7 +52,7 @@ terraform validate
 terraform plan -var-file="terraform.tfvars.prod" -out=tfplan
 terraform apply tfplan
 
-curl -fsS http://<host>:8080/actuator/health
+curl -fsS http://<host>:8080/readyz
 ```
 
 ## Rollback
@@ -62,7 +62,7 @@ immutable image reference and wait for the health check:
 
 ```bash
 terraform apply -var="app_image=ghcr.io/assali-mohamed-ali/api-medlink@sha256:<previous-digest>"
-curl -fsS http://<host>:8080/actuator/health
+curl -fsS http://<host>:8080/readyz
 ```
 
 If the container is unhealthy, inspect `docker logs api-medlink`; if the database
