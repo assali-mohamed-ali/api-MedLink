@@ -1,0 +1,999 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><title>MedLink - Sprint 2 report</title><style>
+@page { size: A4; margin: 17mm 15mm 18mm 15mm; }
+* { box-sizing: border-box; }
+body { font-family: 'Segoe UI', Arial, sans-serif; font-size: 10.2pt; line-height: 1.55; color: #1c2733; margin: 0; }
+h1 { font-size: 27pt; line-height: 1.1; color: #16324f; margin: 0 0 4pt 0; letter-spacing: -0.3pt; }
+h1 + p { font-size: 12pt; color: #5b6b7f; margin-top: 0; }
+h2 { font-size: 17pt; color: #16324f; margin: 22pt 0 8pt; padding-bottom: 4pt; border-bottom: 1.2pt solid #d7e0ea; page-break-after: avoid; break-after: avoid; }
+h3 { font-size: 12.5pt; color: #9b3b3b; margin: 15pt 0 5pt; page-break-after: avoid; break-after: avoid; }
+p { margin: 5pt 0; }
+ul, ol { margin: 5pt 0 6pt 18pt; padding: 0; }
+li { margin: 2pt 0; }
+a { color: #2f5d8a; text-decoration: none; }
+blockquote { margin: 10pt 0; padding: 8pt 12pt; background: #f6f8fb; border-left: 3pt solid #2f5d8a; color: #33475c; font-size: 9.5pt; }
+code { font-family: Consolas, 'Courier New', monospace; font-size: 8.8pt; background: #eef3f8; padding: 1pt 3pt; border-radius: 2pt; }
+table { width: 100%; border-collapse: collapse; margin: 9pt 0 11pt; font-size: 8.7pt; page-break-inside: avoid; }
+th { background: #16324f; color: #ffffff; text-align: left; padding: 5pt 6pt; font-weight: 600; vertical-align: top; }
+td { border-bottom: 0.6pt solid #d7e0ea; padding: 4.5pt 6pt; vertical-align: top; }
+tr:nth-child(even) td { background: #f7f9fc; }
+img { max-width: 100%; height: auto; }
+p[align="center"] { margin: 10pt 0 3pt; page-break-inside: avoid; break-inside: avoid; page-break-after: avoid; break-after: avoid; }
+p[align="center"] + p { color: #5b6b7f; font-size: 8.8pt; page-break-before: avoid; break-before: avoid; }
+p[align="center"] + p em { color: #5b6b7f; font-size: 8.8pt; }
+hr { border: none; border-top: 0.8pt solid #d7e0ea; margin: 18pt 0; }
+h2 + p, h3 + p { margin-top: 4pt; }
+</style></head>
+<body><h1>MedLink — Sprint 2 report</h1>
+<p><strong>Identity, access and account security</strong>
+Sprint 2 · October 2026 · api-MedLink</p>
+<blockquote>
+<p>This is the presentation edition of the sprint report. The full, PR-by-PR engineering log
+remains in <a href="report.md"><code>report.md</code></a>; the contracts and design rules are in
+<a href="plan.md"><code>plan.md</code></a>, and the security rationale is in
+<a href="../../ARCHITECTURE.md"><code>../../ARCHITECTURE.md</code></a>.</p>
+</blockquote>
+<h2>The short version</h2>
+<p>Sprint 2 turned a small user API into the identity layer of a health portal.</p>
+<p>The browser now holds only one credential: an HttpOnly session cookie. Passwords, roles,
+lockout and session policy live in Keycloak. The API sits in front of it as a backend for frontend (BFF),
+so a patient or a practitioner never sees a Keycloak page, a token, or a redirect. Every
+identity flow goes through one place that we can test, audit and reason about.</p>
+<p>By the latest checkpoint the API exposes <strong>twelve routes</strong>, three roles are enforced with a
+<strong>49-cell access matrix</strong>, and the suite is <strong>222 tests green in both class orders</strong>. Registration, e-mail verification, login, logout, session expiry, password history,
+password change and a staff-forced password reset all work end to end against a real Keycloak,
+a real PostgreSQL and Mailpit.</p>
+<p>Some work is deliberately still open: the second factor for practitioners and staff, account
+management, and the React screens. The last section says what comes next and why.</p>
+<table>
+<thead>
+<tr>
+<th>At a glance</th>
+<th></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Product</strong></td>
+<td>MedLink — a health portal for patients, practitioners and administrative staff across three clinics</td>
+</tr>
+<tr>
+<td><strong>Sprint goal</strong></td>
+<td>Build the identity and access foundation: register, verify, log in, log out, manage sessions and passwords, enforce roles</td>
+</tr>
+<tr>
+<td><strong>Backend</strong></td>
+<td>Spring Boot 4.1 · Java 17 · Spring Security · Spring Data JPA · Flyway</td>
+</tr>
+<tr>
+<td><strong>Identity</strong></td>
+<td>Keycloak 26 · realm <code>medlink</code> · groups → roles · password policy · lockout · events</td>
+</tr>
+<tr>
+<td><strong>Data</strong></td>
+<td>PostgreSQL, two isolated stores: business data in the API, identity data in Keycloak</td>
+</tr>
+<tr>
+<td><strong>Client</strong></td>
+<td>React 19 · TypeScript · Vite (shell ready; screens are the next sprint)</td>
+</tr>
+<tr>
+<td><strong>Delivery</strong></td>
+<td>GitHub Actions · CodeQL · Dependency-Check / Trivy · gitleaks · ZAP · GHCR · Compose · Terraform</td>
+</tr>
+<tr>
+<td><strong>Proof</strong></td>
+<td>222 tests · 49-cell access matrix · Postman 66 requests / 176 assertions · mutation checks</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2>1. The problem, in plain terms</h2>
+<p>A health portal has an unusual mix of users. A patient books and reads their own records. A
+practitioner works across clinics and needs a different view of the same data. Administrative
+staff manage accounts and need oversight without being able to read clinical content. All three
+groups share one login page, one session model and one audit trail.</p>
+<p>The obvious shortcut is to let the frontend talk to Keycloak, use its hosted login page, and
+keep a token in the browser. It is fast to build and standard on paper. We rejected it for three
+reasons:</p>
+<ol>
+<li><strong>The user experience becomes someone else's page.</strong> A Keycloak redirect is visible, hard to
+   brand, and easy to break with a proxy or a cookie setting.</li>
+<li><strong>A token in the browser is a token an XSS bug can steal.</strong> A BFF keeps it on the server.</li>
+<li><strong>Every identity flow should be testable in one place.</strong> Login, logout, verification,
+   password changes and account operations share the same rules; scattering them across a
+   frontend and an identity server makes the rules hard to prove.</li>
+</ol>
+<p>So the design rule for the sprint was simple: <strong>the frontend never talks to Keycloak</strong>. The
+browser calls the API; the API talks to Keycloak server to server. The cost is real — the API
+sees passwords during login, and a second factor becomes our code rather than a Keycloak
+screen — but it is a conscious trade, recorded in
+<a href="../../decisions/0001-login-password-grant.md">decision 0001</a>.</p>
+<p align="center">
+  <img src="assets/use-case.png" alt="MedLink use case diagram: patient, practitioner and administrative staff" width="720">
+</p>
+
+<p><em>The scope in one picture. Sprint 2 builds the authentication and access layer behind these
+use cases; the appointment, record and reporting flows come later.</em></p>
+<h3>What “done” meant</h3>
+<p>A task was not done when the endpoint answered. It was done when a test proved the happy path,
+the refusal path, and the access rule — and when the report said what changed and what was
+still risky. That standard shaped most of the decisions below.</p>
+<hr />
+<h2>2. What shipped</h2>
+<p>Sprint 2 was split into five sub-sprints so that each one could finish in a working session and
+end in a pull request. The table is the honest status at the end of the sprint, not the original
+plan.</p>
+<table>
+<thead>
+<tr>
+<th>Sub-sprint</th>
+<th>Scope</th>
+<th>State</th>
+<th>Main evidence</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>0</strong></td>
+<td>Sprint plan, backend-only design, YouTrack re-mapping</td>
+<td>Done</td>
+<td><code>CLAUDE.md</code>, <code>plan.md</code>, this folder</td>
+</tr>
+<tr>
+<td><strong>1</strong></td>
+<td>Registration and e-mail verification (routes 1–4)</td>
+<td>Done</td>
+<td>69 tests at the time; Postman 45 requests</td>
+</tr>
+<tr>
+<td><strong>2</strong></td>
+<td>Login, session, logout, expiry, cookie hardening (routes 5–7)</td>
+<td>Login and session done; cookie hardening in review</td>
+<td>Login, logout, expiry and cookie tests</td>
+</tr>
+<tr>
+<td><strong>3</strong></td>
+<td>Staff code / TOTP (routes 8–9)</td>
+<td>To do</td>
+<td>Design in <code>plan.md</code></td>
+</tr>
+<tr>
+<td><strong>4</strong></td>
+<td>Password history, change, forced reset (routes 10–11)</td>
+<td>History merged; change and forced reset in review under PR #89</td>
+<td>5/5 + 3/3 dedicated tests; full suite 222/222</td>
+</tr>
+<tr>
+<td><strong>5</strong></td>
+<td>Account management and access matrix (routes 12–16)</td>
+<td>Access matrix done early; account operations to do</td>
+<td>49-cell matrix; <code>GET /api/users</code> locked down</td>
+</tr>
+</tbody>
+</table>
+<h3>Registration and e-mail verification</h3>
+<p><code>POST /api/auth/register</code> creates a Keycloak account and the matching <code>users</code> / <code>patients</code> rows
+under the same id. <code>POST /api/auth/verify-email</code> consumes a single-use, SHA-256-hashed token
+that expires after 24 hours. The link in the mail points at the frontend, which posts the token
+back to the API — a POST rather than a GET, so mail scanners cannot consume the link by opening it.</p>
+<p>The detail we care about most is what happens when the e-mail is already taken. The endpoint
+still answers <strong>201</strong> with the same message. The real owner receives a warning mail, at most one
+per address every 15 minutes. That closes account enumeration without turning the form into a
+dead end for the person who genuinely forgot they had an account.</p>
+<h3>Login, session and logout</h3>
+<p><code>POST /api/auth/login</code> checks CSRF, applies a per-IP rate limit, calls Keycloak with the
+password grant, verifies the token signature, issuer and <code>azp</code>, provisions the local user if
+needed, and starts a new session id. The browser receives a <strong>200</strong> and an HttpOnly,
+<code>SameSite=Strict</code> session cookie. No token ever reaches JavaScript.</p>
+<p>A wrong password, an unknown e-mail and a locked account all receive the same <strong>401
+<code>INVALID_CREDENTIALS</code></strong>. An unverified address receives <strong>403 <code>EMAIL_NOT_VERIFIED</code></strong>, and the
+Keycloak session opened during the attempt is ended. A disabled account receives <strong>403
+<code>ACCOUNT_DISABLED</code></strong>. If Keycloak is down, the API answers <strong>503</strong> rather than pretending the
+credentials were wrong.</p>
+<p><code>POST /api/auth/logout</code> ends the Keycloak session, invalidates ours and expires the cookie.
+The Keycloak call is best effort: if Keycloak is unreachable, the API still returns <strong>204</strong> and
+logs the failure. Logging out locally must not depend on a remote service being healthy.</p>
+<h3>Passwords</h3>
+<p>Three changes landed around passwords:</p>
+<ul>
+<li><strong>History.</strong> Keycloak’s policy now remembers the last three passwords. Reusing one is refused
+  with the French message the UI already displays.</li>
+<li><strong>Change.</strong> <code>POST /api/auth/password</code> verifies the current password with a Keycloak password
+  grant, then applies the new one through the admin service and ends the temporary session. A
+  wrong current password is <strong>401 <code>INVALID_CURRENT_PASSWORD</code></strong>; a policy refusal is <strong>400
+  <code>PASSWORD_POLICY</code></strong>.</li>
+<li><strong>Forced reset.</strong> <code>POST /api/admin/users/{id}/force-password-reset</code> is staff-only. It adds
+  Keycloak’s <code>UPDATE_PASSWORD</code> action and ends the user’s Keycloak sessions. The next login
+  returns <strong>200 <code>{ "passwordChangeRequired": true }</code></strong> in a five-minute pending session with no
+  authenticated principal. The user can only change the password; the pending session is
+  single-use, and a normal login clears the marker.</li>
+</ul>
+<h3>Access control</h3>
+<p>Three roles are enforced: <code>PATIENT</code>, <code>PRACTITIONER</code>, <code>ADMINISTRATIVE_STAFF</code>. They come from
+Keycloak groups, never from a request body. A person holds one role. <code>Patient extends User</code> in
+JPA, so a patient is a user rather than a second profile attached to one.</p>
+<p>The access matrix is the part we would keep if we could keep only one test. It reads every
+<code>/api</code> route from Spring at startup and fails the build if a route has no line in the matrix.
+Each cell is a real request against a real Keycloak, with a fresh browser for each caller, so a
+logout or a rate limit cannot leak between cells. The four expected answers are <code>OPEN</code> (past
+security, no 5xx and no redirect), <code>LOGIN</code> (401), <code>FORBIDDEN</code> (403), and the role-specific
+allow.</p>
+<h3>Audit, rate limits and the quieter work</h3>
+<ul>
+<li>Every <strong>403</strong> is written to an append-only <code>audit_entries</code> table. Triggers reject <code>UPDATE</code>,
+  <code>DELETE</code> and <code>TRUNCATE</code>; the path is reduced to route words and UUIDs, so an e-mail or a name
+  in a URL becomes <code>{redacted}</code>.</li>
+<li>Per-IP limits on login, register and resend are counted in PostgreSQL with one atomic
+  <code>INSERT … ON CONFLICT … RETURNING</code>. Every API instance shares the same counter and no two
+  requests read the same count.</li>
+<li>The audit trail, rate limits, session cookie hardening and the Keycloak event log are not
+  visible features, but they are the difference between a demo and something we would let a
+  clinic use.</li>
+</ul>
+<h3>Platform work</h3>
+<p>The sprint also paid down delivery risk:</p>
+<ul>
+<li>one Compose setup per workflow (dev dependencies on the host; full stack in containers);</li>
+<li>a real CD path that publishes an immutable image digest to GHCR and rolls it out over SSH;</li>
+<li>Terraform aligned with the production profile, including both Keycloak clients and SMTP;</li>
+<li>CI that runs the functional suite, CodeQL, Dependency-Check or a visible Trivy fallback,
+  gitleaks, Trivy, ZAP and the AI-disclosure check.</li>
+</ul>
+<hr />
+<h2>3. How the system fits together</h2>
+<p>The architecture is deliberately boring in the places that matter. Identity is a separate
+system. Business data is a separate database. The API is the only component that crosses the
+boundary between them.</p>
+<p align="center">
+  <img src="assets/architecture.png" alt="Runtime architecture: React client, api-MedLink BFF, Keycloak, two PostgreSQL databases, mail and Prometheus" width="1100">
+</p>
+
+<p><em>The runtime view. Six components, two databases, one public door.</em></p>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Responsibility</th>
+<th>What it deliberately does not do</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>React client</strong></td>
+<td>Renders the portal; calls the API with cookies and the CSRF header</td>
+<td>Store tokens, call Keycloak, decide roles</td>
+</tr>
+<tr>
+<td><strong>api-MedLink (BFF)</strong></td>
+<td>Login, session, authorization, provisioning, audit, rate limits, mail</td>
+<td>Store passwords, trust a role from the client, expose Keycloak</td>
+</tr>
+<tr>
+<td><strong>Keycloak</strong></td>
+<td>Passwords, policy, lockout, groups, roles, events</td>
+<td>Serve a page to the end user</td>
+</tr>
+<tr>
+<td><strong><code>keycloak-db</code></strong></td>
+<td>Keycloak’s own PostgreSQL</td>
+<td>Share a schema or credentials with the API</td>
+</tr>
+<tr>
+<td><strong>App PostgreSQL</strong></td>
+<td><code>users</code>, <code>patients</code>, <code>email_tokens</code>, <code>audit_entries</code>, <code>rate_limits</code></td>
+<td>Store password hashes or roles</td>
+</tr>
+<tr>
+<td><strong>Mailpit / SMTP</strong></td>
+<td>Verification and warning mail in dev; real SMTP in production</td>
+<td>Be on the login path</td>
+</tr>
+<tr>
+<td><strong>Prometheus</strong></td>
+<td>Scrapes <code>/actuator/prometheus</code>; four alert rules</td>
+<td>Replace structured logs or the audit trail</td>
+</tr>
+</tbody>
+</table>
+<h3>Why a BFF, and why two databases</h3>
+<p>The BFF pattern is often described as a performance pattern. Here it is a <strong>security boundary</strong>.
+The browser has one credential — a cookie — and the server keeps the OAuth tokens. An XSS bug can
+still act as the user while the page is open, but it cannot read a long-lived token and replay
+it later. The session is also the natural place to enforce idle expiry and revocation.</p>
+<p>The two databases are separate for a less subtle reason: identity data and clinical data have
+different owners, different backup needs and different breach impact. A SQL injection in a
+reporting query should not be able to read password material, and a Keycloak upgrade should not
+touch patient rows. The API is the only place where the two identities meet, and it meets them
+with one rule: <code>users.id</code> <strong>is</strong> the Keycloak <code>sub</code>.</p>
+<h3>The cost we accepted</h3>
+<p>The password grant is deprecated in OAuth 2.1. We use it anyway, server to server, with a
+confidential client. The alternative — Authorization Code + PKCE — is the better standard, but
+it requires a Keycloak page in the browser, which breaks the product rule. The decision record
+lists the conditions: keep the API on the server, rate-limit login per IP, never log the
+password, and revisit the choice if the product ever accepts a Keycloak-hosted login.</p>
+<p>A second consequence is that second factors are ours to build. That is sub-sprint 3, not a
+Keycloak toggle.</p>
+<hr />
+<h2>4. What a login actually does</h2>
+<p align="center">
+  <img src="assets/login.png" alt="Login sequence: browser, api-MedLink and Keycloak" width="620">
+</p>
+
+<p><em>The happy path. The interesting part is what happens when one step refuses.</em></p>
+<p>The sequence is short on purpose. There is no redirect, no implicit flow and no token in the
+response body. The API does the work that a browser would otherwise do, and it does it with the
+same error shape every time.</p>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Answer</th>
+<th>Why this answer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Wrong password</td>
+<td><code>401 INVALID_CREDENTIALS</code></td>
+<td>Same as an unknown e-mail and a locked account; no enumeration</td>
+</tr>
+<tr>
+<td>Unknown e-mail</td>
+<td><code>401 INVALID_CREDENTIALS</code></td>
+<td>The response must not reveal whether the account exists</td>
+</tr>
+<tr>
+<td>Locked account</td>
+<td><code>401 INVALID_CREDENTIALS</code></td>
+<td>A <code>423</code> would confirm the account; Keycloak never locks an unknown one</td>
+</tr>
+<tr>
+<td>Unverified e-mail</td>
+<td><code>403 EMAIL_NOT_VERIFIED</code></td>
+<td>The user needs a different next step, not a generic failure</td>
+</tr>
+<tr>
+<td>Disabled account</td>
+<td><code>403 ACCOUNT_DISABLED</code></td>
+<td>The session must not be created</td>
+</tr>
+<tr>
+<td>Missing CSRF header</td>
+<td><code>403 FORBIDDEN</code></td>
+<td>The cookie is not enough for a write</td>
+</tr>
+<tr>
+<td>Too many attempts from one IP</td>
+<td><code>429 TOO_MANY_REQUESTS</code> + <code>Retry-After</code></td>
+<td>Protects the form without saying which e-mail exists</td>
+</tr>
+<tr>
+<td>Keycloak unreachable</td>
+<td><code>503</code></td>
+<td>An outage is not a wrong password</td>
+</tr>
+</tbody>
+</table>
+<h3>Session life</h3>
+<p>A session ends after <strong>15 idle minutes</strong> on both sides: Tomcat’s session timeout and Keycloak’s
+SSO idle timeout. While it lives, the API renews the five-minute access token. If Keycloak
+refuses the renewal — account disabled, signed out elsewhere, password reset — the session ends
+with <strong>401 <code>SESSION_EXPIRED</code></strong>. The browser gets a code, not an HTML login page, so React can
+decide whether to show the login screen, a “signed out elsewhere” message, or a retry.</p>
+<p>Logout is best effort in the other direction: our session and cookie always go, even if Keycloak
+is slow. That is the right failure mode for a user who wants to leave.</p>
+<hr />
+<h2>5. Who can do what</h2>
+<p align="center">
+  <img src="assets/access.png" alt="Roles from Keycloak groups and the API authorization layers" width="1000">
+</p>
+
+<p><em>Groups become roles, and roles become four checks. The matrix is the proof that no route
+skips them.</em></p>
+<p>The API checks access in four layers:</p>
+<table>
+<thead>
+<tr>
+<th>Layer</th>
+<th>Where</th>
+<th>What it prevents</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Deny by default</strong></td>
+<td><code>SecurityConfig</code></td>
+<td>A forgotten route becoming public</td>
+</tr>
+<tr>
+<td><strong>Role</strong></td>
+<td><code>@PreAuthorize</code> with <code>Roles</code> constants</td>
+<td>A patient calling a staff endpoint</td>
+</tr>
+<tr>
+<td><strong>Ownership</strong></td>
+<td><code>OwnershipGuard</code></td>
+<td>Reading someone else’s record by changing an id</td>
+</tr>
+<tr>
+<td><strong>Proof</strong></td>
+<td><code>AccessMatrixFunctionalTest</code></td>
+<td>A route shipping without an access rule</td>
+</tr>
+</tbody>
+</table>
+<p>The ownership check runs <strong>before</strong> the lookup. A stranger gets the same <code>403</code> whether the id
+exists or not; only staff get a <code>404</code> for an unknown id. That one ordering decision removes a
+quiet enumeration channel.</p>
+<p>An excerpt from the matrix:</p>
+<table>
+<thead>
+<tr>
+<th>Route</th>
+<th>Anonymous</th>
+<th>Patient</th>
+<th>Practitioner</th>
+<th>Staff</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET /api/auth/csrf</code></td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+</tr>
+<tr>
+<td><code>POST /api/auth/register</code></td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+</tr>
+<tr>
+<td><code>POST /api/auth/verify-email</code></td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+</tr>
+<tr>
+<td><code>POST /api/auth/verify-email/resend</code></td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+</tr>
+<tr>
+<td><code>POST /api/auth/login</code></td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+</tr>
+<tr>
+<td><code>POST /api/auth/logout</code></td>
+<td>LOGIN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+</tr>
+<tr>
+<td><code>GET /api/users</code></td>
+<td>LOGIN</td>
+<td>FORBIDDEN</td>
+<td>FORBIDDEN</td>
+<td>OPEN</td>
+</tr>
+<tr>
+<td><code>GET /api/users/{id}</code></td>
+<td>LOGIN</td>
+<td>FORBIDDEN</td>
+<td>FORBIDDEN</td>
+<td>OPEN</td>
+</tr>
+<tr>
+<td><code>DELETE /api/users/{id}</code></td>
+<td>LOGIN</td>
+<td>FORBIDDEN</td>
+<td>FORBIDDEN</td>
+<td>OPEN</td>
+</tr>
+<tr>
+<td><code>GET /api/users/_health</code></td>
+<td>LOGIN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+<td>OPEN</td>
+</tr>
+</tbody>
+</table>
+<p>The matrix is not a snapshot in a document. It is a test class. A new endpoint without a line
+fails <code>everyApiRouteHasALineInTheMatrix</code> and names the route in the failure. That is the
+difference between an access-control table and an access-control guarantee.</p>
+<h3>Staff are not Keycloak administrators</h3>
+<p>One finding from the threat-model review is worth calling out. <code>ADMINISTRATIVE_STAFF</code> used to be
+a composite role with <code>manage-users</code>, <code>view-users</code>, <code>query-users</code>, <code>query-groups</code> and
+<code>view-realm</code>. With those rights, a staff member could use Keycloak’s public <code>admin-cli</code> client
+and manage accounts outside the API — no ownership check, no audit trail.</p>
+<p>The role is now a plain role. Staff manage accounts through the API, where the rules and the
+audit trail apply. Only the service account <code>medlink-admin</code> keeps realm-management rights. The
+fix was proved red first: the old composite let <code>staff.dev</code> list users, create a user and read
+the realm; after the change all three answer <code>403</code>.</p>
+<hr />
+<h2>6. Where the data lives, and what we refuse to store</h2>
+<table>
+<thead>
+<tr>
+<th>Store</th>
+<th>Holds</th>
+<th>Why it is separate</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Keycloak</strong></td>
+<td>Passwords, password policy, lockout state, groups, roles, sessions, events</td>
+<td>A proven identity server; we write no password code</td>
+</tr>
+<tr>
+<td><strong>App PostgreSQL</strong></td>
+<td><code>users</code>, <code>patients</code>, <code>email_tokens</code>, <code>audit_entries</code>, <code>rate_limits</code></td>
+<td>Business data and security evidence owned by the API</td>
+</tr>
+<tr>
+<td><strong><code>keycloak-db</code></strong></td>
+<td>Keycloak’s schema</td>
+<td>Identity data must not share credentials or backups with clinical data</td>
+</tr>
+<tr>
+<td><strong>Browser</strong></td>
+<td><code>JSESSIONID</code> (HttpOnly) and <code>XSRF-TOKEN</code> (readable)</td>
+<td>One credential, no tokens</td>
+</tr>
+<tr>
+<td><strong>Mailpit / SMTP</strong></td>
+<td>Verification links and warning messages</td>
+<td>Mail is a side effect, not part of the session</td>
+</tr>
+</tbody>
+</table>
+<p>We deliberately do <strong>not</strong> store:</p>
+<ul>
+<li>a password or a password hash in the API;</li>
+<li>a role on the user row;</li>
+<li>an OAuth token in the browser;</li>
+<li>a raw e-mail, name or token in the audit path;</li>
+<li>a per-account login lock of our own (Keycloak already has one, and a second one would let an
+  attacker lock an account faster).</li>
+</ul>
+<h3>The migration story</h3>
+<p>Flyway owns the schema. Migrations <code>V1</code>–<code>V8</code> are on <code>master</code>; <code>V8</code> adds the shared
+<code>rate_limits</code> table. The numbering rule is part of the review: the migration that merges first
+takes the lower number, because a database that already applied <code>V9</code> will refuse a <code>V8</code> that
+arrives later. It is a small process rule that prevents a class of production incidents.</p>
+<hr />
+<h2>7. How we know it works</h2>
+<p align="center">
+  <img src="assets/pipeline.png" alt="DevSecOps pipeline from plan to operate" width="1100">
+</p>
+
+<p><em>Security is not a phase at the end. It is a set of gates along the path.</em></p>
+<h3>Tests that behave like a browser</h3>
+<p>Most of the meaningful tests are functional. They start the API on a real port, a real Keycloak
+with the same realm file as dev, a real PostgreSQL and Mailpit. They drive the API over HTTP,
+with their own cookie jar and their own <code>X-Forwarded-For</code>, and they act in Keycloak through its
+admin API when the scenario needs it.</p>
+<p>That choice is slower than mocking Keycloak, but it catches the bugs that matter: a missing CSRF
+header, a cookie that is not sent back, an unverified e-mail that is accepted, a role that leaks
+through a token, a session that survives a logout. The first Postman run found a real bug that
+MockMvc could not see: a refused CSRF token answered <strong>401</strong> to a real client because the error
+forward needed a login.</p>
+<table>
+<thead>
+<tr>
+<th>Checkpoint</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Password change (MLink-91)</td>
+<td>5/5 functional tests</td>
+</tr>
+<tr>
+<td>Forced password reset (MLink-88)</td>
+<td>3/3 functional tests</td>
+</tr>
+<tr>
+<td>Full suite at the latest checkpoint</td>
+<td>222/222, normal and reverse class order</td>
+</tr>
+<tr>
+<td>Access matrix</td>
+<td>49 tests; every <code>/api</code> route covered</td>
+</tr>
+<tr>
+<td>Postman / Newman, folder 6</td>
+<td>66 requests, 176 assertions, 0 failures</td>
+</tr>
+<tr>
+<td>Registration slice, earlier checkpoint</td>
+<td>69 tests; 45-request Postman run; 154 assertions</td>
+</tr>
+</tbody>
+</table>
+<p>The team also uses mutation checks as a habit: break the rule a test guards, watch the test go
+red, restore the rule. A test that cannot fail is documentation, not proof.</p>
+<h3>Delivery and operations</h3>
+<p>The CI pipeline runs <code>./mvnw -B verify</code>, CodeQL, Dependency-Check (with a visible, policy-gated
+Trivy fallback when no NVD key is available), gitleaks, Trivy and a ZAP baseline. The CD workflow
+publishes an image by digest to GHCR, copies the Compose file and realm to the target over SSH,
+starts the API, verifies the running digest and polls <code>/actuator/health</code>. If the health check
+fails, the last 200 log lines are printed.</p>
+<p>Prometheus scrapes the API every 15 seconds and four alert rules cover app down, 5xx rate, p95
+latency and heap pressure. The alerts are only useful once Alertmanager has a target; that is
+listed as a gap, not hidden.</p>
+<hr />
+<div style="page-break-before: always;"></div>
+
+<h2>8. The system on screen</h2>
+<p>The screenshots below were taken from the running dev stack: the API on <code>:8080</code>, Keycloak on
+<code>:8180</code>, Mailpit on <code>:8025</code>, and the React shell on <code>:3000</code>. They are evidence, not mockups.</p>
+<h3>The API contract</h3>
+<p align="center">
+  <img src="assets/swagger-overview.png" alt="Swagger UI showing the API grouped by controller" width="1100">
+</p>
+
+<p><em>Swagger UI: the public surface, grouped by controller. The contracts are generated from the
+code, so a controller change is visible in the documentation immediately.</em></p>
+<p>The list is short on purpose. There is no <code>/api/patients</code> or <code>/api/appointments</code> yet, because
+Sprint 2 is the access layer, not the clinical surface. The controllers are split by
+responsibility rather than by URL prefix, which keeps login, logout, password and verification
+changes from sharing one class.</p>
+<p align="center">
+  <img src="assets/swagger-login.png" alt="Swagger UI detail of the login operation with CSRF header and 200/429 responses" width="1000">
+</p>
+
+<p><em>The login contract. The required <code>X-XSRF-TOKEN</code> header and the <code>429</code> response are part of the
+documented contract, not an implementation detail.</em></p>
+<p>The detail matters more than the summary. A caller can see the CSRF header, the <code>200</code> shape and
+the <code>429</code> shape before writing a client. That reduces the chance that the frontend invents its
+own error contract.</p>
+<h3>Keycloak</h3>
+<p align="center">
+  <img src="assets/keycloak-users.png" alt="Keycloak user list for the medlink realm" width="1100">
+</p>
+
+<p><em>The <code>medlink</code> realm: the three development users and a patient registered through the API. The
+new account is created by the service account, not by a human in the console.</em></p>
+<p>The interesting row is the fourth one. <code>sarra.benali@medlink.local</code> exists because a registration
+request created it. The console is where we inspect the result, not where the account came from.</p>
+<p align="center">
+  <img src="assets/keycloak-roles.png" alt="Keycloak realm roles: PATIENT, PRACTITIONER, ADMINISTRATIVE_STAFF" width="1100">
+</p>
+
+<p><em>Three business roles, plus Keycloak’s own defaults. <code>ADMINISTRATIVE_STAFF</code> is a plain role: no
+realm-management rights.</em></p>
+<p>The role list is also a boundary. <code>ADMINISTRATIVE_STAFF</code> can manage accounts through
+<code>/api/users</code>, but it cannot open the Keycloak admin API. Staff get the workflow, not the
+identity provider's master key.</p>
+<p align="center">
+  <img src="assets/keycloak-clients.png" alt="Keycloak clients: medlink-bff and medlink-admin" width="1100">
+</p>
+
+<p><em>Two clients, two jobs: <code>medlink-bff</code> for the user login, <code>medlink-admin</code> for account
+operations. The separation is what lets staff stay out of the Keycloak admin API.</em></p>
+<p><code>medlink-bff</code> is the confidential client the API uses for the password grant; <code>medlink-admin</code> is
+the service account for account operations. Only the API holds the second secret. A staff
+browser never sees either one.</p>
+<h3>The verification mail</h3>
+<p align="center">
+  <img src="assets/mailpit-email.png" alt="Mailpit showing the MedLink verification email" width="1000">
+</p>
+
+<p><em>A real verification mail produced by a real registration. The link is single-use, expires in
+24 hours, and points at the frontend, which posts the token back to the API.</em></p>
+<p>The mail is in French because the clinic's users are French-speaking; the template is not the
+point. The point is that the token arrives as a link, not as a password, and that Mailpit lets
+us test the whole path without a real mailbox.</p>
+<h3>The React client</h3>
+<p align="center">
+  <img src="assets/frontend-shell.png" alt="The current React and Vite client shell" width="900">
+</p>
+
+<p><em>The current client is still the Vite shell. The sprint delivered the API and identity layer it
+will consume; the login, verification and password screens are the next UI milestone. We would
+rather show the shell than pretend the screens exist.</em></p>
+<p>The empty shell is deliberate. The repository contains the client, the API and the identity
+configuration; the sprint scope stopped at the API boundary. The next UI milestone can now be
+built against a contract that already exists.</p>
+<hr />
+<div style="page-break-before: always;"></div>
+
+<h2>9. Trade-offs, limits and what comes next</h2>
+<h3>Decisions we would defend</h3>
+<table>
+<thead>
+<tr>
+<th>Decision</th>
+<th>What it buys</th>
+<th>What it costs</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Keycloak owns identity</td>
+<td>Proven password policy, lockout, events, admin UI; no password code of ours</td>
+<td>One more service to run, back up and upgrade</td>
+</tr>
+<tr>
+<td>BFF with server-side tokens</td>
+<td>XSS cannot steal a token; one place to revoke a session</td>
+<td>Server sessions; shared session storage before a second instance</td>
+</tr>
+<tr>
+<td>Password grant, server to server</td>
+<td>No Keycloak page ever reaches the user</td>
+<td>The API sees passwords; second factors are ours to build</td>
+</tr>
+<tr>
+<td>Same answer for unknown e-mail</td>
+<td>No account enumeration</td>
+<td>A slower, less specific error for a legitimate user</td>
+</tr>
+<tr>
+<td>Per-IP limits in PostgreSQL</td>
+<td>Shared across instances, race-free, no Redis</td>
+<td>A fixed window allows a burst at the edge; NAT users share a count</td>
+</tr>
+<tr>
+<td>Append-only audit table</td>
+<td>Raw SQL cannot rewrite the trail</td>
+<td>The table owner still can; separate roles are future work</td>
+</tr>
+<tr>
+<td>Functional tests over mocks</td>
+<td>Proof at the HTTP boundary, like a browser</td>
+<td>Slower CI; Docker required</td>
+</tr>
+</tbody>
+</table>
+<h3>What is still open</h3>
+<table>
+<thead>
+<tr>
+<th>Priority</th>
+<th>Item</th>
+<th>Why it matters</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Now</strong></td>
+<td>React login, verification and password screens</td>
+<td>The API is ready; the product still needs a usable front door</td>
+</tr>
+<tr>
+<td><strong>Now</strong></td>
+<td>Second factor for practitioners and staff (TOTP, MLink-62/63)</td>
+<td>A password alone is not enough for clinical access</td>
+</tr>
+<tr>
+<td><strong>Next</strong></td>
+<td>Account management: create, disable, list, audit (sub-sprint 5)</td>
+<td>Staff can reset a password but cannot yet run the full account lifecycle</td>
+</tr>
+<tr>
+<td><strong>Next</strong></td>
+<td>Reverse proxy: TLS, HSTS, CSP, <code>TRUSTED_PROXIES</code>, Keycloak not public</td>
+<td>The production topology in <code>docs/DEPLOYMENT.md</code> assumes this</td>
+</tr>
+<tr>
+<td><strong>Next</strong></td>
+<td>Backup and restore for both databases (GitHub #67)</td>
+<td>A named volume is not a backup</td>
+</tr>
+<tr>
+<td><strong>Later</strong></td>
+<td>Separate database roles for the audit trail (GitHub #57)</td>
+<td>Append-only should survive a compromised application role</td>
+</tr>
+<tr>
+<td><strong>Later</strong></td>
+<td>Shared sessions before a second API instance</td>
+<td>In-memory Tomcat sessions do not scale horizontally</td>
+</tr>
+<tr>
+<td><strong>Watch</strong></td>
+<td>PostgreSQL 18 in the dev compose file</td>
+<td>Known dev-volume issue (#74); a fresh volume works in the clean run</td>
+</tr>
+<tr>
+<td><strong>Watch</strong></td>
+<td>Metrics and API docs are public in production (#49, #65)</td>
+<td>Convenient now; unacceptable for a clinic deployment</td>
+</tr>
+</tbody>
+</table>
+<h3>Known engineering limits</h3>
+<ul>
+<li>Only Keycloak sessions are ended by a forced reset. API sessions end at their next token
+  renewal through <code>SessionValidityFilter</code>; the access token lives five minutes.</li>
+<li>The rate limiter uses a fixed window. It can let up to twice the limit through around a window
+  edge. That is enough against floods and much simpler than a sliding log.</li>
+<li>The audit trail protects against ordinary SQL, not against the table owner. Flyway and the
+  application currently use the same database role.</li>
+<li><code>X-Forwarded-For</code> is trusted only from <code>TRUSTED_PROXIES</code>, loopback by default. Staging and
+  production must set it to the real proxy address, and the proxy must append the client
+  address rather than pass a client-supplied header through.</li>
+<li>The React client is a shell. There is no claim in this report that the UI is finished.</li>
+</ul>
+<hr />
+<h2>10. How the team worked</h2>
+<p>The sprint followed a simple loop: pick one YouTrack ticket, branch from <code>master</code>, write the
+failing test, make it pass, prove the refusal path, open a PR, update this report in the same
+PR. No stacked PRs — a lesson learned the hard way when one landed on the wrong branch and had
+to be re-landed.</p>
+<p>Three people shared the work: Mohamed on identity, sessions, passwords and the platform; Ahlem
+on the React pages and the scripted lockout checks; Youssef on login/logout, session expiry and
+the setup scripts. Shared files (<code>SecurityConfig</code>, <code>AuthBffController</code>, <code>FunctionalTestBase</code>,
+the realm file, the setup scripts) were announced on the other person’s ticket before touching
+them.</p>
+<p>The repository rules do more work than any meeting:</p>
+<ul>
+<li><code>master</code> is protected; a code-owner review and CodeQL are required;</li>
+<li>every PR declares AI assistance, and an AI-assisted PR needs a human review acknowledgement;</li>
+<li>a new endpoint needs a DTO, a mapper, a service, a controller, a matrix line, a test for the
+  right role and a test for the wrong role;</li>
+<li>a schema change is the next free <code>V&lt;N&gt;</code>, never an edit to a merged migration;</li>
+<li>a task is done when a test proves it.</li>
+</ul>
+<p>That last rule is the reason this report can show evidence instead of adjectives.</p>
+<hr />
+<h2>Appendix A — route inventory</h2>
+<table>
+<thead>
+<tr>
+<th>Method</th>
+<th>Path</th>
+<th>Access</th>
+<th>Purpose</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/auth/csrf</code></td>
+<td>Public</td>
+<td>Issue the CSRF cookie</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/auth/register</code></td>
+<td>Public</td>
+<td>Create a patient account and send verification</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/auth/verify-email</code></td>
+<td>Public</td>
+<td>Consume a verification token</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/auth/verify-email/resend</code></td>
+<td>Public</td>
+<td>Send a new verification link</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/auth/login</code></td>
+<td>Public</td>
+<td>Start a session through Keycloak</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/auth/logout</code></td>
+<td>Session</td>
+<td>End the Keycloak and API sessions</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/auth/password</code></td>
+<td>Session</td>
+<td>Change the current password</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/users/_health</code></td>
+<td>Session</td>
+<td>Cheap “is my session alive” check</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/users</code></td>
+<td>Staff</td>
+<td>List users</td>
+</tr>
+<tr>
+<td><code>GET</code></td>
+<td><code>/api/users/{id}</code></td>
+<td>Owner or staff</td>
+<td>Read one user</td>
+</tr>
+<tr>
+<td><code>DELETE</code></td>
+<td><code>/api/users/{id}</code></td>
+<td>Staff</td>
+<td>Delete the local user row</td>
+</tr>
+<tr>
+<td><code>POST</code></td>
+<td><code>/api/admin/users/{id}/force-password-reset</code></td>
+<td>Staff</td>
+<td>Force a password change at next login</td>
+</tr>
+</tbody>
+</table>
+<p>Planned but not in this sprint: <code>/api/auth/me</code> (MLink-53), staff code / TOTP (MLink-62/63), and
+the account-management routes (sub-sprint 5).</p>
+<h2>Appendix B — glossary</h2>
+<table>
+<thead>
+<tr>
+<th>Term</th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>BFF</strong></td>
+<td>Backend for Frontend: the API runs the login and keeps the tokens; the browser holds a session cookie</td>
+</tr>
+<tr>
+<td><strong>OIDC / OAuth 2.0</strong></td>
+<td>The identity and authorization protocols Keycloak speaks</td>
+</tr>
+<tr>
+<td><strong>Password grant (ROPC)</strong></td>
+<td>The client sends the user’s password to the token endpoint. Deprecated by OAuth 2.1; used here server to server as an accepted exception</td>
+</tr>
+<tr>
+<td><strong>PKCE</strong></td>
+<td>Proof Key for Code Exchange, part of the Authorization Code flow; not used by our login</td>
+</tr>
+<tr>
+<td><strong>Realm</strong></td>
+<td>An isolated Keycloak space with its own users, roles, groups and clients (<code>medlink</code>)</td>
+</tr>
+<tr>
+<td><strong>Client</strong></td>
+<td>An application registered in Keycloak: <code>medlink-bff</code> for login, <code>medlink-admin</code> for account operations</td>
+</tr>
+<tr>
+<td><strong>JWKS</strong></td>
+<td>The public keys Keycloak publishes so the API can verify token signatures</td>
+</tr>
+<tr>
+<td><strong>IDOR</strong></td>
+<td>Insecure Direct Object Reference: reading someone else’s data by changing an id; stopped by <code>OwnershipGuard</code></td>
+</tr>
+<tr>
+<td><strong>SAST / SCA / DAST</strong></td>
+<td>Static code analysis / dependency vulnerability scanning / attacks against the running app</td>
+</tr>
+</tbody>
+</table>
+<h2>References</h2>
+<ul>
+<li><a href="report.md"><code>report.md</code></a> — the complete engineering log, PR by PR</li>
+<li><a href="plan.md"><code>plan.md</code></a> — endpoint contracts, sub-sprint breakdown, decisions</li>
+<li><a href="README.md"><code>README.md</code></a> — how a sprint session runs</li>
+<li><a href="../../ARCHITECTURE.md"><code>../../ARCHITECTURE.md</code></a> — architecture, security model, ISO 27001 mapping</li>
+<li><a href="../../../security/threat-model.md"><code>../../../security/threat-model.md</code></a> — STRIDE threats and controls</li>
+<li><a href="../../decisions/0001-login-password-grant.md"><code>../../decisions/0001-login-password-grant.md</code></a> — why the password grant</li>
+<li><a href="../../DEPLOYMENT.md"><code>../../DEPLOYMENT.md</code></a> — environments, secrets, rollout and rollback</li>
+</ul></body></html>

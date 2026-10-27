@@ -18,6 +18,10 @@ private management port 9000; the public port keeps `/livez` and `/readyz`. **Ev
 (Dockerfile, Terraform, the deploy action's `DEPLOY_HEALTH_URL`): the code owner sets the GitHub variable
 `DEPLOY_HEALTH_URL` to `https://<api-host>/readyz` before the next deployment. Dev unchanged. No migration, no endpoint.
 
+**2026-10-24:** Presentation edition of this report for the team and the jury: `report-v2.md`
+(source) and `report-v2.html` (rendered), screenshots and diagrams in `assets/`.
+This file stays the engineering log. No code change.
+
 **2026-10-23:** MLink-91, MLink-88 and MLink-90 on `feat/ss4-password-change`, one PR based on `master`.
 Endpoints 10 and 11 work end to end; see the section below for the proofs.
 
