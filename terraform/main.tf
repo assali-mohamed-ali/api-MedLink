@@ -61,7 +61,7 @@ resource "docker_container" "app" {
   ]
 
   healthcheck {
-    test         = ["CMD-SHELL", "wget -qO- http://localhost:8080/actuator/health | grep UP"]
+    test         = ["CMD-SHELL", "wget -qO- http://localhost:8080/readyz | grep UP"]
     interval     = "30s"
     timeout      = "5s"
     retries      = 3

@@ -14,12 +14,13 @@ scrape_configs:
   - job_name: api-medlink-prod
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['app:8080']
+      # the private management port (GitHub #49), never published outside Docker
+      - targets: ['app:9000']
         labels: { env: prod }
     scrape_interval: 15s
   - job_name: api-medlink-staging
     metrics_path: /actuator/prometheus
     static_configs:
-      - targets: ['app-staging:8080']
+      - targets: ['app-staging:9000']
         labels: { env: staging }
     scrape_interval: 15s

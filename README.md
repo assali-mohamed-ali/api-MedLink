@@ -324,7 +324,9 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 **Report a vulnerability privately**, never in a public issue: see [SECURITY.md](SECURITY.md)
 (`security@medlink.example.com`, or a DM to @assali-mohamed-ali starting with `[SECURITY]`).
 
-Known open items: `/actuator/prometheus` and Swagger are public in production (GitHub #49, #65). The
+Known open item: Swagger and `/v3/api-docs` are public in production (GitHub #65). In staging and prod the
+actuator (metrics, `/actuator/health`) is only on the private management port 9000, never published; the public
+port keeps `/livez` and `/readyz` (GitHub #49). The
 actuator exposes only `health,info,prometheus`: don't open more without a security review.
 
 | Document | What is in it |
