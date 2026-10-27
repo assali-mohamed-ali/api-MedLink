@@ -17,8 +17,8 @@ lockout and session policy live in Keycloak. The API sits in front of it as a ba
 so a patient or a practitioner never sees a Keycloak page, a token, or a redirect. Every
 identity flow goes through one place that we can test, audit and reason about.
 
-By the latest checkpoint the API exposes **twelve routes**, three roles are enforced with a
-**49-cell access matrix**, and the suite is **222 tests green in both class orders**. Registration, e-mail verification, login, logout, session expiry, password history,
+At `master` commit `d7b0585` (2026-10-23, PR #89 merged) the API exposes **twelve routes**, three roles are enforced
+by an access matrix of **48 route × role cells** (49 tests with the route-coverage check), and the suite is **243 tests green in both class orders**. Registration, e-mail verification, login, logout, session expiry, password history,
 password change and a staff-forced password reset all work end to end against a real Keycloak,
 a real PostgreSQL and Mailpit.
 
@@ -34,7 +34,7 @@ management, and the React screens. The last section says what comes next and why
 | **Data** | PostgreSQL, two isolated stores: business data in the API, identity data in Keycloak |
 | **Client** | React 19 · TypeScript · Vite (shell ready; screens are the next sprint) |
 | **Delivery** | GitHub Actions · CodeQL · Dependency-Check / Trivy · gitleaks · ZAP · GHCR · Compose · Terraform |
-| **Proof** | 222 tests · 49-cell access matrix · Postman 66 requests / 176 assertions · mutation checks |
+| **Proof** (`d7b0585`) | 243 tests · 48-cell access matrix (49 tests) · Postman 67 requests / 178 assertions · mutation checks |
 
 ---
 
@@ -87,10 +87,10 @@ plan.
 |---|---|---|---|
 | **0** | Sprint plan, backend-only design, YouTrack re-mapping | Done | `CLAUDE.md`, `plan.md`, this folder |
 | **1** | Registration and e-mail verification (routes 1–4) | Done | 69 tests at the time; Postman 45 requests |
-| **2** | Login, session, logout, expiry, cookie hardening (routes 5–7) | Login and session done; cookie hardening in review | Login, logout, expiry and cookie tests |
+| **2** | Login, session, logout, expiry, cookie hardening (routes 5–7) | Login, session, logout and expiry done; cookie hardening merged (#63) | Login, logout, expiry and cookie tests |
 | **3** | Staff code / TOTP (routes 8–9) | To do | Design in `plan.md` |
-| **4** | Password history, change, forced reset (routes 10–11) | History merged; change and forced reset in review under PR #89 | 5/5 + 3/3 dedicated tests; full suite 222/222 |
-| **5** | Account management and access matrix (routes 12–16) | Access matrix done early; account operations to do | 49-cell matrix; `GET /api/users` locked down |
+| **4** | Password history, change, forced reset (routes 10–11) | Merged (#88, #89) | `PasswordChangeFunctionalTest` 7, `ForcePasswordResetFunctionalTest` 5, `PasswordHistoryFunctionalTest` 1 test methods; full suite 243/243 |
+| **5** | Account management and access matrix (routes 12–16) | Access matrix done early; account operations to do | 48-cell matrix (49 tests); `GET /api/users` locked down |
 
 ### Registration and e-mail verification
 
@@ -364,11 +364,11 @@ forward needed a login.
 
 | Checkpoint | Result |
 |---|---|
-| Password change (MLink-91) | 5/5 functional tests |
-| Forced password reset (MLink-88) | 3/3 functional tests |
-| Full suite at the latest checkpoint | 222/222, normal and reverse class order |
-| Access matrix | 49 tests; every `/api` route covered |
-| Postman / Newman, folder 6 | 66 requests, 176 assertions, 0 failures |
+| Password change (MLink-91) | 7 functional test methods (`PasswordChangeFunctionalTest`), all green |
+| Forced password reset (MLink-88) | 5 functional test methods (`ForcePasswordResetFunctionalTest`), all green |
+| Full suite at `d7b0585` (2026-10-23) | 243/243, normal and reverse class order |
+| Access matrix | 48 route × role cells + 1 route-coverage test = 49 tests; every `/api` route covered |
+| Postman / Newman, through folder 6 | 67 requests, 178 assertions, 0 failures |
 | Registration slice, earlier checkpoint | 69 tests; 45-request Postman run; 154 assertions |
 
 The team also uses mutation checks as a habit: break the rule a test guards, watch the test go

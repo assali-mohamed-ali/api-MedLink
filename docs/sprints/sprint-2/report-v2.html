@@ -39,8 +39,8 @@ remains in <a href="report.md"><code>report.md</code></a>; the contracts and des
 lockout and session policy live in Keycloak. The API sits in front of it as a backend for frontend (BFF),
 so a patient or a practitioner never sees a Keycloak page, a token, or a redirect. Every
 identity flow goes through one place that we can test, audit and reason about.</p>
-<p>By the latest checkpoint the API exposes <strong>twelve routes</strong>, three roles are enforced with a
-<strong>49-cell access matrix</strong>, and the suite is <strong>222 tests green in both class orders</strong>. Registration, e-mail verification, login, logout, session expiry, password history,
+<p>At <code>master</code> commit <code>d7b0585</code> (2026-10-23, PR #89 merged) the API exposes <strong>twelve routes</strong>, three roles are enforced
+by an access matrix of <strong>48 route × role cells</strong> (49 tests with the route-coverage check), and the suite is <strong>243 tests green in both class orders</strong>. Registration, e-mail verification, login, logout, session expiry, password history,
 password change and a staff-forced password reset all work end to end against a real Keycloak,
 a real PostgreSQL and Mailpit.</p>
 <p>Some work is deliberately still open: the second factor for practitioners and staff, account
@@ -83,7 +83,7 @@ management, and the React screens. The last section says what comes next and why
 </tr>
 <tr>
 <td><strong>Proof</strong></td>
-<td>222 tests · 49-cell access matrix · Postman 66 requests / 176 assertions · mutation checks</td>
+<td>243 tests · 48-cell access matrix (49 tests) · Postman 67 requests / 178 assertions · mutation checks (at <code>d7b0585</code>)</td>
 </tr>
 </tbody>
 </table>
@@ -149,7 +149,7 @@ plan.</p>
 <tr>
 <td><strong>2</strong></td>
 <td>Login, session, logout, expiry, cookie hardening (routes 5–7)</td>
-<td>Login and session done; cookie hardening in review</td>
+<td>Login, session, logout and expiry done; cookie hardening merged (#63)</td>
 <td>Login, logout, expiry and cookie tests</td>
 </tr>
 <tr>
@@ -161,14 +161,14 @@ plan.</p>
 <tr>
 <td><strong>4</strong></td>
 <td>Password history, change, forced reset (routes 10–11)</td>
-<td>History merged; change and forced reset in review under PR #89</td>
-<td>5/5 + 3/3 dedicated tests; full suite 222/222</td>
+<td>Merged (#88, #89)</td>
+<td><code>PasswordChangeFunctionalTest</code> 7, <code>ForcePasswordResetFunctionalTest</code> 5, <code>PasswordHistoryFunctionalTest</code> 1 test methods; full suite 243/243</td>
 </tr>
 <tr>
 <td><strong>5</strong></td>
 <td>Account management and access matrix (routes 12–16)</td>
 <td>Access matrix done early; account operations to do</td>
-<td>49-cell matrix; <code>GET /api/users</code> locked down</td>
+<td>48-cell matrix (49 tests); <code>GET /api/users</code> locked down</td>
 </tr>
 </tbody>
 </table>
@@ -601,23 +601,23 @@ forward needed a login.</p>
 <tbody>
 <tr>
 <td>Password change (MLink-91)</td>
-<td>5/5 functional tests</td>
+<td>7 functional test methods (<code>PasswordChangeFunctionalTest</code>), all green</td>
 </tr>
 <tr>
 <td>Forced password reset (MLink-88)</td>
-<td>3/3 functional tests</td>
+<td>5 functional test methods (<code>ForcePasswordResetFunctionalTest</code>), all green</td>
 </tr>
 <tr>
-<td>Full suite at the latest checkpoint</td>
-<td>222/222, normal and reverse class order</td>
+<td>Full suite at <code>d7b0585</code> (2026-10-23)</td>
+<td>243/243, normal and reverse class order</td>
 </tr>
 <tr>
 <td>Access matrix</td>
-<td>49 tests; every <code>/api</code> route covered</td>
+<td>48 route × role cells + 1 route-coverage test = 49 tests; every <code>/api</code> route covered</td>
 </tr>
 <tr>
 <td>Postman / Newman, folder 6</td>
-<td>66 requests, 176 assertions, 0 failures</td>
+<td>67 requests, 178 assertions, 0 failures</td>
 </tr>
 <tr>
 <td>Registration slice, earlier checkpoint</td>
