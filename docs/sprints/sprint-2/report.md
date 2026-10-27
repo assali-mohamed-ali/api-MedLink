@@ -77,6 +77,13 @@ and `/actuator/health` on the main port refused to anonymous callers, metrics se
 **For whoever deploys:** set the GitHub Environment variable `DEPLOY_HEALTH_URL` to the API's `/readyz` URL in
 `staging` and `production`. A proxy must not route port 9000.
 
+**Code owner's review on #94:** the default readiness group holds only `readinessState`, so with every health check
+moved to `/readyz` a database outage still looked healthy. Now `management.endpoint.health.group.readiness.include =
+readinessState,db` (every profile); `/livez` stays the process only, so a database outage never restarts the API.
+`ReadinessProbeIntegrationTest` (prod profile) stops its own Postgres container: `/readyz` 200 → **503 DOWN** (no
+detail), `/livez` still 200 UP. Committed red first (33b634d: `/readyz` still 200 without the database), then green
+(297a5ef).
+
 **Limits:** Swagger and `/v3/api-docs` are not Actuator and stay public in production: GitHub #65.
 
 ## MLink-91, MLink-88, MLink-90 - password changes (2026-10-23, feat/ss4-password-change, [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89))
