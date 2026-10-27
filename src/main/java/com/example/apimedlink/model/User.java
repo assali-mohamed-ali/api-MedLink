@@ -1,5 +1,10 @@
 package com.example.apimedlink.model;
 
+import java.time.Instant;
+import java.util.UUID;
+
+import org.springframework.data.domain.Persistable;
+
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.Id;
@@ -10,18 +15,16 @@ import jakarta.persistence.PostPersist;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
-import java.time.Instant;
-import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
-import org.springframework.data.domain.Persistable;
 
 /**
  * A MedLink account. Each role is a subclass with its own table sharing this id
- * ({@code JOINED}): a patient is a {@link Patient}. A person holds one role only, so there is
+ * ({@code JOINED}): a patient is a {@link Patient}. A person holds one role
+ * only, so there is
  * never a second profile for the same login.
  */
 @Entity
@@ -33,7 +36,8 @@ import org.springframework.data.domain.Persistable;
 public class User implements Persistable<UUID> {
 
     /**
-     * Keycloak user id ({@code sub} claim): given by Keycloak, never generated here.
+     * Keycloak user id ({@code sub} claim): given by Keycloak, never generated
+     * here.
      * Passwords and roles live in Keycloak only.
      */
     @Id
@@ -49,7 +53,10 @@ public class User implements Persistable<UUID> {
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
-    /** The id is assigned, so Spring Data cannot tell a new row from an existing one by itself. */
+    /**
+     * The id is assigned, so Spring Data cannot tell a new row from an existing one
+     * by itself.
+     */
     @Transient
     @Getter(AccessLevel.NONE)
     @Setter(AccessLevel.NONE)
@@ -79,5 +86,16 @@ public class User implements Persistable<UUID> {
         if (createdAt == null) {
             createdAt = Instant.now();
         }
+    }
+
+    @Transient
+    private boolean updated;
+
+    public void markUpdated() {
+        this.updated = true;
+    }
+
+    public boolean wasUpdated() {
+        return updated;
     }
 }
