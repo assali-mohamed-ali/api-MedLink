@@ -8,6 +8,7 @@ import com.example.apimedlink.security.MfaPending;
 import com.example.apimedlink.security.PasswordChangePending;
 import com.example.apimedlink.service.LoginResult;
 import com.example.apimedlink.service.LoginService;
+import com.example.apimedlink.service.MfaEnrolmentLinks;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
@@ -28,13 +29,15 @@ public class LoginController {
     private final LoginSessions sessions;
     private final PasswordChangePending passwordChange;
     private final MfaPending mfaPending;
+    private final MfaEnrolmentLinks enrolmentLinks;
 
     public LoginController(LoginService logins, LoginSessions sessions, PasswordChangePending passwordChange,
-                           MfaPending mfaPending) {
+                           MfaPending mfaPending, MfaEnrolmentLinks enrolmentLinks) {
         this.logins = logins;
         this.sessions = sessions;
         this.passwordChange = passwordChange;
         this.mfaPending = mfaPending;
+        this.enrolmentLinks = enrolmentLinks;
     }
 
     @PostMapping("/login")
@@ -47,6 +50,10 @@ public class LoginController {
         }
         if (result instanceof LoginResult.MfaRequired code) {
             mfaPending.start(code.login(), request);
+            if (code.setupRequired()) {
+                // The first setup needs the mailed link too: a stolen password alone enrols nothing
+                enrolmentLinks.send(code.login().user(), code.login().firstName());
+            }
             return LoginResponse.mfaRequired(code.setupRequired());
         }
         LoginResult.PasswordChange change = (LoginResult.PasswordChange) result;
