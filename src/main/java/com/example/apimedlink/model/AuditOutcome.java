@@ -5,4 +5,5 @@ public enum AuditOutcome {
     DENIED,
     SUCCESS,
     FAILURE
+
 }

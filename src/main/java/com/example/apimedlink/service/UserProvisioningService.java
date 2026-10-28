@@ -1,6 +1,7 @@
 package com.example.apimedlink.service;
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 =======
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.model.AuditAction;
@@ -8,6 +9,8 @@ import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.UserRepository;
 >>>>>>> 7dbf59d (feat: audit login and account changes)
+=======
+>>>>>>> 06ee374 (style: ensure final newlines for end-of-file-fixer)
 import java.util.Locale;
 import java.util.Optional;
 import java.util.UUID;
@@ -37,10 +40,10 @@ public class UserProvisioningService {
     private static final Logger log = LoggerFactory.getLogger(UserProvisioningService.class);
 
     private final UserRepository users;
-    private final AuditService audit;
     private final TransactionTemplate tx;
     private final AuditService audit;
 
+<<<<<<< HEAD
 <<<<<<< HEAD
     public UserProvisioningService(UserRepository users,
             TransactionTemplate tx,
@@ -48,8 +51,12 @@ public class UserProvisioningService {
 =======
     public UserProvisioningService(UserRepository users, AuditService audit, TransactionTemplate tx) {
 >>>>>>> 7dbf59d (feat: audit login and account changes)
+=======
+    public UserProvisioningService(UserRepository users,
+            TransactionTemplate tx,
+            AuditService audit) {
+>>>>>>> 06ee374 (style: ensure final newlines for end-of-file-fixer)
         this.users = users;
-        this.audit = audit;
         this.tx = tx;
         this.audit = audit;
     }
@@ -72,10 +79,14 @@ public class UserProvisioningService {
         }
         String normalizedEmail = email.trim().toLowerCase(Locale.ROOT);
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 06ee374 (style: ensure final newlines for end-of-file-fixer)
         String normalizedUsername = username == null || username.isBlank()
                 ? normalizedEmail
                 : username.trim();
 
+<<<<<<< HEAD
         try {
             // TOUT (update + audit) dans la même transaction
             return tx.execute(status -> {
@@ -100,15 +111,29 @@ public class UserProvisioningService {
                     .map(existing -> follow(existing, normalizedEmail, normalizedUsername))
                     .orElseGet(() -> new Provisioned(create(id, normalizedEmail, normalizedUsername), false)));
 >>>>>>> 7dbf59d (feat: audit login and account changes)
+=======
+        try {
+            // TOUT (update + audit) dans la même transaction
+            return tx.execute(status -> {
+                User result = users.findById(id)
+                        .map(existing -> follow(existing, normalizedEmail, normalizedUsername))
+                        .orElseGet(() -> create(id, normalizedEmail, normalizedUsername));
+
+                if (result.wasUpdated()) {
+                    audit.record(
+                            AuditAction.ACCOUNT_UPDATED,
+                            "USER",
+                            id.toString(),
+                            AuditOutcome.SUCCESS);
+                }
+                return result;
+            });
+>>>>>>> 06ee374 (style: ensure final newlines for end-of-file-fixer)
         } catch (DataIntegrityViolationException raced) {
             // Two first logins at once: the primary key let the other one insert. Read its
             // row.
             return users.findById(id).orElseThrow(() -> conflict(id));
         }
-        if (provisioned.accountUpdated()) {
-            audit.record(AuditAction.ACCOUNT_UPDATED, "USER", id.toString(), AuditOutcome.SUCCESS);
-        }
-        return provisioned.user();
     }
 
     private User create(UUID id, String email, String username) {
@@ -119,11 +144,15 @@ public class UserProvisioningService {
     }
 
 <<<<<<< HEAD
+<<<<<<< HEAD
+=======
+>>>>>>> 06ee374 (style: ensure final newlines for end-of-file-fixer)
     /**
      * Keycloak is the source of truth for the email and the username: follow their
      * changes.
      */
     private User follow(User existing, String email, String username) {
+<<<<<<< HEAD
         boolean updated = false;
 
 =======
@@ -131,6 +160,10 @@ public class UserProvisioningService {
     private Provisioned follow(User existing, String email, String username) {
         boolean updated = false;
 >>>>>>> 7dbf59d (feat: audit login and account changes)
+=======
+        boolean updated = false;
+
+>>>>>>> 06ee374 (style: ensure final newlines for end-of-file-fixer)
         if (!existing.getEmail().equals(email)) {
             Optional<User> holder = users.findByEmail(email);
             if (holder.isPresent()) {
@@ -151,7 +184,11 @@ public class UserProvisioningService {
 =======
 >>>>>>> 7dbf59d (feat: audit login and account changes)
         }
-        return new Provisioned(existing, updated);
+
+        if (updated) {
+            existing.markUpdated();
+        }
+        return existing;
     }
 
     private static ApiException conflict(UUID id) {
@@ -164,6 +201,5 @@ public class UserProvisioningService {
 }
 =======
 
-    private record Provisioned(User user, boolean accountUpdated) {}
 }
 >>>>>>> 7dbf59d (feat: audit login and account changes)
