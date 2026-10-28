@@ -8,4 +8,11 @@
     <cve>CVE-20XX-XXXXX</cve>
   </suppress>
   -->
+  <suppress until="2027-01-31">
+    <notes><![CDATA[FP confirmé : CVE-2022-31691 touche Spring Tools 4 (plugins Eclipse et VS Code, SnakeYAML),
+    pas la bibliothèque spring-boot-devtools ; Dependency-Check la rattache par le CPE vmware:spring_boot_tools.
+    devtools est optional : il ne part pas dans le jar de production. Ticket: MLink-127.]]></notes>
+    <packageUrl regex="true">^pkg:maven/org\.springframework\.boot/spring-boot-devtools@.*$</packageUrl>
+    <cve>CVE-2022-31691</cve>
+  </suppress>
 </suppressions>

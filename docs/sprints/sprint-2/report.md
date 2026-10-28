@@ -13,6 +13,14 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-28:** MLink-127 (SCA baseline, `chore/sca-baseline`): since the NVD key is set (2026-10-27), the
+SCA workflow runs OWASP Dependency-Check instead of the Trivy fallback, and it scans the whole project, so findings
+already on `master` turned **every PR red**. The only finding with CVSS ≥ 7, `spring-boot-devtools` vs
+CVE-2022-31691 (9.8), is a false positive: the CVE is about the Spring Tools IDE plugins (CPE mismatch), and devtools
+is `optional`, so the production jar leaves it out. It gets a narrow suppression in `security/owasp-suppressions.xml`
+(this package and this CVE only, until 2027-01-31). springdoc 3.1.1 → 3.2.0 brings Swagger UI 5.34.0, whose bundled
+DOMPurify 3.4.16 fixes CVE-2026-109344/109345 (6.1, XSS). No migration, no endpoint.
+
 **2026-10-25:** MLink-122 (GitHub #49): in staging and prod, Actuator (metrics, `/actuator/health`) moves to the
 private management port 9000; the public port keeps `/livez` and `/readyz`. **Every health check now calls `/readyz`**
 (Dockerfile, Terraform, the deploy action's `DEPLOY_HEALTH_URL`): the code owner sets the GitHub variable
