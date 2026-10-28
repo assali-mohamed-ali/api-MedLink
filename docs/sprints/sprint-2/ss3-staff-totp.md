@@ -21,10 +21,77 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 7 | HTTP, in one green commit: staff branch of login + `MfaPending` + endpoints 8 and 9 + `Browser.login()` helper | MLink-62/63 | Done (regrouping OK'd by Mohamed) | 9398f1b (red), abe58dc (green); idle-time fix e914835 (red), 0c100e6 (green) |
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | Done | a720111 (Postman); log of an unreadable secret cd4ecb7 (red), 0370c1c (green); docs 97351d5 |
 | 10 | Checks and PR | MLink-62/63 | Done: [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), in review | merge 482cb99 |
+| A | SCA baseline, own PR (see "Review round 1") | MLink-127 | In review: [#98](https://github.com/assali-mohamed-ali/api-MedLink/pull/98) | 3c5215b (on `chore/sca-baseline`) |
+| B1 | Realm: no default group; console-made staff hold one role | MLink-62 | To do | |
+| B2 | Login fails closed on more than one MedLink role | MLink-62 | To do | |
+| B3 | `EmailToken.Purpose.MFA_ENROLMENT` (30 min), `requireValid`, V12 | MLink-62 | To do | |
+| B4 | Enrolment mail at a staff login that needs setup (`MfaEnrolmentLinks`) | MLink-62 | To do | |
+| B5 | `/setup` needs the mailed token (takeover tests) | MLink-62 | To do | |
+| B6 | Postman folders 6 and 8 | MLink-62 | To do | |
+| B7 | Docs and drafts | MLink-62/63 | To do | |
+| B8 | Manual check on the dev stack (`-Reset`: ask Mohamed first) | MLink-62 | To do | |
+| B9 | Merge `master` (after #98), checks, push, answer the review | MLink-62/63 | To do | |
 
-**Next step (new session):** answer the code owner's review on #97. Mohamed ticks the "relu" box in the PR
-(the `ai-disclosure` check fails until then) and adds the #97 link on MLink-62/63. After merge: the comments in
-"Open items" below, then the MFA audit follow-up once #90 merges.
+**Next step (new session):** B1 (see "Review round 1" below for the whole plan). Track A: once #98's
+`dependency-check` is green and #98 merges, update #92 from `master` with a merge commit (no rewrite).
+
+## Review round 1 (2026-10-28): plan agreed with Mohamed
+
+**Code owner's review of #97 (2026-10-28 07:41):** (1) `realm-medlink.json` `defaultGroups: ["/patients"]`
+gives every console-made practitioner or staff member `PATIENT` too, and the test helper hides it: fix the
+realm and test a real console-made account (cross-role leak); (2) first enrolment is authorized by the password
+alone: anyone with a stolen password can bind their own app first: require an independent confirmation, test
+the takeover path; (3) no completed SCA result for ZXing; (4) coordinate `LoginService` with #90/#93 (staff
+`LOGIN` SUCCESS only after the code). On #92 (07:42): the SCA gate is red on `master`'s baseline.
+
+**Decisions (Mohamed, 2026-10-28):** enrolment confirmed by a **single-use email link, 30 minutes**, at most one
+mail per 15 minutes; the TOTP logic does not change. Login **fails closed** on more than one MedLink role.
+devtools: documented suppression. Claude created MLink-127 and moves that ticket only; every other YouTrack
+write is drafted for Mohamed.
+
+**Rules:** as for subtasks 1–10 (red commit, green commit, a mutation check per rule; both test orders before
+a push; never log a token). Stop and ask Mohamed for a force-push, a YouTrack write other than MLink-127, a
+teammate's file beyond those below, or a contract change not written here.
+
+- **A (MLink-127, `chore/sca-baseline`, #98):** the SCA gate scans the whole project; since the NVD key
+  (2026-10-27) the primary scanner runs and baseline findings turned every PR red. `spring-boot-devtools` vs
+  CVE-2022-31691 (9.8, the only one ≥ 7) is a false positive (Spring Tools IDE plugins, CPE mismatch; devtools
+  not in the jar): narrow suppression until 2027-01-31. springdoc 3.2.0 → Swagger UI 5.34.0 → DOMPurify 3.4.16
+  (CVE-2026-109344/109345, 6.1). ZXing was never flagged (run 190 completed and failed only on the baseline).
+- **B1:** remove `defaultGroups` from `keycloak/realm-medlink.json` (registration passes `/patients` itself:
+  `RegistrationService.PATIENTS_GROUP`). `KeycloakConsole.createUser(email, pw, group)` loses its `/patients`
+  delete. Tests: a console-made practitioner and staff member hold only their group (admin API) and role
+  (`/api/users/me`); a file test asserts no `defaultGroups`. Postman: drop the "remove /patients" requests.
+  Docs: staging and prod need the same change in the Keycloak console (Realm settings → User registration →
+  Default groups) and a check of existing staff accounts. Draft for MLink-65 (realm file is shared).
+- **B2:** in `LoginService.login`, before `provision`: more than one of our roles → `log.warn` (user id and
+  roles) and 403 `ACCOUNT_SETUP_INCOMPLETE` (existing code and message, one shared helper); the existing
+  `catch` ends the Keycloak session. Functional test: `/practitioners` + `/patients` → 403, no session,
+  Keycloak session ended.
+- **B3:** `EmailToken.Purpose` carries its validity (`VERIFY_EMAIL` and `ACTIVATE_ACCOUNT` 24 h,
+  `MFA_ENROLMENT` 30 min). `EmailTokenService.requireValid(raw, purpose, userId)` checks without consuming
+  (unknown, other purpose or **other user** → 400 `INVALID_TOKEN`; expired or used → 410 `TOKEN_EXPIRED`) and
+  shares its lookup with `consume`. `V12__email_token_mfa_enrolment.sql` re-creates the `purpose` CHECK. Draft
+  for #87 (V12).
+- **B4:** `MailService.sendMfaEnrolmentLink(to, firstName, token)`: link `{app.frontend-url}/configurer-code?token=…`,
+  valid 30 min, "if this wasn't you, someone knows your password". New `service/MfaEnrolmentLinks`:
+  `send(user, firstName)` (`MailThrottle.allow("mfa-enrolment", email)` → `cancelUnused` → `issue` → mail; a
+  mail failure is logged, the login answer never changes), `check(userId, raw)`, `close(userId)`.
+  `LoginController` calls `send` when `setupRequired` (`LoginService` untouched for this).
+- **B5:** `dto/MfaSetupRequest(token)`. `MfaController.setup`: pending step (401) → blank token (400
+  `VALIDATION_FAILED`) → `check` → `startEnrolment`. `verify` success → `close`. Tests: password without token,
+  made-up token, **another staff member's token** → refused and no secret stored; the right token works, twice
+  before `/verify`; after the first good code the token is 410. `Browser.login()` reads the link through the
+  mailbox helper, so teammates' tests keep working.
+- **B6:** Postman folders 6 and 8 read the link from the Mailpit API; takeover requests; newman 0 failures twice.
+- **B7:** plan.md §4/§5, report.md (review round), threat model (enrolment takeover, role leak), README,
+  ARCHITECTURE. Drafts: MLink-64 (Ahlem: the `/setup` body, the `/configurer-code` page, errors), MLink-65, #87,
+  #90/#93.
+- **B8:** dev stack `-Reset` (realm changed; wipes `practitioner.dev`'s enrolment: ask first), then a real
+  enrolment through the Mailpit link and Google Authenticator.
+- **B9:** merge `master`, all checks, push, answer each review thread (drafted, posted on Mohamed's go),
+  re-request the review. #90: if it lands first we move staff `LOGIN` SUCCESS to `/verify` here; if we land
+  first, her audit stays on the `Success` path, which `MfaRequired` never reaches.
 
 ## YouTrack moves (Mohamed does them: Claude only reads YouTrack)
 
