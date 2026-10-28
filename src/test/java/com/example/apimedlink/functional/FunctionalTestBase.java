@@ -372,7 +372,7 @@ public abstract class FunctionalTestBase {
 
         /** Same, choosing whether the email is verified (an unverified one: a sign-up whose link was never opened). */
         UUID createUser(String email, String password, boolean emailVerified) {
-            return createUser(email, password, emailVerified, "/patients");
+            return createUser(email, password, emailVerified, List.of("/patients"));
         }
 
         /**
@@ -380,7 +380,12 @@ public abstract class FunctionalTestBase {
          * console, in that group only: exactly what the admin does, nothing cleaned up after.
          */
         UUID createUser(String email, String password, String group) {
-            return createUser(email, password, true, group);
+            return createUser(email, password, true, List.of(group));
+        }
+
+        /** An account an admin put in several groups by mistake (a person holds one role only). */
+        UUID createUserInGroups(String email, String password, List<String> groups) {
+            return createUser(email, password, true, groups);
         }
 
         /** The paths of the user's groups, as the console's Groups tab lists them. */
@@ -390,13 +395,13 @@ public abstract class FunctionalTestBase {
                     .toList();
         }
 
-        private UUID createUser(String email, String password, boolean emailVerified, String group) {
+        private UUID createUser(String email, String password, boolean emailVerified, List<String> groups) {
             URI location = http.post().uri("/admin/realms/medlink/users")
                     .header(HttpHeaders.AUTHORIZATION, token())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of(
                             "username", email, "email", email, "firstName", "Console", "lastName", "User",
-                            "enabled", true, "emailVerified", emailVerified, "groups", List.of(group),
+                            "enabled", true, "emailVerified", emailVerified, "groups", groups,
                             "credentials", List.of(Map.of("type", "password", "value", password, "temporary", false))))
                     .retrieve()
                     .toBodilessEntity()
