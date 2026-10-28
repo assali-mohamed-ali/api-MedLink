@@ -98,6 +98,62 @@ class EmailTokenServiceTest {
         assertError(() -> service.consume(old, Purpose.VERIFY_EMAIL), HttpStatus.GONE, "TOKEN_EXPIRED");
     }
 
+    // ---- the staff code's first-enrolment link (review of #97, MLink-62) ----------------------------
+
+    @Test
+    void anEnrolmentTokenLasts30Minutes() {
+        String raw = service.issue(userId, Purpose.MFA_ENROLMENT);
+
+        EmailToken row = tokens.findByTokenHash(EmailTokenService.hash(raw)).orElseThrow();
+        assertThat(row.getPurpose()).isEqualTo(Purpose.MFA_ENROLMENT);
+        assertThat(Duration.between(Instant.now(), row.getExpiresAt()))
+                .isBetween(Duration.ofMinutes(29), Duration.ofMinutes(30));
+    }
+
+    @Test
+    void requireValidChecksWithoutUsingTheToken() {
+        String raw = service.issue(userId, Purpose.MFA_ENROLMENT);
+
+        service.requireValid(raw, Purpose.MFA_ENROLMENT, userId);
+        service.requireValid(raw, Purpose.MFA_ENROLMENT, userId);
+
+        assertThat(tokens.findByTokenHash(EmailTokenService.hash(raw)).orElseThrow().getUsedAt()).isNull();
+    }
+
+    @Test
+    void requireValidRefusesAnotherUsersToken() {
+        String raw = service.issue(userId, Purpose.MFA_ENROLMENT);
+        UUID someoneElse = UUID.randomUUID();
+
+        assertError(() -> service.requireValid(raw, Purpose.MFA_ENROLMENT, someoneElse),
+                HttpStatus.BAD_REQUEST, "INVALID_TOKEN");
+    }
+
+    @Test
+    void requireValidRefusesAnUnknownTokenOrAnotherPurpose() {
+        String verify = service.issue(userId, Purpose.VERIFY_EMAIL);
+
+        assertError(() -> service.requireValid("not-a-token", Purpose.MFA_ENROLMENT, userId),
+                HttpStatus.BAD_REQUEST, "INVALID_TOKEN");
+        assertError(() -> service.requireValid(verify, Purpose.MFA_ENROLMENT, userId),
+                HttpStatus.BAD_REQUEST, "INVALID_TOKEN");
+    }
+
+    @Test
+    void requireValidRefusesAnExpiredOrClosedToken() {
+        String expired = service.issue(userId, Purpose.MFA_ENROLMENT);
+        EmailToken row = tokens.findByTokenHash(EmailTokenService.hash(expired)).orElseThrow();
+        row.setExpiresAt(Instant.now().minusSeconds(1));
+        tokens.save(row);
+        assertError(() -> service.requireValid(expired, Purpose.MFA_ENROLMENT, userId),
+                HttpStatus.GONE, "TOKEN_EXPIRED");
+
+        String closed = service.issue(userId, Purpose.MFA_ENROLMENT);
+        service.cancelUnused(userId, Purpose.MFA_ENROLMENT);
+        assertError(() -> service.requireValid(closed, Purpose.MFA_ENROLMENT, userId),
+                HttpStatus.GONE, "TOKEN_EXPIRED");
+    }
+
     private static void assertError(Runnable call, HttpStatus status, String code) {
         assertThatThrownBy(call::run).isInstanceOfSatisfying(ApiException.class, e -> {
             assertThat(e.getStatus()).isEqualTo(status);
