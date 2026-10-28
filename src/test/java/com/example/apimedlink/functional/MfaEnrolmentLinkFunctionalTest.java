@@ -151,9 +151,12 @@ class MfaEnrolmentLinkFunctionalTest extends FunctionalTestBase {
         byte[] secret = Totp.fromBase32((String) Browser.json(again).get("secret"));
         assertThat(browser.mfaVerify(CLOCK.nextCode(secret)).statusCode()).isEqualTo(200);
 
+        assertThat(jdbc.queryForObject("SELECT count(*) FROM email_tokens t JOIN users u ON u.id = t.user_id"
+                        + " WHERE u.email = ? AND t.purpose = 'MFA_ENROLMENT' AND t.used_at IS NULL",
+                Integer.class, email)).as("the link is closed once the code works").isZero();
         Browser later = new Browser();
         later.apiLogin(email, PASSWORD);
-        assertError(later.mfaSetup(token), 410, "TOKEN_EXPIRED");
+        assertError(later.mfaSetup(token), 409, "MFA_ALREADY_ENROLLED"); // the contract's answer, as before
     }
 
     @Test

@@ -2,6 +2,7 @@ package com.example.apimedlink.service;
 
 import com.example.apimedlink.model.EmailToken.Purpose;
 import com.example.apimedlink.model.User;
+import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.mail.MailException;
@@ -45,5 +46,19 @@ public class MfaEnrolmentLinks {
             log.error("Staff code setup link could not be mailed to user {} ({})", user.getId(),
                     e.getClass().getSimpleName());
         }
+    }
+
+    /**
+     * The user's own link, unused and in time; it keeps working until {@link #close}.
+     *
+     * @throws com.example.apimedlink.exception.ApiException 400 {@code INVALID_TOKEN}, 410 {@code TOKEN_EXPIRED}
+     */
+    public void check(UUID userId, String token) {
+        tokens.requireValid(token, Purpose.MFA_ENROLMENT, userId);
+    }
+
+    /** The code is set up: the link stops working. */
+    public void close(UUID userId) {
+        tokens.cancelUnused(userId, Purpose.MFA_ENROLMENT);
     }
 }
