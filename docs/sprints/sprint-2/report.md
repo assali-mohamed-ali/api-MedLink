@@ -17,7 +17,9 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 `master`. **Migration V11** (`user_mfa`). **New required secret `APP_MFA_ENCRYPTION_KEY`**: the API does not start
 without it; staging and prod need it in `DEPLOY_ENV_FILE` before the merge (see the section below).
 Practitioners and staff now log in with a code: tests that log in as them use `Browser.login()`, which does the
-code step.
+code step. **Review round 1 (2026-10-28):** the first setup needs a link mailed at login (**migration V12**), the
+realm adds no default group (staging and prod: a console step before the merge), and a login holding two MedLink
+roles is refused.
 
 **2026-10-25:** MLink-122 (GitHub #49): in staging and prod, Actuator (metrics, `/actuator/health`) moves to the
 private management port 9000; the public port keeps `/livez` and `/readyz`. **Every health check now calls `/readyz`**
@@ -92,15 +94,32 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
 - **Found on the way:**
   - A full session opened after a pending step kept its 5-minute idle time; `LoginSessions.open` now sets the
     usual 15 minutes again (red test first).
-  - **Not fixed here:** the realm's `defaultGroups: ["/patients"]` puts every console-made practitioner or staff
-    member in `/patients` too, so they also hold `PATIENT` (one role only, CLAUDE.md). The tests remove it, as an
-    admin must do by hand today.
+  - The realm's `defaultGroups: ["/patients"]` put every console-made practitioner or staff member in `/patients`
+    too: fixed in review round 1 below.
+- **Review round 1 (code owner, 2026-10-28):**
+  - **Role leak:** `defaultGroups` removed from `keycloak/realm-medlink.json` (registration adds `/patients`
+    itself); the test helper no longer cleans up after the console. `ConsoleStaffAccountFunctionalTest`: a
+    console-made practitioner and staff member hold their own group and role only; `RealmFileTest` keeps the
+    default out. **Fail closed:** a login whose token holds more than one MedLink role gets 403
+    `ACCOUNT_SETUP_INCOMPLETE`, no session, its Keycloak session ended, logged (3 two-group cases).
+  - **First-enrolment takeover:** the password alone no longer enrols a code. A login with `mfaSetupRequired:
+    true` mails a single-use link (`MfaEnrolmentLinks`, purpose `MFA_ENROLMENT`, **V12**, 30 minutes, at most one
+    mail per 15 minutes, a "someone knows your password" warning); endpoint 8 needs its `{token}`, bound to the
+    account (another staff member's valid link: 400 `INVALID_TOKEN`), and the first good code closes it.
+    `MfaEnrolmentLinkFunctionalTest` (9, over HTTP) and `MfaEnrolmentLinksTest` (3: throttle, mail failure
+    logged without the token). The TOTP rules (`Totp`, cipher, `user_mfa`, endpoint 9, the lock) are unchanged.
+  - **SCA:** the gate was red on `master`'s baseline, not on ZXing (run 190 completed and flagged only
+    devtools and DOMPurify): fixed for every PR in #98 (MLink-127).
+  - Each new rule: a red commit, then green, then broken on purpose once (two-role limit, owner filter of the
+    token, "send only when setup is needed", the token check, closing the link).
 - **Limits:** changing `APP_MFA_ENCRYPTION_KEY` makes every enrolled code unreadable: verify answers 500 and the
   log names the user and the likely cause, never the secret; re-enrolment would come with an admin reset (later
   ticket). A pending step that runs out leaves its Keycloak
   session to Keycloak's idle timeout. No second factor for patients (not planned).
 - **Before merging:** add `APP_MFA_ENCRYPTION_KEY` (`openssl rand -base64 32`, one per environment) to the
   staging and prod `DEPLOY_ENV_FILE`; compose refuses to start without it. Local `.env`: the setup scripts add it.
+  In the staging and prod Keycloak consoles, remove the default group `/patients` and take `/patients` off the
+  existing practitioners and staff (`docs/DEPLOYMENT.md`); locally, `setup-dev -Reset` re-imports the realm.
 
 ## MLink-122 — metrics not public in production, GitHub #49 (2026-10-25, fix/49-management-port)
 

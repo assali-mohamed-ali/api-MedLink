@@ -161,10 +161,12 @@ one is mailed. At most one mail per minute per account, also under parallel requ
 ### 5 · `POST /api/auth/login`
 `{ "email": "…", "password": "…" }`
 - **200** `{ "user": {…} }` + session cookie (patient, or staff after the code step)
-- **200** `{ "mfaRequired": true, "mfaSetupRequired": true|false }` — practitioner or staff (sub-sprint 3)
+- **200** `{ "mfaRequired": true, "mfaSetupRequired": true|false }` — practitioner or staff (sub-sprint 3). With
+  `mfaSetupRequired: true` the API also mails the setup link of endpoint 8 to the account's own address (at most one
+  mail per 15 minutes; the answer is the same either way, even if the mail fails)
 - **200** `{ "passwordChangeRequired": true }` — forced change pending (sub-sprint 4)
 - **401** `INVALID_CREDENTIALS` "E-mail ou mot de passe incorrect, ou compte temporairement verrouillé." (same for an unknown email and a locked account)
-- **403** `EMAIL_NOT_VERIFIED` (React offers endpoint 4) · `ACCOUNT_DISABLED` · `ACCOUNT_SETUP_INCOMPLETE` "Votre compte n'est pas encore prêt. Contactez l'administration." (a Keycloak required action other than a forced change, right password only)
+- **403** `EMAIL_NOT_VERIFIED` (React offers endpoint 4) · `ACCOUNT_DISABLED` · `ACCOUNT_SETUP_INCOMPLETE` "Votre compte n'est pas encore prêt. Contactez l'administration." (a Keycloak required action other than a forced change, or an account holding more than one MedLink role; right password only; logged)
 - **429** `TOO_MANY_REQUESTS` per IP (see "Rate limits"), before Keycloak is asked: the same for any email
 - **503** `IDENTITY_UNAVAILABLE`
 How Keycloak 26.7.5 answers the password grant (checked on the dev stack, 2026-10-15):
@@ -192,9 +194,14 @@ valid", GitHub #28). Logout (endpoint 7) uses the same refresh token to end the 
 → **204**. The API ends the Keycloak session (logout endpoint with the stored refresh token;
 a failure is only logged) and invalidates our session.
 
-### 8 · `POST /api/auth/mfa/setup` (pending code step, first time only)
+### 8 · `POST /api/auth/mfa/setup` (pending code step + the mailed link, first time only)
+`{ "token": "…" }` (from the link `{frontend}/configurer-code?token=…` mailed at endpoint 5; review of #97: the
+password alone must not enrol a code, or a stolen password would let anyone bind their own app first)
 → **200** `{ "otpauthUrl": "otpauth://totp/MedLink:…", "qrCode": "data:image/png;base64,…", "secret": "…" }`
-· **409** `MFA_ALREADY_ENROLLED` when a code is already enrolled · **401** `UNAUTHORIZED` without a pending step.
+· checked in this order: **401** `UNAUTHORIZED` without a pending step · **409** `MFA_ALREADY_ENROLLED` when a
+code is already enrolled · **400** `VALIDATION_FAILED` without a token · **400** `INVALID_TOKEN` (unknown, or
+another account's) · **410** `TOKEN_EXPIRED` (after 30 minutes, or replaced by a newer mail). The link works until
+the first good code at endpoint 9, then stops.
 Stores the secret encrypted (AES-256-GCM, `app.mfa.encryption-key`), not yet active; the first valid code at
 endpoint 9 activates it. A second setup before that replaces the secret. The pending step (from endpoint 5) lasts
 5 minutes and holds no session: every other endpoint stays closed.
@@ -262,7 +269,7 @@ Existing `/api/users` endpoints become staff-only in sub-sprint 5.
 |---|---|---|---|
 | 1 | `users.username` → `varchar(254)`; `patients(id PK/FK users, first_name, last_name, birth_date, phone, address, created_at)`; `email_tokens(id, user_id FK, purpose VERIFY_EMAIL\|ACTIVATE_ACCOUNT, token_hash char(64) unique, expires_at, used_at, created_at)` | client `medlink-admin` (service account: `manage-users`, `view-users`, `query-users`, `query-groups`; secret `${KC_ADMIN_CLIENT_SECRET}`) | `keycloak.admin.*`, `spring.mail.*`, `app.frontend-url`; Mailpit in both compose files (inbox 8025); setup scripts generate the new secret and add missing `.env` keys |
 | 2 | — | `medlink-bff`: direct grants on, standard flow off; `ssoSessionIdleTimeout 900`; lockout 5 failures → 900 s; login events stored | `server.servlet.session.timeout=15m`, cookie flags; `oauth2Login` removed; setup scripts log in through endpoint 5 |
-| 3 | `user_mfa(user_id PK/FK users ON DELETE CASCADE, secret_enc, enabled, enrolled_at, last_used_step, failed_attempts, locked_until)` (V11; the last three: a code works once, 5 wrong codes lock for 15 min) | — | `app.mfa.encryption-key` = `APP_MFA_ENCRYPTION_KEY` (32 bytes base64, required: the API does not start without it); compose, `.env` examples, Terraform; setup scripts generate it |
+| 3 | `user_mfa(user_id PK/FK users ON DELETE CASCADE, secret_enc, enabled, enrolled_at, last_used_step, failed_attempts, locked_until)` (V11; the last three: a code works once, 5 wrong codes lock for 15 min) | — | `app.mfa.encryption-key` = `APP_MFA_ENCRYPTION_KEY` (32 bytes base64, required: the API does not start without it); compose, `.env` examples, Terraform; setup scripts generate it. V12: `email_tokens.purpose` also takes `MFA_ENROLMENT` (the 30-minute setup link) |
 | 4 | `session_revocations(user_id PK/FK users, revoked_at)` (V9, review of #89) | `passwordHistory(3)` added to the policy | French messages for Keycloak policy errors |
 | 5 | `audit_entries(id, timestamp, user_id, action, resource_type, resource_id, ip_address, outcome)` | — | — |
 | #51 | `rate_limits(key PK, hits, expires_at)` (V8) | — | `app.rate-limit.*`, `TRUSTED_PROXIES` (staging/prod: the reverse proxy's address) |

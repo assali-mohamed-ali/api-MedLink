@@ -84,8 +84,8 @@ sequenceDiagram
 - **Session:** a new HttpOnly cookie at login (`SameSite=Strict`, `Secure` in staging/prod). It ends after
   **15 idle minutes**, or as soon as Keycloak refuses to renew the token (account disabled, signed out).
 - **Staff code:** for practitioners and staff, the login answers `{ "mfaRequired": true, "mfaSetupRequired": … }`
-  and no session yet; the browser then calls `/api/auth/mfa/setup` (first time: a QR code for an authenticator
-  app) and `/api/auth/mfa/verify` with the 6-digit code, which opens the session. 5 wrong codes lock the code step
+  and no session yet; the browser then calls `/api/auth/mfa/setup` (first time only, with the token of the link the
+  API mails to the account's own address: a QR code for an authenticator app; the password alone enrols nothing) and `/api/auth/mfa/verify` with the 6-digit code, which opens the session. 5 wrong codes lock the code step
   for 15 minutes. The secrets are encrypted with `APP_MFA_ENCRYPTION_KEY` (the API does not start without it).
 - **CSRF:** every write (`POST`, `PUT`, `DELETE`) echoes the `XSRF-TOKEN` cookie in `X-XSRF-TOKEN`, or gets 403.
 - **Password grant:** a consciously accepted exception to the OAuth best practice, so the login stays a
@@ -100,7 +100,7 @@ sequenceDiagram
 | `POST /api/auth/verify-email` | anyone | 204 · 400 `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
 | `POST /api/auth/verify-email/resend` | anyone | 202, the same whether or not the account exists |
 | `POST /api/auth/login` | anyone | 200 (`user`, or `mfaRequired` for practitioners and staff) · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
-| `POST /api/auth/mfa/setup` | at the code step | 200 QR code, otpauth URL, secret · 401 · 409 `MFA_ALREADY_ENROLLED` |
+| `POST /api/auth/mfa/setup` | at the code step, `{token}` from the mailed link | 200 QR code, otpauth URL, secret · 401 · 409 `MFA_ALREADY_ENROLLED` · 400 `VALIDATION_FAILED` / `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
 | `POST /api/auth/mfa/verify` | at the code step | 200 `user` + session · 400 · 401 `INVALID_CODE` · 423 `MFA_LOCKED` |
 | `POST /api/auth/logout` | logged in | 204 |
 | `GET /api/users` | staff | 200 |

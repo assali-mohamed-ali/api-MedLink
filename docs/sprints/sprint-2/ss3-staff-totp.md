@@ -256,6 +256,39 @@ teammate's file beyond those below, or a contract change not written here.
 > `staff.dev` (like `SensitiveActionsAuditFunctionalTest`) will see `{ "mfaRequired": true }`. MFA audit entries
 > will come after your PR, on top of your `LOGIN` audit.
 
+### Review round 1 drafts (2026-10-28; Mohamed posts the YouTrack ones, Claude the GitHub ones on his go)
+
+**MLink-64 (Ahlem, React staff-code screens): contract change in #97**
+> #97 changed the first setup after the code owner's review (a stolen password alone could enrol the thief's own
+> app). The contract (plan.md §4, endpoints 5 and 8):
+> - The login is unchanged: `200 { mfaRequired: true, mfaSetupRequired: true|false }`. With `mfaSetupRequired:
+>   true` the API mails a link to the account's own address: `{frontend}/configurer-code?token=…`, valid 30 minutes,
+>   at most one mail per 15 minutes. So the screen after the password says "open the link we sent you".
+> - New page `/configurer-code`: read `token` from the URL, `POST /api/auth/mfa/setup` with `{ "token": "…" }` (CSRF
+>   header as usual) → 200 `{ otpauthUrl, qrCode, secret }` as before. It needs the pending code step of the
+>   login (5 minutes, same browser): on **401** `UNAUTHORIZED`, ask for the password again, then post the same
+>   token (it stays valid 30 minutes).
+> - Errors: **400** `VALIDATION_FAILED` (no token) · **400** `INVALID_TOKEN` (unknown or another account's link) ·
+>   **410** `TOKEN_EXPIRED` (older than 30 minutes or replaced: log in again after 15 minutes for a new mail) ·
+>   **409** `MFA_ALREADY_ENROLLED` (as before).
+> - `/verify` is unchanged (6 digits, 401 `INVALID_CODE`, 423 `MFA_LOCKED` for 15 minutes). The link stops working
+>   after the first good code.
+> - New login refusal: **403** `ACCOUNT_SETUP_INCOMPLETE` also for an account that holds two roles (same message).
+
+**MLink-65 (Youssef, setup scripts): realm file**
+> #97 removes `"defaultGroups": ["/patients"]` from `keycloak/realm-medlink.json` (console-made staff were also
+> patients). Nothing to change in the scripts: they check the groups exist, not the default. A dev stack needs
+> `-Reset` once to re-import the realm (the import runs into an empty database only).
+
+**#87 (Ela):** Heads-up: #97 now also takes Flyway **V12** (`V12__email_token_mfa_enrolment.sql`, the
+`email_tokens.purpose` CHECK), after your V10 and our V11.
+
+**#90 / #93 (Chourouk):** #97 adds one check at the top of `LoginService.login` (a token with more than one MedLink
+role → 403 `ACCOUNT_SETUP_INCOMPLETE`) and leaves the `Success` path as it was; `LoginController` now mails the
+setup link when `mfaSetupRequired`. As agreed with the code owner, staff `LOGIN` SUCCESS belongs after
+`/api/auth/mfa/verify`: if your PR lands first, #97 moves it there; if #97 lands first, keep your audit on the
+`Success` path only, which `MfaRequired` never reaches.
+
 ## Plan (agreed 2026-10-24)
 
 ### Context
