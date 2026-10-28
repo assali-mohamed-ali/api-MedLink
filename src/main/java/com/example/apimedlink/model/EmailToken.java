@@ -9,6 +9,7 @@ import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import lombok.Builder;
@@ -26,9 +27,22 @@ import org.hibernate.type.SqlTypes;
 @NoArgsConstructor
 public class EmailToken {
 
+    /** What the link is for, and how long it stays valid. */
     public enum Purpose {
-        VERIFY_EMAIL,
-        ACTIVATE_ACCOUNT
+        VERIFY_EMAIL(Duration.ofHours(24)),
+        ACTIVATE_ACCOUNT(Duration.ofHours(24)),
+        /** A practitioner's or staff member's first staff-code setup (MLink-62, review of #97). */
+        MFA_ENROLMENT(Duration.ofMinutes(30));
+
+        private final Duration validity;
+
+        Purpose(Duration validity) {
+            this.validity = validity;
+        }
+
+        public Duration validity() {
+            return validity;
+        }
     }
 
     @Id
