@@ -201,6 +201,9 @@ public abstract class FunctionalTestBase {
 
         private static final ObjectMapper JSON = new ObjectMapper();
 
+        /** The {@code user} of the last answer that opened a session ({@link #login}). */
+        private Map<?, ?> sessionUser;
+
         /**
          * Logs in through our login endpoint (MLink-55), as a person does in React; the password answer is not
          * checked here. A practitioner or staff member then does the code step (MLink-62/63) as with their
@@ -210,6 +213,7 @@ public abstract class FunctionalTestBase {
         Browser login(String email, String password) throws Exception {
             Map<?, ?> answer = json(apiLogin(email, password));
             if (!Boolean.TRUE.equals(answer.get("mfaRequired"))) {
+                sessionUser = (Map<?, ?>) answer.get("user");
                 return this;
             }
             String who = email.toLowerCase();
@@ -228,7 +232,14 @@ public abstract class FunctionalTestBase {
             if (verify.statusCode() != 200) {
                 throw new AssertionError("code step for " + email + ": " + verify.statusCode() + " " + verify.body());
             }
+            sessionUser = (Map<?, ?>) json(verify).get("user");
             return this;
+        }
+
+        /** The roles the API gave the session that {@link #login} opened, as React reads them. */
+        List<String> sessionRoles() {
+            return sessionUser == null ? List.of()
+                    : ((List<?>) sessionUser.get("roles")).stream().map(String::valueOf).toList();
         }
 
         /** Endpoint 8, as React does: no body, the pending code step is the session's. */
@@ -366,18 +377,17 @@ public abstract class FunctionalTestBase {
 
         /**
          * A practitioner ({@code /practitioners}) or staff member ({@code /administrative-staff}) made in the
-         * console. The realm's default group {@code /patients} is added to every new user, so the admin takes it
-         * off: a person holds one role only.
+         * console, in that group only: exactly what the admin does, nothing cleaned up after.
          */
         UUID createUser(String email, String password, String group) {
-            UUID id = createUser(email, password, true, group);
-            List<?> patients = (List<?>) read("/groups?search=patients&exact=true");
-            String patientsGroup = (String) ((Map<?, ?>) patients.get(0)).get("id");
-            http.delete().uri("/admin/realms/medlink/users/{id}/groups/{group}", id, patientsGroup)
-                    .header(HttpHeaders.AUTHORIZATION, token())
-                    .retrieve()
-                    .toBodilessEntity();
-            return id;
+            return createUser(email, password, true, group);
+        }
+
+        /** The paths of the user's groups, as the console's Groups tab lists them. */
+        List<String> groups(UUID user) {
+            return ((List<?>) read("/users/{id}/groups", user)).stream()
+                    .map(group -> (String) ((Map<?, ?>) group).get("path"))
+                    .toList();
         }
 
         private UUID createUser(String email, String password, boolean emailVerified, String group) {
