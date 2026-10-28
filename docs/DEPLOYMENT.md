@@ -97,6 +97,14 @@ Pushing to `master` deploys nothing. The promotion path is still `master` → `s
 The Postgres and Keycloak volumes are persistent. Re-running the workflow does not recreate or wipe
 them. `docker compose up` only recreates the API container when its image or environment changes.
 
+**A realm change never reaches an existing Keycloak:** the import runs on the first start only, so each change
+to `keycloak/realm-medlink.json` is made by hand in the Keycloak console of staging and prod. The changes so far:
+- MLink-121: the realm role `ADMINISTRATIVE_STAFF` holds no `realm-management` client role.
+- MLink-62 (review of #97): **no default group**. Realm settings → User registration → Default groups: remove
+  `/patients`. Then, in Groups → `practitioners` and `administrative-staff` → Members, check each member's
+  Groups tab and remove `/patients` (the default group gave it to every console-made account). Until then, the
+  API refuses the login of an account that holds two MedLink roles (`403 ACCOUNT_SETUP_INCOMPLETE`, logged).
+
 ## Rollback
 
 Every run logs its immutable image reference. To return to the previous revision, edit `APP_IMAGE` on

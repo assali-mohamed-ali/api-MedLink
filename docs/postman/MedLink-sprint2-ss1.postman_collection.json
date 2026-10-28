@@ -2225,7 +2225,7 @@
           ]
         },
         {
-          "name": "Keycloak: the patients group (added to every new user by the realm)",
+          "name": "Keycloak: the staff member is in /administrative-staff only",
           "request": {
             "method": "GET",
             "header": [
@@ -2234,7 +2234,7 @@
                 "value": "Bearer {{kcToken}}"
               }
             ],
-            "url": "{{keycloakUrl}}/admin/realms/medlink/groups?search=patients&exact=true"
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{staffUserId}}/groups"
           },
           "event": [
             {
@@ -2243,31 +2243,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
-                  "pm.collectionVariables.set(\"patientsGroupId\", pm.response.json()[0].id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Keycloak: the staff member leaves the patients group (one role only)",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kcToken}}"
-              }
-            ],
-            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{staffUserId}}/groups/{{patientsGroupId}}"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                  "",
+                  "pm.test(\"groups = [/administrative-staff] (the realm adds no default group)\", () => pm.expect(pm.response.json().map(g => g.path)).to.eql([\"/administrative-staff\"]));"
                 ]
               }
             }
@@ -2705,7 +2682,7 @@
           ]
         },
         {
-          "name": "Keycloak: the patients group (added to every new user by the realm)",
+          "name": "Keycloak: the practitioner is in /practitioners only",
           "request": {
             "method": "GET",
             "header": [
@@ -2714,7 +2691,7 @@
                 "value": "Bearer {{kcToken}}"
               }
             ],
-            "url": "{{keycloakUrl}}/admin/realms/medlink/groups?search=patients&exact=true"
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{practitionerUserId}}/groups"
           },
           "event": [
             {
@@ -2723,31 +2700,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
-                  "pm.collectionVariables.set(\"patientsGroupId\", pm.response.json()[0].id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Keycloak: the practitioner leaves the patients group (one role only)",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kcToken}}"
-              }
-            ],
-            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{practitionerUserId}}/groups/{{patientsGroupId}}"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                  "",
+                  "pm.test(\"groups = [/practitioners] (the realm adds no default group)\", () => pm.expect(pm.response.json().map(g => g.path)).to.eql([\"/practitioners\"]));"
                 ]
               }
             }
@@ -3588,10 +3542,6 @@
     },
     {
       "key": "practitionerUserId",
-      "value": ""
-    },
-    {
-      "key": "patientsGroupId",
       "value": ""
     },
     {
