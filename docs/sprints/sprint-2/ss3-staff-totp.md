@@ -22,9 +22,9 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | Done | a720111 (Postman); log of an unreadable secret cd4ecb7 (red), 0370c1c (green); docs 97351d5 |
 | 10 | Checks and PR | MLink-62/63 | Done: [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), in review | merge 482cb99 |
 | A | SCA baseline, own PR (see "Review round 1") | MLink-127 | In review: [#98](https://github.com/assali-mohamed-ali/api-MedLink/pull/98) | 3c5215b (on `chore/sca-baseline`) |
-| B1 | Realm: no default group; console-made staff hold one role | MLink-62 | To do | |
-| B2 | Login fails closed on more than one MedLink role | MLink-62 | To do | |
-| B3 | `EmailToken.Purpose.MFA_ENROLMENT` (30 min), `requireValid`, V12 | MLink-62 | To do | |
+| B1 | Realm: no default group; console-made staff hold one role | MLink-62 | Done (newman waits for B6: the dev realm needs `-Reset`) | 06c37f9 (red), 91185f5 (green) |
+| B2 | Login fails closed on more than one MedLink role | MLink-62 | Done | c400380 (red), 9ecb94d (green) |
+| B3 | `EmailToken.Purpose.MFA_ENROLMENT` (30 min), `requireValid`, V12 | MLink-62 | Done | 7339b36 (red), f0fd9b1 (green) |
 | B4 | Enrolment mail at a staff login that needs setup (`MfaEnrolmentLinks`) | MLink-62 | To do | |
 | B5 | `/setup` needs the mailed token (takeover tests) | MLink-62 | To do | |
 | B6 | Postman folders 6 and 8 | MLink-62 | To do | |
@@ -32,7 +32,7 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | B8 | Manual check on the dev stack (`-Reset`: ask Mohamed first) | MLink-62 | To do | |
 | B9 | Merge `master` (after #98), checks, push, answer the review | MLink-62/63 | To do | |
 
-**Next step (new session):** B1 (see "Review round 1" below for the whole plan). Track A: once #98's
+**Next step (new session):** B4 (see "Review round 1" below for the whole plan). Track A: once #98's
 `dependency-check` is green and #98 merges, update #92 from `master` with a merge commit (no rewrite).
 
 ## Review round 1 (2026-10-28): plan agreed with Mohamed
@@ -219,6 +219,14 @@ teammate's file beyond those below, or a contract change not written here.
   1.9.8 fmt/validate, `check-prod-config.sh`, `sca-policy.test.sh`: pass. PR
   [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) opened to `master`, review asked from the code
   owner. Not run locally: the OWASP/Trivy SCA workflow (its CI result is the proof).
+- **2026-10-28:** review round 1 started. A: MLink-127 created (Claude, allowed by Mohamed; Claude moves that
+  ticket only), #98 opened (262/262 both orders; swagger-ui 5.34.0 with DOMPurify 3.4.16 in the jar, no devtools
+  jar). B1: `KeycloakConsole.createUser(email, pw, group)` no longer removes `/patients`; `groups(id)` and
+  `Browser.sessionRoles()` added; `RealmFileTest`; `defaultGroups` removed; Postman checks the single group;
+  DEPLOYMENT.md console steps. 371/371. B2: `createUserInGroups`; 3 two-group cases → 403, sessions ended, logged;
+  mutation (limit 2) → red. B3: `Purpose.validity()`, `requireValid` (no consume, owner-bound), V12; mutation
+  (no owner filter) → red. **Lesson:** restore a mutation from a backup copy, never `git checkout` (it drops
+  uncommitted green edits).
 - **Open items carried to the new session:**
   - Comments to post after merge (Claude writes, Mohamed posts on YouTrack): MLink-64 (Ahlem: contract + error
     codes, the QR is a data URI, codes are 6 digits, `MFA_LOCKED` lasts 15 min), MLink-65 (Youssef: the staff
