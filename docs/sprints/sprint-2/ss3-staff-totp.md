@@ -22,17 +22,17 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | 9 | Postman (folder 6 + folder 8) and docs | MLink-62/63 | Done | a720111 (Postman); log of an unreadable secret cd4ecb7 (red), 0370c1c (green); docs 97351d5 |
 | 10 | Checks and PR | MLink-62/63 | Done: [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), in review | merge 482cb99 |
 | A | SCA baseline, own PR (see "Review round 1") | MLink-127 | In review: [#98](https://github.com/assali-mohamed-ali/api-MedLink/pull/98) | 3c5215b (on `chore/sca-baseline`) |
-| B1 | Realm: no default group; console-made staff hold one role | MLink-62 | Done (newman waits for B6: the dev realm needs `-Reset`) | 06c37f9 (red), 91185f5 (green) |
+| B1 | Realm: no default group; console-made staff hold one role | MLink-62 | Done | 06c37f9 (red), 91185f5 (green) |
 | B2 | Login fails closed on more than one MedLink role | MLink-62 | Done | c400380 (red), 9ecb94d (green) |
 | B3 | `EmailToken.Purpose.MFA_ENROLMENT` (30 min), `requireValid`, V12 | MLink-62 | Done | 7339b36 (red), f0fd9b1 (green) |
-| B4 | Enrolment mail at a staff login that needs setup (`MfaEnrolmentLinks`) | MLink-62 | To do | |
-| B5 | `/setup` needs the mailed token (takeover tests) | MLink-62 | To do | |
-| B6 | Postman folders 6 and 8 | MLink-62 | To do | |
-| B7 | Docs and drafts | MLink-62/63 | To do | |
-| B8 | Manual check on the dev stack (`-Reset`: ask Mohamed first) | MLink-62 | To do | |
+| B4 | Enrolment mail at a staff login that needs setup (`MfaEnrolmentLinks`) | MLink-62 | Done | 4eda38c (red), be37064 (green) |
+| B5 | `/setup` needs the mailed token (takeover tests) | MLink-62 | Done | 58503f7 (red), a412a59 (green) |
+| B6 | Postman folders 6 and 8 | MLink-62 | Done: newman 106 requests, 252 assertions, 0 failures, twice | 1696d0a |
+| B7 | Docs and drafts | MLink-62/63 | Done (drafts in "Review round 1 drafts") | 2ec9fe9 |
+| B8 | Manual check on the dev stack (`-Reset` done 2026-10-28, OK'd by Mohamed) | MLink-62 | In progress: Mohamed's phone check | |
 | B9 | Merge `master` (after #98), checks, push, answer the review | MLink-62/63 | To do | |
 
-**Next step (new session):** B4 (see "Review round 1" below for the whole plan). Track A: once #98's
+**Next step (new session):** B8 manual check, then B9 (see "Review round 1" below for the whole plan). Track A: once #98's
 `dependency-check` is green and #98 merges, update #92 from `master` with a merge commit (no rewrite).
 
 ## Review round 1 (2026-10-28): plan agreed with Mohamed
@@ -227,6 +227,13 @@ teammate's file beyond those below, or a contract change not written here.
   mutation (limit 2) → red. B3: `Purpose.validity()`, `requireValid` (no consume, owner-bound), V12; mutation
   (no owner filter) → red. **Lesson:** restore a mutation from a backup copy, never `git checkout` (it drops
   uncommitted green edits).
+- **2026-10-28 (afternoon):** B4: `MfaEnrolmentLinks.send` (throttle → close older → issue → mail; a mail failure
+  logged without the token), `LoginController` sends only when `setupRequired`; mutation → red. B5:
+  `MfaSetupRequest{token}`; order pending (401) → enrolled (409, kept so React's contract holds) → no token (400)
+  → `check`; `/verify` closes the link; two mutations → red. Full suite **391/391**. B6: newman 106/252, 0
+  failures, twice, on a `-Reset` dev stack. #98's `dependency-check` was **cancelled by the 60-minute timeout**
+  while downloading the NVD (no cache: `actions/cache` saves only on success, and no run succeeded since the NVD
+  key): re-run, and a cache/timeout fix proposed to the code owner on #98 (their workflow, not changed by us).
 - **Open items carried to the new session:**
   - Comments to post after merge (Claude writes, Mohamed posts on YouTrack): MLink-64 (Ahlem: contract + error
     codes, the QR is a data URI, codes are 6 digits, `MFA_LOCKED` lasts 15 min), MLink-65 (Youssef: the staff
