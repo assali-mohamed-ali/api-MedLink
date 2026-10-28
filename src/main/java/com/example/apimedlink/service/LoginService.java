@@ -59,8 +59,7 @@ public class LoginService {
             }
             log.warn("Login refused for user {}: not fully set up in Keycloak (required actions {})",
                     user.id(), user.requiredActions());
-            throw new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_SETUP_INCOMPLETE",
-                    "Votre compte n'est pas encore prêt. Contactez l'administration.");
+            throw setupIncomplete();
         }
         Jwt token = tokens.accessToken();
         try {
@@ -70,13 +69,19 @@ public class LoginService {
                 throw new ApiException(HttpStatus.FORBIDDEN, "EMAIL_NOT_VERIFIED",
                         "Confirmez votre adresse e-mail avant de vous connecter : utilisez le lien reçu par e-mail.");
             }
+            // One person, one role: an account left in two MedLink groups gets no session rather than a mixed one
+            List<String> roles = ourRoles(token);
+            if (roles.size() > 1) {
+                log.warn("Login refused for user {}: holds more than one role {}", token.getSubject(), roles);
+                throw setupIncomplete();
+            }
             // Our row for this account, created at first login for console-made accounts (GitHub #29)
             User user = provisioning.provision(
                     UUID.fromString(token.getSubject()),
                     token.getClaimAsString("email"),
                     token.getClaimAsString("preferred_username"));
             Login login = new Login(user, token.getClaimAsString("given_name"),
-                    token.getClaimAsString("family_name"), ourRoles(token), tokens);
+                    token.getClaimAsString("family_name"), roles, tokens);
             if (login.roles().stream().anyMatch(CODE_ROLES::contains)) {
                 return new LoginResult.MfaRequired(login, !mfa.isEnrolled(user.getId()));
             }
@@ -102,6 +107,11 @@ public class LoginService {
             return List.of();
         }
         return Roles.ALL.stream().filter(claimed::contains).toList();
+    }
+
+    private static ApiException setupIncomplete() {
+        return new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_SETUP_INCOMPLETE",
+                "Votre compte n'est pas encore prêt. Contactez l'administration.");
     }
 
     private static ApiException invalidCredentials() {
