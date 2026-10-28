@@ -204,6 +204,9 @@ public abstract class FunctionalTestBase {
         /** The {@code user} of the last answer that opened a session ({@link #login}). */
         private Map<?, ?> sessionUser;
 
+        /** The email of the last login through {@link #apiLogin}: whose mailbox holds the setup link. */
+        private String loginEmail;
+
         /**
          * Logs in through our login endpoint (MLink-55), as a person does in React; the password answer is not
          * checked here. A practitioner or staff member then does the code step (MLink-62/63) as with their
@@ -242,9 +245,17 @@ public abstract class FunctionalTestBase {
                     : ((List<?>) sessionUser.get("roles")).stream().map(String::valueOf).toList();
         }
 
-        /** Endpoint 8, as React does: no body, the pending code step is the session's. */
+        /**
+         * Endpoint 8, as React does once the person opened the setup link mailed at this login (review of #97): the
+         * token of the newest such mail to the address this browser logged in with.
+         */
         HttpResponse<String> mfaSetup() throws Exception {
-            return post("/api/auth/mfa/setup", "", true);
+            return mfaSetup(new Mailbox().enrolmentToken(loginEmail));
+        }
+
+        /** Endpoint 8 with this token ({@code null}: no body), the pending code step being the session's. */
+        HttpResponse<String> mfaSetup(String token) throws Exception {
+            return post("/api/auth/mfa/setup", token == null ? "" : "{\"token\":\"" + token + "\"}", true);
         }
 
         /** Endpoint 9, as React does. */
@@ -260,6 +271,7 @@ public abstract class FunctionalTestBase {
 
         /** Logs in through our login endpoint (MLink-55), as React does: CSRF cookie first, then the JSON post. */
         HttpResponse<String> apiLogin(String email, String password) throws Exception {
+            loginEmail = email;
             call("/api/auth/csrf");
             return post("/api/auth/login", "{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}", true);
         }
