@@ -482,7 +482,11 @@ public abstract class FunctionalTestBase {
     /** The mails the API sent, read through Mailpit's API. */
     static final class Mailbox {
 
+        static final String VERIFICATION_SUBJECT = "Confirmez votre adresse e-mail MedLink";
+        static final String ENROLMENT_SUBJECT = "Configurez votre code de connexion MedLink";
+
         private static final Pattern VERIFY_LINK = Pattern.compile("verifier-email[?]token=([A-Za-z0-9_-]+)");
+        private static final Pattern ENROLMENT_LINK = Pattern.compile("configurer-code[?]token=([A-Za-z0-9_-]+)");
 
         private final RestClient http =
                 RestClient.builder().baseUrl("http://localhost:" + MAILPIT.getMappedPort(8025)).build();
@@ -508,13 +512,22 @@ public abstract class FunctionalTestBase {
 
         /** The token in the newest verification mail to this address. */
         String verificationToken(String email) {
-            List<Map<?, ?>> mails = to(email, "Confirmez votre adresse e-mail MedLink");
+            return token(email, VERIFICATION_SUBJECT, VERIFY_LINK);
+        }
+
+        /** The token in the newest staff-code setup mail to this address (MLink-62, review of #97). */
+        String enrolmentToken(String email) {
+            return token(email, ENROLMENT_SUBJECT, ENROLMENT_LINK);
+        }
+
+        private String token(String email, String subject, Pattern linkPattern) {
+            List<Map<?, ?>> mails = to(email, subject);
             if (mails.isEmpty()) {
-                throw new AssertionError("no verification mail to " + email);
+                throw new AssertionError("no mail \"" + subject + "\" to " + email);
             }
-            Matcher link = VERIFY_LINK.matcher(text(mails.get(0)));
+            Matcher link = linkPattern.matcher(text(mails.get(0)));
             if (!link.find()) {
-                throw new AssertionError("no verification link in the mail to " + email);
+                throw new AssertionError("no link in the mail \"" + subject + "\" to " + email);
             }
             return link.group(1);
         }
