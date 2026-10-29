@@ -9,10 +9,15 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
-| 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
+| 3 | Staff code, TOTP (endpoints 8–9) | **In review** on `feat/ss3-staff-totp` (MLink-62/63): see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) | 2026-10-27 |
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-25:** MLink-62 and MLink-63 (sub-sprint 3, staff code) on `feat/ss3-staff-totp`, one PR based on
+`master`. **Migration V11** (`user_mfa`). **New required secret `APP_MFA_ENCRYPTION_KEY`**: the API does not start
+without it; staging and prod need it in `DEPLOY_ENV_FILE` before the merge (see the section below).
+Practitioners and staff now log in with a code: tests that log in as them use `Browser.login()`, which does the
+code step.
 **2026-10-28:** MLink-127 (SCA baseline, `chore/sca-baseline`): since the NVD key is set (2026-10-27), the
 SCA workflow runs OWASP Dependency-Check instead of the Trivy fallback, and it scans the whole project, so findings
 already on `master` turned **every PR red**. The only finding with CVSS ≥ 7, `spring-boot-devtools` vs
@@ -57,6 +62,52 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-62, MLink-63 - staff code, TOTP (2026-10-25, feat/ss3-staff-totp)
+
+- **Contract** (plan.md §4, endpoints 5, 8, 9): for `PRACTITIONER` and `ADMINISTRATIVE_STAFF`, the password alone
+  answers `200 {"mfaRequired":true,"mfaSetupRequired":true|false}` and opens no session; the accepted login waits
+  5 minutes in the server session (`MfaPending`, Keycloak tokens included, never sent). `POST /api/auth/mfa/setup`
+  → QR code (PNG data URI), otpauth URL, Base32 secret; 401 without the step; 409 `MFA_ALREADY_ENROLLED`.
+  `POST /api/auth/mfa/verify` → `{user}` + session (new id, 15 idle minutes); 401 `INVALID_CODE`; 400 for a code
+  that is not 6 digits (checked after the step, so a caller without one gets 401); 423 `MFA_LOCKED` from the 5th
+  wrong code. Patients are unchanged.
+- **Library choice:** RFC 6238 is a few lines of `javax.crypto` (HMAC-SHA1, dynamic truncation), so it is our own
+  `service/Totp`, checked against the RFC's published vectors; ZXing `core` 3.5.3 (no transitive dependency)
+  draws the QR code, the JDK writes the PNG. A TOTP library would add a dependency for less than 100 lines.
+- **Decisions** (with Mohamed, recorded in [ss3-staff-totp.md](ss3-staff-totp.md)):
+  - The secret is sealed with AES-256-GCM, a new IV each time, the user id as associated data (a secret copied to
+    another row does not decrypt). Key `APP_MFA_ENCRYPTION_KEY` (32 bytes, base64), checked at start.
+  - Wrong codes are counted per user in the database, not per pending step: 5 → the code step is locked for 15
+    minutes, across logins and parallel requests (stronger than plan.md's first draft). The lock also drops the
+    pending step and ends the Keycloak session. A good code resets the count.
+  - A code works once (`last_used_step`), within one step of tolerance either side.
+  - `repository/UserMfaStore` uses `JdbcClient`, not JPA: each rule is one SQL statement, atomic without a
+    transaction (like `SessionRevocationStore`).
+  - The forced password change and the code step share `security/PendingStep<T>` (5 minutes, old session dropped).
+  - MFA audit entries come after #90 (Chourouk's `LOGIN` audit) merges; for staff, `LOGIN` SUCCESS should then be
+    recorded after the code (proposed on #90). Logs name the user and the outcome only.
+- **Proof:** `MfaFunctionalTest` 20 (every contract line, over HTTP, real Keycloak and database), `MfaServiceTest` 9,
+  `UserMfaStoreTest` 15 (10 wrong codes at once: exactly 5 counted; one code twice at once: works once),
+  `TotpTest` 27, `MfaSecretCipherTest` 14, `MfaKeyStartupTest` 3, `QrCodesTest` 3, `PendingStepTest` 7; the access
+  matrix has the 2 routes (57 cells). Each rule was broken once on purpose and its test turned red. Full suite
+  **349/349** in normal and reverse class order. Postman: folder 6's staff step now does the code; new folder 8
+  (28 requests) on a disposable practitioner; newman **101 requests, 240 assertions, 0 failures**, twice in a row.
+- **Tests:** in functional tests the API's `Clock` is real time shifted forward (`FunctionalTestBase.CLOCK`): each
+  staff login uses the next 30-second code, and a test lets the 15-minute lock or the 5-minute step run out.
+  `Browser.login()` does the code step for practitioners and staff, so teammates' tests keep working.
+- **Found on the way:**
+  - A full session opened after a pending step kept its 5-minute idle time; `LoginSessions.open` now sets the
+    usual 15 minutes again (red test first).
+  - **Not fixed here:** the realm's `defaultGroups: ["/patients"]` puts every console-made practitioner or staff
+    member in `/patients` too, so they also hold `PATIENT` (one role only, CLAUDE.md). The tests remove it, as an
+    admin must do by hand today.
+- **Limits:** changing `APP_MFA_ENCRYPTION_KEY` makes every enrolled code unreadable: verify answers 500 and the
+  log names the user and the likely cause, never the secret; re-enrolment would come with an admin reset (later
+  ticket). A pending step that runs out leaves its Keycloak
+  session to Keycloak's idle timeout. No second factor for patients (not planned).
+- **Before merging:** add `APP_MFA_ENCRYPTION_KEY` (`openssl rand -base64 32`, one per environment) to the
+  staging and prod `DEPLOY_ENV_FILE`; compose refuses to start without it. Local `.env`: the setup scripts add it.
 
 ## MLink-122 — metrics not public in production, GitHub #49 (2026-10-25, fix/49-management-port)
 

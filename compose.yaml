@@ -105,6 +105,7 @@ services:
       - 'KEYCLOAK_CLIENT_ID=medlink-bff'
       - 'KEYCLOAK_CLIENT_SECRET=dev-only-medlink-bff-secret'
       - 'KEYCLOAK_ADMIN_CLIENT_SECRET=dev-only-medlink-admin-secret'
+      - 'APP_MFA_ENCRYPTION_KEY=devOnlyMfaKeyNotForProductionUseLocalOnlyMA=' # gitleaks:allow
       - 'MAIL_HOST=mailpit'
       - 'MAIL_PORT=1025'
       - 'MAIL_USERNAME='

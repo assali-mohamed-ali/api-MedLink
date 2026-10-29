@@ -65,6 +65,12 @@
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
             <version>3.2.0</version>
         </dependency>
+        <!-- MLink-62: QR code of the staff code enrolment (core only: no other dependency) -->
+        <dependency>
+            <groupId>com.google.zxing</groupId>
+            <artifactId>core</artifactId>
+            <version>3.5.3</version>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

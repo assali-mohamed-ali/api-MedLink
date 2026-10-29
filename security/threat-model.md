@@ -48,7 +48,7 @@ flowchart LR
 | Personal and health data (PII/PHI) | app database (`users`, `patients`, later appointments and records) | confidentiality, GDPR, health-data rules |
 | Audit trail | `audit_entries` (append-only) | proof of who was refused what (MLink-17) |
 | Email tokens | `email_tokens` (SHA-256 hash only, 24 h, single use) | verify someone else's email |
-| Secrets | environment variables, GitHub Environments: `KC_BFF_CLIENT_SECRET`, `KC_ADMIN_CLIENT_SECRET`, DB and Keycloak admin passwords | full access to identity or data |
+| Secrets | environment variables, GitHub Environments: `KC_BFF_CLIENT_SECRET`, `KC_ADMIN_CLIENT_SECRET`, `APP_MFA_ENCRYPTION_KEY` (staff code secrets), DB and Keycloak admin passwords | full access to identity or data |
 
 ## 3. Assumptions
 
@@ -64,7 +64,7 @@ flowchart LR
 | # | Threat | Controls (where) | Status | Open work |
 |---|---|---|---|---|
 | S1 | Brute force or credential stuffing on login | Keycloak lockout: 5 failures → 15 min (realm `bruteForceProtected`, `LoginLockoutFunctionalTest`); per-IP limit 30 / 5 min → 429 (`security/RateLimitFilter`, `RateLimitFunctionalTest`); password policy: 12+ characters, mixed, not the email (realm) | ✅ | |
-| S2 | A password alone opens a staff or practitioner account | none yet: one factor for every role | ⏳ | staff code (TOTP): MLink-62/63; admin identities: GitHub #68 |
+| S2 | A password alone opens a staff or practitioner account | staff code (TOTP, RFC 6238): the password alone opens no session; secret AES-256-GCM encrypted; each code works once; 5 wrong codes → 15-minute lock across logins, Keycloak session ended (`MfaService`, `MfaController`, `MfaFunctionalTest`, MLink-62/63) | ✅ | admin identities: GitHub #68 |
 | S3 | Session stolen by a script (XSS) | session cookie HttpOnly, tokens never sent to the browser (`security/LoginSessions`, `LoginFunctionalTest`) | ✅ | a Content-Security-Policy is not set (proxy or API) ❌ |
 | S4 | Session fixation | a new session id at every login (`LoginSessions.open`, `SessionCookieFunctionalTest`) | ✅ | |
 | S5 | Cross-site request forgery | session cookie `SameSite=Strict`; CSRF token on every write (`config/SecurityConfig`, SPA cookie mode; `OwnershipFunctionalTest`) | ✅ | |
@@ -139,7 +139,7 @@ be triggered by someone else (D2).
 
 | Priority | Item | Tracked |
 |---|---|---|
-| 1 | Staff and practitioner second factor (S2); MFA for admin identities (E4) | MLink-62/63, GitHub #68 |
+| 1 | MFA for admin identities (E4); the staff and practitioner second factor (S2) is in place (MLink-62/63) | GitHub #68 |
 | 1 | No default database credentials outside dev (I7) | GitHub #64 |
 | 2 | API docs not public in production (I4) | GitHub #65 |
 | 2 | Separate database roles for the audit trail (T2) | GitHub #57 |
