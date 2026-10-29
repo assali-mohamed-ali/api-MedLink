@@ -281,7 +281,7 @@ flowchart LR
 | `master` | Repository default and one-time workflow bootstrap during migration | existing | — | — | — |
 
 - **Never push directly** to `master`, `staging`, or `prod`.
-- Keep PR/check-required protections on `staging` and `prod`. For fully automatic promotion, do not configure a human reviewer gate on the production environment or required code-owner approval for bot-created promotion/release PRs. All configured CI/security checks must still pass before merge.
+- Keep PR/check-required protections on `staging` and `prod`. In this PAT-based full-automation design, don't require reviewers on those branches or on the production environment: that would block the bot's `staging -> prod` promotion and `prod -> staging` version-sync PRs. All configured CI/security checks must still pass before merge. If review requirements must stay enforced, use a dedicated GitHub App with narrowly scoped ruleset bypass for automation PRs.
 - **One-time migration warning:** the current `master`, `staging`, and `prod` branches have different/diverged history. This design is not active on staging/prod until workflows and release configuration are carried over by deliberately reviewed PRs and branch baselines are reconciled. Keep repository variable `ENABLE_AUTO_PROMOTION` false until then; do not merge the historical branch differences blindly.
 - **Secrets never enter git.** `.env*` files are ignored except `*.example` templates.
 - **Fail fast:** Keycloak client secrets have no default outside dev, so a missing secret stops startup. Datasource credentials still have defaults (GitHub #64).
