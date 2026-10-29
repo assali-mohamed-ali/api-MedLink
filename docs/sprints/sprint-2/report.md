@@ -9,22 +9,41 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
-| 3 | Staff code, TOTP (endpoints 8–9) | **In review** on `feat/ss3-staff-totp` (MLink-62/63): see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) | 2026-10-27 |
+| 3 | Staff code, TOTP (endpoints 8–9) | **Merged** (#97, MLink-62/63); review round 1 **in review** on `fix/ss3-review-round-1`: see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) | 2026-10-29 |
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
+
+**2026-10-29:** #97 (MLink-62/63) was merged before its review round 1 reached it, so `master` still has the
+first-enrolment takeover and the `/patients` default group. `fix/ss3-review-round-1` (one PR based on `master`)
+brings that round: the first setup needs a link mailed at login (**migration V12**), the realm adds no default group
+(staging and prod: a console step, see `docs/DEPLOYMENT.md`), and a login holding two MedLink roles is refused. Also
+the README tells manual-setup users to replace the `APP_MFA_ENCRYPTION_KEY` placeholder of `.env.example`. SCA on
+`master` is red again on a new finding, CVE-2026-116803/116804 (10.0) in DOMPurify 3.4.16 (Swagger UI 5.34.0): a
+separate MLink-127 follow-up, not this PR.
+
+**2026-10-28:** MLink-127 (SCA baseline, `chore/sca-baseline`): since the NVD key is set (2026-10-27), the
+SCA workflow runs OWASP Dependency-Check instead of the Trivy fallback, and it scans the whole project, so findings
+already on `master` turned **every PR red**. The only finding with CVSS ≥ 7, `spring-boot-devtools` vs
+CVE-2022-31691 (9.8), is a false positive: the CVE is about the Spring Tools IDE plugins (CPE mismatch), and devtools
+is `optional`, so the production jar leaves it out. It gets a narrow suppression in `security/owasp-suppressions.xml`
+(this package and this CVE only, until 2027-01-31). springdoc 3.1.1 → 3.2.0 brings Swagger UI 5.34.0, whose bundled
+DOMPurify 3.4.16 fixes CVE-2026-109344/109345 (6.1, XSS). No migration, no endpoint.
 
 **2026-10-25:** MLink-62 and MLink-63 (sub-sprint 3, staff code) on `feat/ss3-staff-totp`, one PR based on
 `master`. **Migration V11** (`user_mfa`). **New required secret `APP_MFA_ENCRYPTION_KEY`**: the API does not start
 without it; staging and prod need it in `DEPLOY_ENV_FILE` before the merge (see the section below).
 Practitioners and staff now log in with a code: tests that log in as them use `Browser.login()`, which does the
-code step. **Review round 1 (2026-10-28):** the first setup needs a link mailed at login (**migration V12**), the
-realm adds no default group (staging and prod: a console step before the merge), and a login holding two MedLink
-roles is refused.
+code step.
 
 **2026-10-25:** MLink-122 (GitHub #49): in staging and prod, Actuator (metrics, `/actuator/health`) moves to the
 private management port 9000; the public port keeps `/livez` and `/readyz`. **Every health check now calls `/readyz`**
 (Dockerfile, Terraform, the deploy action's `DEPLOY_HEALTH_URL`): the code owner sets the GitHub variable
 `DEPLOY_HEALTH_URL` to `https://<api-host>/readyz` before the next deployment. Dev unchanged. No migration, no endpoint.
+
+**2026-10-24:** Presentation edition of this report for the team and the jury: `report-v2.md`
+(source) and `report-v2.html` (rendered), screenshots and diagrams in `assets/`; figures as of `master`
+`d7b0585` (2026-10-23). For a PDF, print the HTML (A4 is set in its CSS); the PDF is not committed (2.4 MB,
+over the 1 MB limit of the large-file hook in #91). This file stays the engineering log. No code change.
 
 **2026-10-23:** MLink-91, MLink-88 and MLink-90 on `feat/ss4-password-change`, one PR based on `master`.
 Endpoints 10 and 11 work end to end; see the section below for the proofs.

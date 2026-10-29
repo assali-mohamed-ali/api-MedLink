@@ -107,7 +107,7 @@ services:
 
   # Catches every mail in dev and local runs: inbox at http://localhost:8025.
   mailpit:
-    image: axllent/mailpit:v1.31.5
+    image: axllent/mailpit:v1.31.6
     ports:
       - '1025:1025'
       - '8025:8025'

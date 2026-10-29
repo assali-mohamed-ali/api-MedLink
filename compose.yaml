@@ -79,7 +79,7 @@ services:
 
   # Catches every mail the API sends in dev: inbox at http://localhost:8025, SMTP on 1025.
   mailpit:
-    image: 'axllent/mailpit:v1.31.5'
+    image: 'axllent/mailpit:v1.31.6'
     labels:
       org.springframework.boot.ignore: 'true'
     ports:
