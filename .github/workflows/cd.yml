@@ -301,10 +301,13 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin prod staging
-          AHEAD="$(git rev-list --count origin/prod..origin/staging)"
-          echo "ahead=$AHEAD" >> "$GITHUB_OUTPUT"
-          if [ "$AHEAD" -eq 0 ]; then
-            echo "No staged commits to promote."
+          # Compare trees, not only commit counts: the automatic prod -> staging
+          # version-sync PR may add a merge commit with an identical tree.
+          if git diff --quiet origin/prod origin/staging --; then
+            echo "ahead=0" >> "$GITHUB_OUTPUT"
+            echo "Staging and prod have identical content; no promotion needed."
+          else
+            echo "ahead=1" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Validate the promotion token
