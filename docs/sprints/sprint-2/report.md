@@ -13,6 +13,9 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-24:** MLink-100 (slot search input rules, "no result" message) on `epic/MLink-8`, draft PR #87: no
+migration, no new route.
+
 **2026-10-23:** `master` merged into `epic/MLink-8` after #89: the appointment migration is renumbered
 **V10** (`V10__appointment_domain.sql`), since #89 merged first with `V9__session_revocations.sql` (the code owner's
 call on #87: the PR merged second takes the next free number). Conflicts kept both sides: the access matrix lines,
@@ -165,6 +168,54 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-100 — slot search input rules and "no result" message (2026-10-24, epic/MLink-8)
+
+Task 25.4 of MLink-25: wrong input to `GET /api/slots` is refused clearly, and an empty search says so.
+
+**Contract** (added to MLink-98's): every broken rule answers 400 `VALIDATION_FAILED`, one entry per field in
+`details`, in French:
+
+| Input | `details` |
+|---|---|
+| `from` or `to` missing (MLink-98) | `from`: "La date de début est obligatoire." / `to`: "La date de fin est obligatoire." |
+| `to` not after `from` | `to`: "La date de fin doit être après la date de début." |
+| more than 31 days between `from` and `to` (31 days exactly is accepted) | `to`: "La période ne peut pas dépasser 31 jours." |
+| `page` below 0 | `page`: "Le numéro de page ne peut pas être négatif." |
+| `size` outside 1–50 | `size`: "La taille de page doit être comprise entre 1 et 50." |
+| an id that is not a UUID | the field (`clinicId`, `practitionerId`, `specialtyId`): "Identifiant invalide." |
+| a date that cannot be read | the field: "Date invalide (format attendu : 2026-10-27T09:00:00Z)." |
+
+Nothing matches at all: 200 `{ "items": [], "total": 0, "message": "Aucun créneau disponible. Élargissez la
+recherche (dates, clinique ou spécialité)." }`; `message` is absent whenever something matches (and on a page past
+the last one, where `total` is not 0).
+
+**Built:**
+- `SlotController`: the rules, all collected before answering, so one call lists every broken field. The
+  31-day bound and the 50-slot page bound the work one request can ask of the database (`MAX_PERIOD`,
+  `MAX_PAGE_SIZE`). An unreadable parameter (`MethodArgumentTypeMismatchException`) gets our error body through an
+  `@ExceptionHandler` local to this controller: the shared `GlobalExceptionHandler` is unchanged.
+- `SlotSearchResponse` gains `message` (`@JsonInclude(NON_NULL)`); `SlotMapper` sets it when `total` is 0.
+- `SlotSearchFunctionalTest`: 5 new tests through the real API (end before start; 31 days accepted, 31 days and
+  one second refused; unreadable ids and date named; `size` 0 and 51 and `page` -1 refused, 1 and 50 accepted;
+  the message when nothing matches, absent when something does).
+- Postman folder 7: five more requests (end before start, 32 days, `clinicId=abc`, `size=51`, a week next year
+  with nothing seeded: the message).
+
+**Proof** (Ubuntu VM with Docker, then CI):
+- Red first (59cdab5, the tests alone): `SlotSearchFunctionalTest` 11 tests, 5 failures, exactly the 5 new ones;
+  MLink-98's six stay green.
+- Green (3b601aa): `./mvnw -B clean verify` **284 tests, 0 failures**; reverse order: 284, 0 failures. CI on PR #87:
+  9 checks green.
+- Mutation check: with a 10-year bound instead of 31 days, `thePeriodIsThirtyOneDaysAtMost` turns red.
+- `scripts/setup-dev.sh --skip-tests`: 0 warnings. Postman, `npx newman@6.2.1 run`: **80 requests, 211 assertions,
+  0 failures** (folder 7 with the five new cases).
+
+**Decisions** (also in the log below): the messages above; 31 days at most, exactly 31 accepted; pages of 1 to
+50, numbered from 0; the type-mismatch handler local to `SlotController`; the message only when nothing matches.
+
+**Limits:** an unreadable parameter is converted by Spring before `@PreAuthorize`: a practitioner sending
+`clinicId=abc` gets this 400, not 403 (a malformed request reveals nothing; a well-formed one still gets 403).
 
 ## MLink-98 — slot search, `GET /api/slots` (2026-10-23, epic/MLink-8)
 
@@ -942,6 +993,8 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 |---|---|---|---|
 | 2026-10-21 | Appointment tables take V9, after V8 `rate_limits` | The code owner settled it on PR #60: the PR merged first holds the lower number, or Flyway refuses the older one on databases that already ran the newer (MLink-97) | "Whoever merges second renumbers" |
 | 2026-10-21 | Practitioners' first and last names live in `practitioners`, like patients' in `patients` | The slot search shows them without asking Keycloak; only Ela's code changes (MLink-97) | Names moved to `users` (touches `Patient` and registration); asking Keycloak per result |
+| 2026-10-24 | Slot search input: at most 31 days per search (exactly 31 accepted) and 1–50 slots per page; one 400 lists every broken field; "no result" message only when nothing matches | Bounds the work one request can ask of the database (a multi-year or million-row search is a cheap denial of service); a patient looks a few weeks ahead; React shows each error under its field (MLink-100) | No bound; one error at a time; a message on every empty page |
+| 2026-10-24 | Unreadable search parameters answered by an `@ExceptionHandler` inside `SlotController` | Our error body with the field's name, without changing the shared `GlobalExceptionHandler` for every other endpoint (MLink-100) | A global handler (affects the whole team's endpoints, to be agreed first); Spring's default 400 body |
 | 2026-10-23 | A practitioner's slots never overlap: exclusion constraint on `tstzrange(starts_at, ends_at, '[)')` per practitioner, with `btree_gist` | Code owner's second review on #87: a unique start time lets 09:00–10:00 and 09:30–10:00 coexist; `[)` keeps back-to-back slots valid; the database holds the rule for every writer (MLink-97) | A check in the service only; per-clinic scope (one person cannot be in two clinics at once) |
 | 2026-10-23 | Slot search (`GET /api/slots`): patients only; a past `from` starts at now; earliest first, paged 20 by default; the practitioner shown by id and names only | Patients book, staff and practitioners have their own screens later; a started slot cannot be booked; no personal data beyond what a patient needs (MLink-98) | Staff allowed to search; an error for a past `from` |
 | 2026-10-23 | `from`/`to` of the slot search checked in the controller, after `@PreAuthorize`, not as required parameters | Spring rejects a missing required parameter before method security runs: a practitioner without dates would get 400, hiding the 403 the access matrix expects (MLink-98) | `@RequestParam` required (400 before the role check); a URL rule in the shared `SecurityConfig` |
