@@ -1,8 +1,7 @@
 #!/usr/bin/env bash
 # Decide which SCA scanner this run may use, and whether the fallback is allowed.
-# Pull requests use Trivy so they do not block for the first-time NVD database
-# download. OWASP Dependency-Check remains the primary scanner for keyed
-# branch pushes, scheduled scans, and manual full scans.
+# Pull requests and keyed branch pushes use Trivy for fast feedback. OWASP
+# Dependency-Check remains the primary scanner for scheduled and manual full scans.
 #
 # Usage: scripts/ci/sca-policy.sh <event> <ref> <has_nvd_key> <allow_fallback>
 set -uo pipefail
@@ -30,13 +29,17 @@ scanner='trivy'
 fallback_allowed='false'
 reason=''
 
-# PRs must get fast, actionable dependency feedback. Dependency-Check's NVD
-# database bootstrap/update can consume most of the 60-minute job timeout.
-# Trivy scans the packaged application and gates fixed CRITICAL/HIGH findings.
+# Do not make PRs or ordinary pushes wait for Dependency-Check's NVD database
+# bootstrap/update. Trivy scans the packaged application and gates fixed
+# CRITICAL/HIGH findings. The full NVD-backed scan still runs on schedule/manual.
 if [ "$event" = "pull_request" ]; then
     scanner='trivy'
     fallback_allowed='true'
-    reason='Pull requests use the fast Trivy package scan; OWASP Dependency-Check runs on branch pushes and scheduled/manual full scans.'
+    reason='Pull requests use the fast Trivy package scan; the full OWASP Dependency-Check scan runs on schedule or manual dispatch.'
+elif [ "$event" = "push" ] && truthy "$has_key"; then
+    scanner='trivy'
+    fallback_allowed='true'
+    reason='Push uses the fast Trivy package scan; the full OWASP Dependency-Check scan runs on schedule or manual dispatch.'
 elif truthy "$has_key"; then
     scanner='dependency-check'
     fallback_allowed='true'
