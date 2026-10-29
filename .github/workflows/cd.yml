@@ -270,7 +270,7 @@ jobs:
 
   # Once staging deployment and smoke tests pass, create a real staging -> prod
   # PR and merge it only after its own CI/security checks complete successfully.
-  # PROMOTION_TOKEN is a PAT or GitHub App token so the resulting PR workflows run.
+  # PROMOTION_TOKEN is a fine-grained PAT so the resulting PR workflows run.
   promote-staging-to-prod:
     name: Promote staging to prod
     needs: staging-smoke-test
@@ -328,7 +328,16 @@ jobs:
           if [ -z "$PR_NUMBER" ]; then
             gh pr create --repo "$GITHUB_REPOSITORY" --base prod --head staging \
               --title "$TITLE" \
-              --body "Automated promotion after the staging deployment and post-deployment smoke tests passed."
+              --body "$(cat <<'EOF'
+Automated promotion after the staging deployment and post-deployment smoke tests passed. The promotion job waits for this PR's CI and security checks before merging.
+
+## Utilisation de l'IA
+
+- [x] Cette PR n'utilise pas d'outils d'IA générative.
+- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR.
+- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.
+EOF
+)"
             PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base prod --head staging --state open --json number --jq '.[0].number // empty')"
           else
             gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$TITLE"
