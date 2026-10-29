@@ -44,6 +44,11 @@ restricted to this repository with:
 The token is used only by workflow automation. Do not put it in an environment secret: the release and promotion
 workflows need it before selecting a deployment environment.
 
+Create repository variable `ENABLE_AUTO_PROMOTION` under **Settings → Secrets and variables → Actions → Variables**.
+Leave it unset or set it to `false` during the initial migration. Only set it to the string `true` after `staging` and `prod`
+have been deliberately reconciled and the workflows, token, environments, and required checks have been verified. The
+promotion jobs, tag-based production deployment, and Release Please job are disabled unless this flag is `true`.
+
 For **fully automatic promotion**, do not configure required reviewers on the `production` environment.
 The workflow is gated by successful staging deployment/smoke checks, PR checks on the promotion and release PRs,
 and a production build/security scan from a lowercase `v*` tag. Add a reviewer gate only if you intentionally want
@@ -129,7 +134,7 @@ branch can contain a feature, a fix, or a refactor, so it is not automatically a
 ## First deployment and one-time migration
 
 1. Create the `staging` and `production` environments and configure all variables/secrets in the table above.
-2. Add the repository secret `PROMOTION_TOKEN`.
+2. Add the repository secret `PROMOTION_TOKEN` and keep `ENABLE_AUTO_PROMOTION` false until the migration is complete.
 3. Prepare the hosts: Docker Engine, Compose v2, deploy user, `DEPLOY_PATH`, reverse proxy, DNS and persistent volumes.
 4. Confirm the release-pipeline workflows/configuration are present on `staging` and `prod`, not only on `master`.
 5. Configure branch rules for `staging` and `prod`:
