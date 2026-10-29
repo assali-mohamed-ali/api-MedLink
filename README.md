@@ -319,7 +319,8 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 | `mvnw` not recognized in PowerShell | type `.\mvnw` |
 | `Could not find a valid Docker environment` | start Docker Desktop (the tests use Testcontainers) |
 | `keycloak-db-1 exited (1)`, log says `in 18+, these Docker images…` | the compose files run PostgreSQL 18 with a PostgreSQL 16 volume path; `-Reset` does not help. Tracked on #74 |
-| `... must be set` from compose | `.env` is missing or incomplete: run the setup script, or copy `.env.example` |
+| `... must be set` from compose | `.env` is missing or incomplete: run the setup script, or copy `.env.example` and replace every `change-me` value (the setup script generates them for you) |
+| `app.mfa.encryption-key must be base64` or `must be 32 bytes` at startup | `APP_MFA_ENCRYPTION_KEY` still holds the `.env.example` placeholder: replace it with `openssl rand -base64 32` (32 random bytes in base64), or run the setup script |
 | roles look wrong, or `staff.dev` cannot log in | your Keycloak holds an old realm: re-run the setup script, or `-Reset` |
 | 401 with the right password | 5 wrong passwords lock the account for 15 minutes, answered like a wrong password: wait, or unlock it in the console |
 | `INVALID_CODE` with the code from the authenticator app | the phone's clock is off (a code lives 30 s, one step of tolerance): set the phone to automatic date and time. Also check you scanned the QR code of the last setup (a new setup replaces the secret) |

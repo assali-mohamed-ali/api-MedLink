@@ -29,11 +29,11 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | B5 | `/setup` needs the mailed token (takeover tests) | MLink-62 | Done | 58503f7 (red), a412a59 (green) |
 | B6 | Postman folders 6 and 8 | MLink-62 | Done: newman 106 requests, 252 assertions, 0 failures, twice | 1696d0a |
 | B7 | Docs and drafts | MLink-62/63 | Done (drafts in "Review round 1 drafts") | 2ec9fe9 |
-| B8 | Manual check on the dev stack (`-Reset` done 2026-10-28, OK'd by Mohamed) | MLink-62 | In progress: Mohamed's phone check | |
-| B9 | Merge `master` (after #98), checks, push, answer the review | MLink-62/63 | To do | |
+| B8 | Manual check on the dev stack (`-Reset` done 2026-10-28, OK'd by Mohamed) | MLink-62 | Done 2026-10-29: Mohamed's phone check passed | |
+| B9 | #97 was merged first: new PR from `fix/ss3-review-round-1` (merge of `master`, checks, push) | MLink-62/63 | In progress | |
 
-**Next step (new session):** B8 manual check, then B9 (see "Review round 1" below for the whole plan). Track A: once #98's
-`dependency-check` is green and #98 merges, update #92 from `master` with a merge commit (no rewrite).
+**Next step (new session):** B9: the new PR's review (link it on #97 and on MLink-62/63). Then the MLink-127
+follow-up (DOMPurify 3.4.16, CVE-2026-116803/116804) in its own PR, and the teammate drafts below.
 
 ## Review round 1 (2026-10-28): plan agreed with Mohamed
 
@@ -234,6 +234,15 @@ teammate's file beyond those below, or a contract change not written here.
   failures, twice, on a `-Reset` dev stack. #98's `dependency-check` was **cancelled by the 60-minute timeout**
   while downloading the NVD (no cache: `actions/cache` saves only on success, and no run succeeded since the NVD
   key): re-run, and a cache/timeout fix proposed to the code owner on #98 (their workflow, not changed by us).
+- **2026-10-29:** #98 merged (2026-10-28), #92 updated from `master` with a merge commit and merged. The code owner
+  merged **#97 at `0082313` before this round was pushed**, so `master` has neither fix: the round goes out as a new
+  PR from `fix/ss3-review-round-1` (the 15 local commits + a merge of `master`; one conflict in `report.md`, both
+  notes kept). Added the README row the code owner asked for on #97 (the `.env.example` placeholder of
+  `APP_MFA_ENCRYPTION_KEY` is not a valid key). **B8 passed:** Mohamed logged in as `practitioner.dev`, took the
+  link from Mailpit, set up with `{token}`, scanned with Google Authenticator, `/verify` opened the session; the DB
+  shows the code enrolled and the `MFA_ENROLMENT` link closed; no token in the API log. SCA on `master` now
+  completes (cache restored, ~32 min) but is red on CVE-2026-116803/116804 (10.0) in DOMPurify 3.4.16 inside
+  Swagger UI 5.34.0: a MLink-127 follow-up, separate PR.
 - **Open items carried to the new session:**
   - Comments to post after merge (Claude writes, Mohamed posts on YouTrack): MLink-64 (Ahlem: contract + error
     codes, the QR is a data URI, codes are 6 digits, `MFA_LOCKED` lasts 15 min), MLink-65 (Youssef: the staff
