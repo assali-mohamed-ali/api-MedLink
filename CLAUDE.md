@@ -110,7 +110,7 @@ classes (see README §7). Use only APIs of these versions.
   (`docs/sprints/sprint-2/README.md` step 3). Stop and report if one fails.
 - Never commit directly on `master`, `staging`, or `prod`. For product changes, after the release-pipeline migration,
   branch from `staging`: `feat/<slug>`, `fix/<slug>`, `core/<slug>`, `docs/<slug>`, or `chore/<slug>`. Workflow/bootstrap
-  changes may first PR to `master`; don't promote them automatically until the branch-baseline migration is reviewed.
+  changes may first PR to `master`; keep repository variable `ENABLE_AUTO_PROMOTION` false until the branch-baseline migration is reviewed.
 - One commit per task, message prefixed `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`,
   `test:`; mention the YouTrack id (`MLink-79`) in the body.
 - Product PRs target `staging` after migration; workflow/bootstrap changes may target `master`. Fill the template honestly
