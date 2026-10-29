@@ -154,6 +154,15 @@ jobs:
         run: |
           set -o pipefail
           docker push "$IMAGE" 2>&1 | tee push.log
+
+          # On a semantic release tag, add a human-friendly GHCR alias to the
+          # exact same image (no second build). The digest remains the deploy ID.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSIONED_IMAGE="ghcr.io/assali-mohamed-ali/api-medlink:${GITHUB_REF_NAME}"
+            docker tag "$IMAGE" "$VERSIONED_IMAGE"
+            docker push "$VERSIONED_IMAGE" 2>&1 | tee -a push.log
+          fi
+
           DIGEST="$(grep -Eo 'digest: sha256:[0-9a-f]{64}' push.log | tail -n 1 | cut -d' ' -f2)"
           test -n "$DIGEST" || { echo "::error::Could not obtain the GHCR digest from docker push."; exit 1; }
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
