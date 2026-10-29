@@ -236,7 +236,7 @@ the repository secret `PROMOTION_TOKEN`, and branch/ruleset checks as described 
 [Deployment](docs/DEPLOYMENT.md). Production deploys only from lowercase `v*` tags; the legacy uppercase
 `V1.0.0` / `V1.0.1` tags are historical and are not used for new automated releases.
 
-**One-time migration warning:** the current `master`, `staging`, and `prod` branches have diverged. This PR adds
+**One-time migration warning:** the current `master`, `staging`, and `prod` branches have diverged. Keep repository variable `ENABLE_AUTO_PROMOTION` unset/false until the workflow files are carried across and branch baselines are deliberately reconciled in reviewed PRs. This PR adds
 the workflow/configuration on `master` only. Do not expect automation to run on `staging` or `prod` until these
 files are carried there and the branch baselines are reconciled in reviewed PRs. Do not blindly auto-merge the full
 legacy branch difference into production. See the migration checklist in [Deployment](docs/DEPLOYMENT.md).
