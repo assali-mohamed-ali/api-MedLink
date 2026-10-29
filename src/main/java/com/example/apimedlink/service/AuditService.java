@@ -1,19 +1,24 @@
 package com.example.apimedlink.service;
 
-import com.example.apimedlink.model.AuditAction;
-import com.example.apimedlink.model.AuditEntry;
-import com.example.apimedlink.model.AuditOutcome;
-import com.example.apimedlink.repository.AuditEntryRepository;
-import com.example.apimedlink.security.CurrentUser;
+import java.util.UUID;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.context.request.RequestContextHolder;
 import org.springframework.web.context.request.ServletRequestAttributes;
 
+import com.example.apimedlink.model.AuditAction;
+import com.example.apimedlink.model.AuditEntry;
+import com.example.apimedlink.model.AuditOutcome;
+import com.example.apimedlink.repository.AuditEntryRepository;
+import com.example.apimedlink.security.CurrentUser;
+
 /**
- * The one audit trail every feature writes to (MLink-59). It finds the caller and the IP itself, and
- * saves in its own transaction so the entry is kept even when the request's work rolls back.
+ * The one audit trail every feature writes to (MLink-59). It finds the caller
+ * and the IP itself, and
+ * saves in its own transaction so the entry is kept even when the request's
+ * work rolls back.
  */
 @Service
 public class AuditService {
@@ -27,8 +32,41 @@ public class AuditService {
     }
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
-    public void record(AuditAction action, String resourceType, String resourceId, AuditOutcome outcome) {
-        entries.save(new AuditEntry(currentUser.idOrNull(), action, resourceType, resourceId, clientIp(), outcome));
+    public void record(
+            AuditAction action,
+            String resourceType,
+            String resourceId,
+            AuditOutcome outcome) {
+        record(action, resourceType, resourceId, outcome, currentUser.idOrNull());
+    }
+
+    @Transactional(propagation = Propagation.REQUIRES_NEW)
+    public void record(
+            AuditAction action,
+            String resourceType,
+            String resourceId,
+            AuditOutcome outcome,
+            UUID userId) {
+        entries.save(new AuditEntry(userId, action, resourceType, resourceId, clientIp(), outcome));
+    }
+
+    /**
+     * Writes an audit entry in the caller's transaction.
+     * The entry is rolled back if the business transaction fails.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordInCurrentTransaction(
+            AuditAction action,
+            String resourceType,
+            String resourceId,
+            AuditOutcome outcome) {
+        entries.save(new AuditEntry(
+                currentUser.idOrNull(),
+                action,
+                resourceType,
+                resourceId,
+                clientIp(),
+                outcome));
     }
 
     private static String clientIp() {

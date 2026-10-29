@@ -13,10 +13,13 @@ import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import com.example.apimedlink.TestcontainersConfiguration;
 import com.example.apimedlink.exception.ApiException;
+import com.example.apimedlink.model.AuditAction;
+import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.UserRepository;
 
@@ -35,6 +38,8 @@ class UserProvisioningServiceTest {
     UserRepository users;
     @Autowired
     TransactionTemplate tx;
+    @Autowired
+    JdbcTemplate jdbc;
 
     @Test
     void twoFirstLoginsAtTheSameMomentMakeOneRow() throws Exception {
@@ -97,7 +102,7 @@ class UserProvisioningServiceTest {
         AuditService failingAudit = org.mockito.Mockito.mock(AuditService.class);
         org.mockito.Mockito.doThrow(new RuntimeException("audit write failed"))
                 .when(failingAudit)
-                .record(
+                .recordInCurrentTransaction(
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.anyString(),
@@ -113,5 +118,31 @@ class UserProvisioningServiceTest {
 
         User reloaded = users.findById(id).orElseThrow();
         assertThat(reloaded.getEmail()).isEqualTo(originalEmail);
+    }
+
+    @Test
+    void noSuccessAuditSurvivesWhenTheOuterTransactionRollsBack() {
+        UUID id = UUID.randomUUID();
+        String originalEmail = "original-" + id + "@example.com";
+        provisioning.provision(id, originalEmail, originalEmail);
+        long updatedBefore = countUpdatedAudits();
+
+        String newEmail = "updated-" + id + "@example.com";
+        assertThatThrownBy(() -> tx.executeWithoutResult(status -> {
+            provisioning.provision(id, newEmail, newEmail); // écrit le compte + l'audit de succès
+            throw new IllegalStateException("business failure after the audit");
+        })).isInstanceOf(IllegalStateException.class);
+
+        assertThat(users.findById(id).orElseThrow().getEmail()).isEqualTo(originalEmail);
+        assertThat(countUpdatedAudits()).isEqualTo(updatedBefore);
+    }
+
+    private long countUpdatedAudits() {
+        Long count = jdbc.queryForObject(
+                "select count(*) from audit_entries where action = ? and outcome = ?",
+                Long.class,
+                AuditAction.ACCOUNT_UPDATED.name(),
+                AuditOutcome.SUCCESS.name());
+        return count == null ? 0 : count;
     }
 }

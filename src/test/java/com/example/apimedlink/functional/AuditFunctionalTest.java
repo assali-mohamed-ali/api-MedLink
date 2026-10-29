@@ -1,24 +1,30 @@
 package com.example.apimedlink.functional;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.*;
 
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.dao.DataAccessException;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * MLink-59 (story MLink-16, first slice of MLink-17): every refused access (403) writes exactly one
- * row in the audit trail, with the caller and the IP; an anonymous refusal has no user. Ordinary SQL
- * cannot change or delete a row (triggers). The table's owner can still drop the triggers: that
+ * MLink-59 (story MLink-16, first slice of MLink-17): every refused access
+ * (403) writes exactly one
+ * row in the audit trail, with the caller and the IP; an anonymous refusal has
+ * no user. Ordinary SQL
+ * cannot change or delete a row (triggers). The table's owner can still drop
+ * the triggers: that
  * boundary is documented in report.md, not tested here.
  *
- * <p>The resource stored is "METHOD /path", redacted (review on PR #56): a segment is kept only when
- * it is a UUID or a literal word of one of the API's routes, anything else becomes {@code {redacted}},
+ * <p>
+ * The resource stored is "METHOD /path", redacted (review on PR #56): a segment
+ * is kept only when
+ * it is a UUID or a literal word of one of the API's routes, anything else
+ * becomes {@code {redacted}},
  * and the whole is cut at 255 characters.
  */
 class AuditFunctionalTest extends FunctionalTestBase {
@@ -39,7 +45,10 @@ class AuditFunctionalTest extends FunctionalTestBase {
 
         assertThat(patient.call("/api/users").statusCode()).as("the list is staff-only").isEqualTo(403);
 
-        List<Map<String, Object>> rows = db.queryForList("select * from audit_entries where user_id = ?", id);
+        List<Map<String, Object>> rows = db.queryForList(
+                "select * from audit_entries "
+                        + "where user_id = ? and action = 'ACCESS_DENIED'",
+                id);
         assertThat(rows).hasSize(1);
         Map<String, Object> row = rows.get(0);
         assertThat(row.get("action")).isEqualTo("ACCESS_DENIED");
@@ -72,7 +81,10 @@ class AuditFunctionalTest extends FunctionalTestBase {
 
         assertThat(patient.call("/api/users/" + someoneElse).statusCode()).as("not their record").isEqualTo(403);
 
-        assertThat(db.queryForList("select resource_id from audit_entries where user_id = ?", String.class, id))
+        assertThat(db.queryForList(
+                "select resource_id from audit_entries "
+                        + "where user_id = ? and action = 'ACCESS_DENIED'",
+                String.class, id))
                 .containsExactly("GET /api/users/" + someoneElse);
     }
 
@@ -93,7 +105,8 @@ class AuditFunctionalTest extends FunctionalTestBase {
 
     @Test
     void aVeryLongPathIsCutAndStillRefused() throws Exception {
-        // 400 one-letter segments: none is a route word, so each is redacted, and the whole is cut
+        // 400 one-letter segments: none is a route word, so each is redacted, and the
+        // whole is cut
         String cutResource = "POST /api/users/{redacted}/{redacted}%";
         int before = anonymousRowsLike(cutResource);
         Browser browser = new Browser();
@@ -110,8 +123,10 @@ class AuditFunctionalTest extends FunctionalTestBase {
     @Test
     void theAuditTrailCanBeNeitherChangedNorDeleted() {
         UUID probe = UUID.randomUUID();
-        db.update("insert into audit_entries (id, timestamp, user_id, action, resource_type, resource_id, ip_address, outcome)"
-                + " values (?, now(), null, 'ACCESS_DENIED', 'REQUEST', 'GET /probe', '127.0.0.1', 'DENIED')", probe);
+        db.update(
+                "insert into audit_entries (id, timestamp, user_id, action, resource_type, resource_id, ip_address, outcome)"
+                        + " values (?, now(), null, 'ACCESS_DENIED', 'REQUEST', 'GET /probe', '127.0.0.1', 'DENIED')",
+                probe);
 
         assertThatThrownBy(() -> db.update("update audit_entries set outcome = 'ALLOWED' where id = ?", probe))
                 .as("UPDATE refused by the database").isInstanceOf(DataAccessException.class);
@@ -121,12 +136,14 @@ class AuditFunctionalTest extends FunctionalTestBase {
 
     private int anonymousRows(String resource) {
         return db.queryForObject(
-                "select count(*) from audit_entries where user_id is null and resource_id = ?", Integer.class, resource);
+                "select count(*) from audit_entries where user_id is null and resource_id = ?", Integer.class,
+                resource);
     }
 
     private int anonymousRowsLike(String likePattern) {
         return db.queryForObject(
-                "select count(*) from audit_entries where user_id is null and resource_id like ?", Integer.class, likePattern);
+                "select count(*) from audit_entries where user_id is null and resource_id like ?", Integer.class,
+                likePattern);
     }
 
     private int rowsContaining(String text) {
@@ -134,7 +151,10 @@ class AuditFunctionalTest extends FunctionalTestBase {
                 "select count(*) from audit_entries where resource_id like ?", Integer.class, "%" + text + "%");
     }
 
-    /** A write without the CSRF header to {@code path} is refused, and recorded once as {@code resource}. */
+    /**
+     * A write without the CSRF header to {@code path} is refused, and recorded once
+     * as {@code resource}.
+     */
     private void assertRefusedAndRecordedAs(String path, String resource) throws Exception {
         int before = anonymousRows(resource);
         Browser browser = new Browser();

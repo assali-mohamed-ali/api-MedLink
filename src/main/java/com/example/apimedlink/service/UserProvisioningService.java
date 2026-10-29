@@ -95,7 +95,7 @@ public class UserProvisioningService {
                         .orElseGet(() -> create(id, normalizedEmail, normalizedUsername));
 
                 if (result.wasUpdated()) {
-                    audit.record(
+                    audit.recordInCurrentTransaction(
                             AuditAction.ACCOUNT_UPDATED,
                             "USER",
                             id.toString(),
