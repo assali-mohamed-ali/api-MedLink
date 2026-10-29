@@ -118,5 +118,7 @@ classes (see README §7). Use only APIs of these versions.
 - Use the intended PR base: product changes → `staging`; workflow/bootstrap changes during migration → `master`.
   Don't stack feature PRs on one another. The promotion PR is specifically `staging` → `prod` and must wait for checks.
 - `master` is currently protected (ruleset `mamnou333`): code-owner review (@assali-mohamed-ali), CodeQL, and merge commits.
-  Configure PR/check-required rules on `staging` and `prod` during migration. For fully automatic promotion, don't require a
-  human review of bot-created promotion/release PRs; all required CI/security checks must still pass. Production deploys only from lowercase `v*` tags.
+  Configure PR/check-required rules on `staging` and `prod` during migration. With this PAT-based automation, don't require
+  reviewers on those branches or on the production environment: that would block promotion and release-version sync PRs. Keep
+  all CI/security checks required. If reviewer gates must stay enforced, use a GitHub App with narrow ruleset bypass for only
+  automation PRs. Production deploys only from lowercase `v*` tags.
