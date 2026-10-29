@@ -31,7 +31,7 @@ concurrency:
 jobs:
   build-and-scan:
     name: Verify, build and scan exact image
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && startsWith(github.ref, 'refs/tags/v'))))
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || (startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_AUTO_PROMOTION == 'true'))) || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && vars.ENABLE_AUTO_PROMOTION == 'true' && startsWith(github.ref, 'refs/tags/v'))))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -113,7 +113,7 @@ jobs:
   publish-and-attest:
     name: Publish and attest the scanned image
     needs: build-and-scan
-    if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && startsWith(github.ref, 'refs/tags/v'))))
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || (startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_AUTO_PROMOTION == 'true'))) || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && vars.ENABLE_AUTO_PROMOTION == 'true' && startsWith(github.ref, 'refs/tags/v'))))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -283,7 +283,7 @@ jobs:
   promote-staging-to-prod:
     name: Promote staging to prod
     needs: staging-smoke-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/staging'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && vars.ENABLE_AUTO_PROMOTION == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -362,7 +362,7 @@ EOF
 
   deploy-prod:
     needs: publish-and-attest
-    if: (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.target == 'production' && startsWith(github.ref, 'refs/tags/v'))
+    if: vars.ENABLE_AUTO_PROMOTION == 'true' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.target == 'production' && startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production
