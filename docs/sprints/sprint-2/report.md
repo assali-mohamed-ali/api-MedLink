@@ -9,15 +9,18 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
-| 3 | Staff code, TOTP (endpoints 8–9) | **In review** on `feat/ss3-staff-totp` (MLink-62/63): see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) | 2026-10-27 |
+| 3 | Staff code, TOTP (endpoints 8–9) | **Merged** (#97, MLink-62/63); review round 1 **in review** on `fix/ss3-review-round-1`: see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) | 2026-10-29 |
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
-**2026-10-25:** MLink-62 and MLink-63 (sub-sprint 3, staff code) on `feat/ss3-staff-totp`, one PR based on
-`master`. **Migration V11** (`user_mfa`). **New required secret `APP_MFA_ENCRYPTION_KEY`**: the API does not start
-without it; staging and prod need it in `DEPLOY_ENV_FILE` before the merge (see the section below).
-Practitioners and staff now log in with a code: tests that log in as them use `Browser.login()`, which does the
-code step.
+**2026-10-29:** #97 (MLink-62/63) was merged before its review round 1 reached it, so `master` still has the
+first-enrolment takeover and the `/patients` default group. `fix/ss3-review-round-1` (one PR based on `master`)
+brings that round: the first setup needs a link mailed at login (**migration V12**), the realm adds no default group
+(staging and prod: a console step, see `docs/DEPLOYMENT.md`), and a login holding two MedLink roles is refused. Also
+the README tells manual-setup users to replace the `APP_MFA_ENCRYPTION_KEY` placeholder of `.env.example`. SCA on
+`master` is red again on a new finding, CVE-2026-116803/116804 (10.0) in DOMPurify 3.4.16 (Swagger UI 5.34.0): a
+separate MLink-127 follow-up, not this PR.
+
 **2026-10-28:** MLink-127 (SCA baseline, `chore/sca-baseline`): since the NVD key is set (2026-10-27), the
 SCA workflow runs OWASP Dependency-Check instead of the Trivy fallback, and it scans the whole project, so findings
 already on `master` turned **every PR red**. The only finding with CVSS ≥ 7, `spring-boot-devtools` vs
@@ -25,6 +28,12 @@ CVE-2022-31691 (9.8), is a false positive: the CVE is about the Spring Tools IDE
 is `optional`, so the production jar leaves it out. It gets a narrow suppression in `security/owasp-suppressions.xml`
 (this package and this CVE only, until 2027-01-31). springdoc 3.1.1 → 3.2.0 brings Swagger UI 5.34.0, whose bundled
 DOMPurify 3.4.16 fixes CVE-2026-109344/109345 (6.1, XSS). No migration, no endpoint.
+
+**2026-10-25:** MLink-62 and MLink-63 (sub-sprint 3, staff code) on `feat/ss3-staff-totp`, one PR based on
+`master`. **Migration V11** (`user_mfa`). **New required secret `APP_MFA_ENCRYPTION_KEY`**: the API does not start
+without it; staging and prod need it in `DEPLOY_ENV_FILE` before the merge (see the section below).
+Practitioners and staff now log in with a code: tests that log in as them use `Browser.login()`, which does the
+code step.
 
 **2026-10-25:** MLink-122 (GitHub #49): in staging and prod, Actuator (metrics, `/actuator/health`) moves to the
 private management port 9000; the public port keeps `/livez` and `/readyz`. **Every health check now calls `/readyz`**
@@ -104,15 +113,32 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
 - **Found on the way:**
   - A full session opened after a pending step kept its 5-minute idle time; `LoginSessions.open` now sets the
     usual 15 minutes again (red test first).
-  - **Not fixed here:** the realm's `defaultGroups: ["/patients"]` puts every console-made practitioner or staff
-    member in `/patients` too, so they also hold `PATIENT` (one role only, CLAUDE.md). The tests remove it, as an
-    admin must do by hand today.
+  - The realm's `defaultGroups: ["/patients"]` put every console-made practitioner or staff member in `/patients`
+    too: fixed in review round 1 below.
+- **Review round 1 (code owner, 2026-10-28):**
+  - **Role leak:** `defaultGroups` removed from `keycloak/realm-medlink.json` (registration adds `/patients`
+    itself); the test helper no longer cleans up after the console. `ConsoleStaffAccountFunctionalTest`: a
+    console-made practitioner and staff member hold their own group and role only; `RealmFileTest` keeps the
+    default out. **Fail closed:** a login whose token holds more than one MedLink role gets 403
+    `ACCOUNT_SETUP_INCOMPLETE`, no session, its Keycloak session ended, logged (3 two-group cases).
+  - **First-enrolment takeover:** the password alone no longer enrols a code. A login with `mfaSetupRequired:
+    true` mails a single-use link (`MfaEnrolmentLinks`, purpose `MFA_ENROLMENT`, **V12**, 30 minutes, at most one
+    mail per 15 minutes, a "someone knows your password" warning); endpoint 8 needs its `{token}`, bound to the
+    account (another staff member's valid link: 400 `INVALID_TOKEN`), and the first good code closes it.
+    `MfaEnrolmentLinkFunctionalTest` (9, over HTTP) and `MfaEnrolmentLinksTest` (3: throttle, mail failure
+    logged without the token). The TOTP rules (`Totp`, cipher, `user_mfa`, endpoint 9, the lock) are unchanged.
+  - **SCA:** the gate was red on `master`'s baseline, not on ZXing (run 190 completed and flagged only
+    devtools and DOMPurify): fixed for every PR in #98 (MLink-127).
+  - Each new rule: a red commit, then green, then broken on purpose once (two-role limit, owner filter of the
+    token, "send only when setup is needed", the token check, closing the link).
 - **Limits:** changing `APP_MFA_ENCRYPTION_KEY` makes every enrolled code unreadable: verify answers 500 and the
   log names the user and the likely cause, never the secret; re-enrolment would come with an admin reset (later
   ticket). A pending step that runs out leaves its Keycloak
   session to Keycloak's idle timeout. No second factor for patients (not planned).
 - **Before merging:** add `APP_MFA_ENCRYPTION_KEY` (`openssl rand -base64 32`, one per environment) to the
   staging and prod `DEPLOY_ENV_FILE`; compose refuses to start without it. Local `.env`: the setup scripts add it.
+  In the staging and prod Keycloak consoles, remove the default group `/patients` and take `/patients` off the
+  existing practitioners and staff (`docs/DEPLOYMENT.md`); locally, `setup-dev -Reset` re-imports the realm.
 
 ## MLink-122 — metrics not public in production, GitHub #49 (2026-10-25, fix/49-management-port)
 

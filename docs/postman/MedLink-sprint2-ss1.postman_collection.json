@@ -2225,7 +2225,7 @@
           ]
         },
         {
-          "name": "Keycloak: the patients group (added to every new user by the realm)",
+          "name": "Keycloak: the staff member is in /administrative-staff only",
           "request": {
             "method": "GET",
             "header": [
@@ -2234,7 +2234,7 @@
                 "value": "Bearer {{kcToken}}"
               }
             ],
-            "url": "{{keycloakUrl}}/admin/realms/medlink/groups?search=patients&exact=true"
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{staffUserId}}/groups"
           },
           "event": [
             {
@@ -2243,31 +2243,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
-                  "pm.collectionVariables.set(\"patientsGroupId\", pm.response.json()[0].id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Keycloak: the staff member leaves the patients group (one role only)",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kcToken}}"
-              }
-            ],
-            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{staffUserId}}/groups/{{patientsGroupId}}"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                  "",
+                  "pm.test(\"groups = [/administrative-staff] (the realm adds no default group)\", () => pm.expect(pm.response.json().map(g => g.path)).to.eql([\"/administrative-staff\"]));"
                 ]
               }
             }
@@ -2312,16 +2289,57 @@
           ]
         },
         {
+          "name": "Mailpit: the code setup link mailed to the staff member (valid 30 minutes)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{staffEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const to = pm.collectionVariables.get(\"staffEmail\");",
+                  "const setupMails = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to) && x.Subject === \"Configurez votre code de connexion MedLink\");",
+                  "pm.test(\"one setup mail, to the account's own address\", () => pm.expect(setupMails).to.have.length(1));",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + setupMails[0].ID, (e, res) => {",
+                  "    const link = res.json().Text.match(/configurer-code\\?token=([A-Za-z0-9_-]+)/);",
+                  "    pm.test(\"the mail links to the React setup page\", () => pm.expect(link).to.not.be.null);",
+                  "    pm.collectionVariables.set(\"staffEnrolmentToken\", link[1]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "200 · code setup (first login of this staff member)",
           "request": {
             "method": "POST",
             "header": [
               {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
                 "key": "X-XSRF-TOKEN",
                 "value": "{{xsrf}}"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/mfa/setup"
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{staffEnrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "event": [
             {
@@ -2705,7 +2723,7 @@
           ]
         },
         {
-          "name": "Keycloak: the patients group (added to every new user by the realm)",
+          "name": "Keycloak: the practitioner is in /practitioners only",
           "request": {
             "method": "GET",
             "header": [
@@ -2714,7 +2732,7 @@
                 "value": "Bearer {{kcToken}}"
               }
             ],
-            "url": "{{keycloakUrl}}/admin/realms/medlink/groups?search=patients&exact=true"
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{practitionerUserId}}/groups"
           },
           "event": [
             {
@@ -2723,31 +2741,8 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
-                  "pm.collectionVariables.set(\"patientsGroupId\", pm.response.json()[0].id);"
-                ]
-              }
-            }
-          ]
-        },
-        {
-          "name": "Keycloak: the practitioner leaves the patients group (one role only)",
-          "request": {
-            "method": "DELETE",
-            "header": [
-              {
-                "key": "Authorization",
-                "value": "Bearer {{kcToken}}"
-              }
-            ],
-            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{practitionerUserId}}/groups/{{patientsGroupId}}"
-          },
-          "event": [
-            {
-              "listen": "test",
-              "script": {
-                "type": "text/javascript",
-                "exec": [
-                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                  "",
+                  "pm.test(\"groups = [/practitioners] (the realm adds no default group)\", () => pm.expect(pm.response.json().map(g => g.path)).to.eql([\"/practitioners\"]));"
                 ]
               }
             }
@@ -2811,16 +2806,162 @@
           ]
         },
         {
-          "name": "200 · setup: QR code, otpauth URL and secret",
+          "name": "Mailpit: the code setup link mailed to the practitioner (valid 30 minutes)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{practitionerEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const to = pm.collectionVariables.get(\"practitionerEmail\");",
+                  "const setupMails = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to) && x.Subject === \"Configurez votre code de connexion MedLink\");",
+                  "pm.test(\"one setup mail, to the account's own address\", () => pm.expect(setupMails).to.have.length(1));",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + setupMails[0].ID, (e, res) => {",
+                  "    const link = res.json().Text.match(/configurer-code\\?token=([A-Za-z0-9_-]+)/);",
+                  "    pm.test(\"the mail links to the React setup page\", () => pm.expect(link).to.not.be.null);",
+                  "    pm.collectionVariables.set(\"enrolmentToken\", link[1]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · setup with the password alone (no mailed link): a stolen password enrols nothing",
           "request": {
             "method": "POST",
             "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
               {
                 "key": "X-XSRF-TOKEN",
                 "value": "{{xsrf}}"
               }
             ],
             "url": "{{baseUrl}}/api/auth/mfa/setup"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · setup with a made-up link",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"made-up-token\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"INVALID_TOKEN\", () => pm.expect(pm.response.json().code).to.eql(\"INVALID_TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · setup with another staff member's link (folder 6's)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{staffEnrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"INVALID_TOKEN\", () => pm.expect(pm.response.json().code).to.eql(\"INVALID_TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · setup: QR code, otpauth URL and secret",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{enrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "event": [
             {
@@ -2846,11 +2987,24 @@
             "method": "POST",
             "header": [
               {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
                 "key": "X-XSRF-TOKEN",
                 "value": "{{xsrf}}"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/mfa/setup"
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{enrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "event": [
             {
@@ -3154,11 +3308,24 @@
             "method": "POST",
             "header": [
               {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
                 "key": "X-XSRF-TOKEN",
                 "value": "{{xsrf}}"
               }
             ],
-            "url": "{{baseUrl}}/api/auth/mfa/setup"
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{enrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
           },
           "event": [
             {
@@ -3591,7 +3758,11 @@
       "value": ""
     },
     {
-      "key": "patientsGroupId",
+      "key": "staffEnrolmentToken",
+      "value": ""
+    },
+    {
+      "key": "enrolmentToken",
       "value": ""
     },
     {

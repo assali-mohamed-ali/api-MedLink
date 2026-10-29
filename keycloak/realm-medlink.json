@@ -48,7 +48,6 @@
     { "name": "practitioners", "path": "/practitioners", "realmRoles": ["PRACTITIONER"] },
     { "name": "patients", "path": "/patients", "realmRoles": ["PATIENT"] }
   ],
-  "defaultGroups": ["/patients"],
   "clients": [
     {
       "clientId": "medlink-bff",
