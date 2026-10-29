@@ -15,6 +15,7 @@ concurrency:
 
 jobs:
   release:
+    if: vars.ENABLE_AUTO_PROMOTION == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
