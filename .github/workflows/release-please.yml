@@ -40,7 +40,7 @@ jobs:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
-      - name: Add the repository-required disclosure to the generated release PR
+      - name: Add the required disclosure to the generated release PR
         if: steps.release.outputs.pr != ''
         env:
           GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
@@ -59,62 +59,7 @@ jobs:
 - [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.
 EOF
 )"
-            BODY="${BODY}"        env:
-          GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
-          PR_JSON: ${{ steps.release.outputs.pr }}
-        run: |
-          set -euo pipefail
-          PR_NUMBER="$(jq -r '.number // empty' <<< "$PR_JSON")"
-          if [ -z "$PR_NUMBER" ]; then
-            echo "Release Please returned no pull request number; nothing to merge."
-            exit 0
-          fi
-          gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --watch --fail-fast
-          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge
-
-      # The release PR changes the Maven version and changelog on prod. Sync
-      # those release metadata changes back to staging so future promotions
-      # don't roll the version backwards.
-      - name: Check out the released branch
-        if: steps.release.outputs.releases_created == 'true'
-        uses: actions/checkout@v7
-        with:
-          ref: prod
-          fetch-depth: 0
-
-      - name: Sync released version back to staging
-        if: steps.release.outputs.releases_created == 'true'
-        env:
-          GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
-        run: |
-          set -euo pipefail
-          git fetch origin prod staging
-          AHEAD="$(git rev-list --count origin/staging..origin/prod)"
-          if [ "$AHEAD" -eq 0 ]; then
-            echo "Staging already contains the released commit."
-            exit 0
-          fi
-
-          PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base staging --head prod --state open --json number --jq '.[0].number // empty')"
-          if [ -z "$PR_NUMBER" ]; then
-            gh pr create --repo "$GITHUB_REPOSITORY" --base staging --head prod \
-              --title "chore: sync released version to staging" \
-              --body "$(cat <<'EOF'
-Automated sync of the released Maven version and changelog from prod back to staging.
-
-## Utilisation de l'IA
-
-- [x] Cette PR n'utilise pas d'outils d'IA générative.
-- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR.
-- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.
-EOF
-)"
-            PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base staging --head prod --state open --json number --jq '.[0].number // empty')"
-          fi
-          test -n "$PR_NUMBER" || { echo "::error::Unable to find/create the prod -> staging sync PR"; exit 1; }
-          gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --watch --fail-fast
-          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge
-\n\n'"${DISCLOSURE}"
+            BODY="$(printf '%s\n\n%s' "$BODY" "$DISCLOSURE")"
             gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
           fi
 
@@ -135,7 +80,7 @@ EOF
 
       # The release PR changes the Maven version and changelog on prod. Sync
       # those release metadata changes back to staging so future promotions
-      # don't roll the version backwards.
+      # do not roll the version backwards.
       - name: Check out the released branch
         if: steps.release.outputs.releases_created == 'true'
         uses: actions/checkout@v7
@@ -158,9 +103,18 @@ EOF
 
           PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base staging --head prod --state open --json number --jq '.[0].number // empty')"
           if [ -z "$PR_NUMBER" ]; then
+            SYNC_BODY="$(cat <<'EOF'
+Automated sync of the released Maven version and changelog from prod back to staging.
+
+## Utilisation de l'IA
+
+- [x] Cette PR n'utilise pas d'outils d'IA générative.
+- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR.
+- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.
+EOF
+)"
             gh pr create --repo "$GITHUB_REPOSITORY" --base staging --head prod \
-              --title "chore: sync released version to staging" \
-              --body "Automated sync of the released Maven version and changelog from prod back to staging."
+              --title "chore: sync released version to staging" --body "$SYNC_BODY"
             PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base staging --head prod --state open --json number --jq '.[0].number // empty')"
           fi
           test -n "$PR_NUMBER" || { echo "::error::Unable to find/create the prod -> staging sync PR"; exit 1; }
