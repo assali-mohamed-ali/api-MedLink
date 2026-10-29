@@ -21,6 +21,7 @@ profile in CI.
 | `keycloak_internal_url` | no | URL the container reaches (e.g. `http://keycloak:8080`) |
 | `keycloak_client_secret` | yes | `medlink-bff` client secret |
 | `keycloak_admin_client_secret` | yes | `medlink-admin` service account secret |
+| `mfa_encryption_key` | yes | Staff code key, 32 bytes in base64 (`openssl rand -base64 32`); a new key means every staff member enrols again |
 | `mail_host`, `mail_port`, `mail_username`, `mail_password`, `mail_from` | username/password yes | Real SMTP, TLS on 587 |
 | `app_frontend_url`, `cors_allowed_origins` | no | React origin |
 
@@ -51,7 +52,7 @@ terraform validate
 terraform plan -var-file="terraform.tfvars.prod" -out=tfplan
 terraform apply tfplan
 
-curl -fsS http://<host>:8080/actuator/health
+curl -fsS http://<host>:8080/readyz
 ```
 
 ## Rollback
@@ -61,7 +62,7 @@ immutable image reference and wait for the health check:
 
 ```bash
 terraform apply -var="app_image=ghcr.io/assali-mohamed-ali/api-medlink@sha256:<previous-digest>"
-curl -fsS http://<host>:8080/actuator/health
+curl -fsS http://<host>:8080/readyz
 ```
 
 If the container is unhealthy, inspect `docker logs api-medlink`; if the database

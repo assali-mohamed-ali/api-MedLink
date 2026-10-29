@@ -48,7 +48,7 @@ public class PasswordController {
             sessions.close(request, response);
             return;
         }
-        Optional<UUID> forced = pending.userId(request);
+        Optional<UUID> forced = pending.current(request);
         if (forced.isEmpty()) {
             throw new ApiException(HttpStatus.UNAUTHORIZED, "UNAUTHORIZED",
                     "Connectez-vous pour changer votre mot de passe.");

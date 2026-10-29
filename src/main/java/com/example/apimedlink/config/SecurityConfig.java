@@ -60,7 +60,12 @@ public class SecurityConfig {
                                 "/swagger-ui/**",
                                 "/swagger-ui.html")
                         .permitAll()
+                        // Staging/prod: Actuator exists only on the private management port, where Prometheus
+                        // scrapes without a login; dev serves it on the main port (GitHub #49)
                         .requestMatchers(HttpMethod.GET, "/actuator/prometheus")
+                        .permitAll()
+                        // Probes on the main port: {"status":"UP"} only, for the deploy check and healthchecks
+                        .requestMatchers(HttpMethod.GET, "/livez", "/readyz")
                         .permitAll()
                         // Public auth endpoints (plan.md §4); CSRF still applies to these POSTs
                         .requestMatchers(HttpMethod.GET, "/api/auth/csrf")
@@ -70,7 +75,10 @@ public class SecurityConfig {
                                 "/api/auth/register",
                                 "/api/auth/verify-email",
                                 "/api/auth/verify-email/resend",
-                                "/api/auth/password")
+                                "/api/auth/password",
+                                // Staff code step: the pending step login started is the guard (MLink-62/63)
+                                "/api/auth/mfa/setup",
+                                "/api/auth/mfa/verify")
                         .permitAll()
                         .anyRequest()
                         .authenticated())

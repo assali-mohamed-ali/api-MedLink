@@ -45,7 +45,7 @@ flowchart LR
   API -- "4 JDBC" --> APPDB
   KC -- "JDBC" --> KCDB
   API -- "5 verification and warning mails" --> MAIL
-  PROM -- "6 /actuator/prometheus every 15 s" --> API
+  PROM -- "6 /actuator/prometheus every 15 s<br/>(private management port 9000)" --> API
 ```
 
 1. The browser only ever calls the API. At login it sends the email and password to the API.
@@ -55,7 +55,8 @@ flowchart LR
 3. Account operations use a separate service account, `medlink-admin`.
 4. Keycloak and the API each have their own database and volume.
 5. Mails (verification links, "someone used your address") are the API's own, not Keycloak's.
-6. Prometheus scrapes the metrics (public in production for now: GitHub #49).
+6. Prometheus scrapes the metrics. In staging and prod, Actuator is only on the private management port 9000
+   (`app:9000`, never published); the public port keeps `/livez` and `/readyz` (GitHub #49).
 
 The browser never needs to reach Keycloak. Its port 8180 is for admins in dev; the API reaches Keycloak
 internally at `http://keycloak:8080`. Staging and prod run the same images with different `.env` values and
@@ -98,8 +99,14 @@ sequenceDiagram
   ends with 401 `SESSION_EXPIRED`.
 - **Logout:** `POST /api/auth/logout` ends Keycloak's session (refresh token, server to server) and ours,
   and expires the cookie: 204.
-- **Planned:** a second factor (TOTP) for practitioners and staff, handled by the API (MLink-62/63), forced
-  password change and history (MLink-87/88/91).
+- **Staff code (MLink-62/63):** for practitioners and staff, the password alone answers
+  `{ "mfaRequired": true, "mfaSetupRequired": … }` and opens no session; the accepted login (tokens included)
+  waits 5 minutes in the server session (`MfaPending`). The first time, `POST /api/auth/mfa/setup` gives a QR
+  code for an authenticator app (TOTP, RFC 6238, our own code plus ZXing for the image); the secret is stored
+  AES-256-GCM encrypted (`user_mfa`, key `APP_MFA_ENCRYPTION_KEY`). `POST /api/auth/mfa/verify` checks the code
+  (each works once) and opens the session; 5 wrong codes lock the code step for 15 minutes across logins and
+  end the Keycloak session. Never logged: the secret, the codes. The forced password change and the password
+  history (MLink-87/88/91) use the same kind of pending step (`PendingStep`).
 
 Why the password grant, its costs and the plan should it be revisited:
 [decision record 0001](decisions/0001-login-password-grant.md).
@@ -281,13 +288,13 @@ treatment, Statement of Applicability, policies, awareness, internal audit, mana
 | Annex A control | How api-MedLink implements it | Evidence in the repo | Coverage | Gap / next action |
 | --- | --- | --- | --- | --- |
 | 5.8 Information security in project management | Threat model mapped to code; decision records; security checklist on every PR | `security/threat-model.md`, `docs/decisions/`, PR template | Covered | Review the threat model with each feature |
-| 5.15 Access control | Deny by default; roles; ownership checks; role × route matrix | `config/SecurityConfig.java`, `security/OwnershipGuard.java`, `AccessMatrixFunctionalTest` | Covered | Metrics and API docs public in production (GitHub #49, #65) |
+| 5.15 Access control | Deny by default; roles; ownership checks; role × route matrix | `config/SecurityConfig.java`, `security/OwnershipGuard.java`, `AccessMatrixFunctionalTest` | Covered | API docs public in production (GitHub #65); metrics only on the private management port (#49) |
 | 5.16 Identity management | One identity store (Keycloak); `users.id` = Keycloak id; one role per person | realm, `V3__users_keycloak_id_as_pk.sql` | Covered | |
 | 5.17 Authentication information | Passwords only in Keycloak; policy 12+ characters, mixed, not the email; never logged by the API | realm `passwordPolicy`, `LoginRequest.toString` | Covered | Password history and forced change: MLink-87/88 |
-| 5.18 Access rights | Roles through groups; new users in `/patients`; no role accepted from requests | realm `groups`, `defaultGroups`, `security/Roles` | Partial | Periodic review of group membership |
-| 8.2 Privileged access rights | Admin calls only through a dedicated service account (staff hold no Keycloak admin rights, #81); actuator limited to health/info/prometheus | realm, `application-*.yml` | Partial | MFA for staff and the bootstrap admin (MLink-62/63, GitHub #68) |
+| 5.18 Access rights | Roles through groups; new users in `/patients`; no role accepted from requests | realm `groups`, `defaultGroups`, `security/Roles` | Partial | Periodic review of group membership; a practitioner or staff member made in the console also lands in `/patients` (`defaultGroups`) and must be taken out by hand |
+| 8.2 Privileged access rights | Admin calls only through a dedicated service account (staff hold no Keycloak admin rights, #81); actuator limited to health/info/prometheus | realm, `application-*.yml` | Partial | MFA for the bootstrap admin (GitHub #68); staff log in with a code (MLink-62/63) |
 | 8.4 Access to source code | CODEOWNERS on security paths; ruleset on `master` (owner review, CodeQL) | `.github/CODEOWNERS`, README | Covered | Same protection for `staging`/`prod` |
-| 8.5 Secure authentication | Password grant server to server (accepted exception, decision 0001); lockout after 5 failures for 15 min; per-IP limits; 15-minute idle session; HttpOnly, Strict, Secure cookies; new session id at login | realm, `RateLimitFilter`, `LoginSessions`, `application*.yml` | Partial | No second factor yet; TLS ends at a proxy not in the repo |
+| 8.5 Secure authentication | Password grant server to server (accepted exception, decision 0001); lockout after 5 failures for 15 min; per-IP limits; 15-minute idle session; HttpOnly, Strict, Secure cookies; new session id at login; second factor (TOTP) for practitioners and staff, 5 wrong codes → 15-minute lock | realm, `RateLimitFilter`, `LoginSessions`, `MfaService`, `application*.yml` | Partial | No second factor for patients (not planned); TLS ends at a proxy not in the repo |
 | 8.8 Management of technical vulnerabilities | Dependabot; Dependency-Check, Trivy and CodeQL blocking; private disclosure | `.github/dependabot.yml`, workflows, `SECURITY.md` | Covered | |
 | 8.9 Configuration management | Infrastructure and config as code; pinned versions; checkov and Trivy config scans; compose files kept alike by a test | `docker/`, compose files, `terraform/`, `ComposeFilesTest` | Covered | |
 | 8.12 Data leakage prevention | gitleaks before commit, in CI and daily; tokens never in the browser; no body or token in logs; audit paths redacted | `security/.gitleaks.toml`, `secrets-scan.yml`, `security/RouteWords.java` | Covered | |
@@ -311,9 +318,10 @@ treatment, Statement of Applicability, policies, awareness, internal audit, mana
 The prioritised list, with the threat behind each item, is in
 [the threat model, §6](../security/threat-model.md#6-open-work-by-priority). In short:
 
-- [ ] Second factor for practitioners and staff (MLink-62/63); MFA for admin identities (GitHub #68)
+- [x] Second factor for practitioners and staff (MLink-62/63)
+- [ ] MFA for admin identities (GitHub #68)
 - [ ] No default database credentials outside dev (GitHub #64)
-- [ ] Metrics and API docs not public in production (GitHub #49, #65)
+- [ ] API docs (Swagger, `/v3/api-docs`) not public in production (GitHub #65)
 - [ ] Separate database roles for the audit trail (GitHub #57)
 - [ ] Logins and account operations in the audit trail (MLink-114, MLink-72)
 - [ ] Backup and tested restore of both databases (GitHub #67)

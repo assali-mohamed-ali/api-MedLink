@@ -55,7 +55,8 @@ team's realm file. All options: [§8](#8-dev-setup-in-detail).
 | Prometheus (full-stack mode only) | http://localhost:9090 |
 
 **Test users** (dev only): `patient.dev`, `practitioner.dev`, `staff.dev`, all `@medlink.local`, password
-`MedLink-Dev-2026!` (the value of `KC_DEV_USERS_PASSWORD`).
+`MedLink-Dev-2026!` (the value of `KC_DEV_USERS_PASSWORD`). `practitioner.dev` and `staff.dev` also need a code
+from an authenticator app (Google Authenticator, Aegis, …): their first login enrols it with a QR code.
 
 **Stack:** Spring Boot 4.1 · Java 17 · Keycloak 26 · PostgreSQL · Flyway · Testcontainers. Package
 `com.example.apimedlink`. Do not downgrade a version to make code compile.
@@ -82,6 +83,10 @@ sequenceDiagram
 
 - **Session:** a new HttpOnly cookie at login (`SameSite=Strict`, `Secure` in staging/prod). It ends after
   **15 idle minutes**, or as soon as Keycloak refuses to renew the token (account disabled, signed out).
+- **Staff code:** for practitioners and staff, the login answers `{ "mfaRequired": true, "mfaSetupRequired": … }`
+  and no session yet; the browser then calls `/api/auth/mfa/setup` (first time: a QR code for an authenticator
+  app) and `/api/auth/mfa/verify` with the 6-digit code, which opens the session. 5 wrong codes lock the code step
+  for 15 minutes. The secrets are encrypted with `APP_MFA_ENCRYPTION_KEY` (the API does not start without it).
 - **CSRF:** every write (`POST`, `PUT`, `DELETE`) echoes the `XSRF-TOKEN` cookie in `X-XSRF-TOKEN`, or gets 403.
 - **Password grant:** a consciously accepted exception to the OAuth best practice, so the login stays a
   MedLink page. Why, and what it still needs: [decision record 0001](docs/decisions/0001-login-password-grant.md).
@@ -94,7 +99,9 @@ sequenceDiagram
 | `POST /api/auth/register` | anyone | 201, the same whether or not the email is taken (the owner gets a mail) |
 | `POST /api/auth/verify-email` | anyone | 204 · 400 `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
 | `POST /api/auth/verify-email/resend` | anyone | 202, the same whether or not the account exists |
-| `POST /api/auth/login` | anyone | 200 · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
+| `POST /api/auth/login` | anyone | 200 (`user`, or `mfaRequired` for practitioners and staff) · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
+| `POST /api/auth/mfa/setup` | at the code step | 200 QR code, otpauth URL, secret · 401 · 409 `MFA_ALREADY_ENROLLED` |
+| `POST /api/auth/mfa/verify` | at the code step | 200 `user` + session · 400 · 401 `INVALID_CODE` · 423 `MFA_LOCKED` |
 | `POST /api/auth/logout` | logged in | 204 |
 | `GET /api/users` | staff | 200 |
 | `GET /api/users/{id}` | the user themself, or staff | 200 · 403 for anyone else, whether the id exists or not |
@@ -223,6 +230,17 @@ host with Docker Compose over SSH; setup, secrets, rollback and recovery are in
 
 ## 8. Dev setup in detail
 
+### Local pre-commit hooks
+
+Install the local Git hook once by following [CONTRIBUTING.md](CONTRIBUTING.md) and running:
+
+```bash
+bash scripts/setup-pre-commit.sh
+```
+
+The hook checks staged files before each commit. CI also runs the complete pre-commit configuration across the repository.
+
+
 <details>
 <summary><b>Setup script options</b></summary>
 
@@ -304,6 +322,8 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 | `... must be set` from compose | `.env` is missing or incomplete: run the setup script, or copy `.env.example` |
 | roles look wrong, or `staff.dev` cannot log in | your Keycloak holds an old realm: re-run the setup script, or `-Reset` |
 | 401 with the right password | 5 wrong passwords lock the account for 15 minutes, answered like a wrong password: wait, or unlock it in the console |
+| `INVALID_CODE` with the code from the authenticator app | the phone's clock is off (a code lives 30 s, one step of tolerance): set the phone to automatic date and time. Also check you scanned the QR code of the last setup (a new setup replaces the secret) |
+| `MFA_LOCKED` | 5 wrong codes lock the code step for 15 minutes, even after a new login: wait |
 | a file shows fully modified after pull | line endings, normalized by `.gitattributes`; a `chore: normalize` commit is fine |
 | `permission denied: ./scripts/setup-dev.sh` | `chmod +x scripts/setup-dev.sh` |
 | a Spring Boot test class "is missing" | Spring Boot 4 moved them (`AutoConfigureMockMvc` → `org.springframework.boot.webmvc.test.autoconfigure`); don't downgrade |
@@ -313,7 +333,9 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 **Report a vulnerability privately**, never in a public issue: see [SECURITY.md](SECURITY.md)
 (`security@medlink.example.com`, or a DM to @assali-mohamed-ali starting with `[SECURITY]`).
 
-Known open items: `/actuator/prometheus` and Swagger are public in production (GitHub #49, #65). The
+Known open item: Swagger and `/v3/api-docs` are public in production (GitHub #65). In staging and prod the
+actuator (metrics, `/actuator/health`) is only on the private management port 9000, never published; the public
+port keeps `/livez` and `/readyz` (GitHub #49). The
 actuator exposes only `health,info,prometheus`: don't open more without a security review.
 
 | Document | What is in it |

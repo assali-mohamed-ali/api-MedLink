@@ -48,7 +48,7 @@ flowchart LR
 | Personal and health data (PII/PHI) | app database (`users`, `patients`, later appointments and records) | confidentiality, GDPR, health-data rules |
 | Audit trail | `audit_entries` (append-only) | proof of who was refused what (MLink-17) |
 | Email tokens | `email_tokens` (SHA-256 hash only, 24 h, single use) | verify someone else's email |
-| Secrets | environment variables, GitHub Environments: `KC_BFF_CLIENT_SECRET`, `KC_ADMIN_CLIENT_SECRET`, DB and Keycloak admin passwords | full access to identity or data |
+| Secrets | environment variables, GitHub Environments: `KC_BFF_CLIENT_SECRET`, `KC_ADMIN_CLIENT_SECRET`, `APP_MFA_ENCRYPTION_KEY` (staff code secrets), DB and Keycloak admin passwords | full access to identity or data |
 
 ## 3. Assumptions
 
@@ -64,7 +64,7 @@ flowchart LR
 | # | Threat | Controls (where) | Status | Open work |
 |---|---|---|---|---|
 | S1 | Brute force or credential stuffing on login | Keycloak lockout: 5 failures → 15 min (realm `bruteForceProtected`, `LoginLockoutFunctionalTest`); per-IP limit 30 / 5 min → 429 (`security/RateLimitFilter`, `RateLimitFunctionalTest`); password policy: 12+ characters, mixed, not the email (realm) | ✅ | |
-| S2 | A password alone opens a staff or practitioner account | none yet: one factor for every role | ⏳ | staff code (TOTP): MLink-62/63; admin identities: GitHub #68 |
+| S2 | A password alone opens a staff or practitioner account | staff code (TOTP, RFC 6238): the password alone opens no session; secret AES-256-GCM encrypted; each code works once; 5 wrong codes → 15-minute lock across logins, Keycloak session ended (`MfaService`, `MfaController`, `MfaFunctionalTest`, MLink-62/63) | ✅ | admin identities: GitHub #68 |
 | S3 | Session stolen by a script (XSS) | session cookie HttpOnly, tokens never sent to the browser (`security/LoginSessions`, `LoginFunctionalTest`) | ✅ | a Content-Security-Policy is not set (proxy or API) ❌ |
 | S4 | Session fixation | a new session id at every login (`LoginSessions.open`, `SessionCookieFunctionalTest`) | ✅ | |
 | S5 | Cross-site request forgery | session cookie `SameSite=Strict`; CSRF token on every write (`config/SecurityConfig`, SPA cookie mode; `OwnershipFunctionalTest`) | ✅ | |
@@ -95,7 +95,7 @@ flowchart LR
 | I1 | **The password passes through the API** (password grant) | sent to Keycloak at once and never stored; never logged (`LoginRequest.toString` hides it); TLS on B1 (assumption) | 🟡 accepted | the risk accepted in decision 0001; revisit if passkeys are wanted |
 | I2 | Tokens leak | kept in the server session; `KeycloakTokens.toString` hides them; ID tokens checked: signature (JWKS), issuer, `azp` (`service/KeycloakLoginClient`, `KeycloakLoginClientTest`) | ✅ | |
 | I3 | A user reads another user's data (IDOR) | `security/OwnershipGuard` checks before the lookup, the same 403 whether the id exists or not (`OwnershipFunctionalTest`) | ✅ | practitioner ↔ own patients only: with the appointment domain (MLink-97 onward) |
-| I4 | Metrics and API documentation public in production | actuator limited to `health,info,prometheus` | ❌ | `/actuator/prometheus`: GitHub #49; Swagger and `/v3/api-docs`: GitHub #65 |
+| I4 | Metrics and API documentation public in production | actuator limited to `health,info,prometheus`; in staging and prod it is served only on the private management port 9000, which no compose file publishes, and the public port keeps `/livez` and `/readyz` (`{"status":"UP"}` only) (`ManagementPortIntegrationTest`, `ManagementPortConfigTest`, GitHub #49) | 🟡 | Swagger and `/v3/api-docs` still public: GitHub #65 |
 | I5 | Personal data in logs or the audit trail | no request body, query string, password or token is logged; the audit path keeps only route words and UUIDs (`security/RouteWords`) | ✅ | |
 | I6 | Internal errors leak details | one error shape, `500 INTERNAL_ERROR` without SQL or stack (`exception/GlobalExceptionHandler`, `ErrorBody`) | ✅ | |
 | I7 | Secrets in git or defaults in production | secrets from the environment only; gitleaks before commit and in CI (`secrets-scan.yml`); Keycloak client secrets have no default outside dev | 🟡 | the datasource still falls back to `myuser` / `secret` in staging and prod: GitHub #64 |
@@ -139,9 +139,9 @@ be triggered by someone else (D2).
 
 | Priority | Item | Tracked |
 |---|---|---|
-| 1 | Staff and practitioner second factor (S2); MFA for admin identities (E4) | MLink-62/63, GitHub #68 |
+| 1 | MFA for admin identities (E4); the staff and practitioner second factor (S2) is in place (MLink-62/63) | GitHub #68 |
 | 1 | No default database credentials outside dev (I7) | GitHub #64 |
-| 2 | Metrics and API docs not public in production (I4) | GitHub #49, #65 |
+| 2 | API docs not public in production (I4) | GitHub #65 |
 | 2 | Separate database roles for the audit trail (T2) | GitHub #57 |
 | 2 | Logins and account operations in the audit trail (R2) | MLink-114, MLink-72 |
 | 2 | Backups with a tested restore (O3) | GitHub #67 |

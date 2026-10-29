@@ -1,0 +1,18 @@
+name: Dependency Review
+
+on:
+  pull_request:
+    branches: [master, main, develop, staging, prod]
+
+permissions:
+  contents: read
+
+jobs:
+  dependency-review:
+    if: vars.DEPENDENCY_GRAPH_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/dependency-review-action@v5
+        with:
+          fail-on-severity: high

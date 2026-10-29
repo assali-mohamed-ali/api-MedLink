@@ -57,6 +57,7 @@ jobs:
           JWT_SECRET="$EFFECTIVE_JWT_SECRET" \
           nohup java -jar target/*.jar > app.log 2>&1 &
           for i in $(seq 1 30); do
+            echo "Waiting for actuator health ($i/30)"
             if curl -sf http://localhost:8080/actuator/health; then
               break
             fi
