@@ -63,7 +63,7 @@
         <dependency>
             <groupId>org.springdoc</groupId>
             <artifactId>springdoc-openapi-starter-webmvc-ui</artifactId>
-            <version>3.1.1</version>
+            <version>3.2.0</version>
         </dependency>
         <!-- MLink-62: QR code of the staff code enrolment (core only: no other dependency) -->
         <dependency>
