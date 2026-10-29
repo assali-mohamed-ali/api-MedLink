@@ -375,7 +375,7 @@ endpoints need in the database, and enough dev data to try them. No endpoint. Sh
 fixes: `compose.yaml` (one dev-only service) and `ComposeFilesTest` (a `DEV_ONLY` list), announced to Mohamed.
 
 **Built:**
-- `V10__appointment_domain.sql` (V9 until #89 took V9 for `session_revocations`): `clinics`, `specialties`, `practitioners` (id = `users.id`, the Keycloak id; names
+- `V12__appointment_domain.sql` (V9, then V10 after #89; V12 since #97 took V11 for `user_mfa`): `clinics`, `specialties`, `practitioners` (id = `users.id`, the Keycloak id; names
   and specialty), `practitioner_clinics`, `slots` and `appointments`. Rules held by the database: one practitioner
   never has two slots starting at the same time (`UNIQUE (practitioner_id, starts_at)`), a slot ends after it
   starts, slot status is `FREE`/`BOOKED`, appointment status `BOOKED`/`CANCELLED`, an appointment belongs to a
@@ -457,7 +457,7 @@ repeatable SQL migration in its own dev-only location; fixed ids for new dev use
   PR #87, a separate ticket proposed.
 - In full-stack mode (`docker-compose.yml`, setup `--full-stack`) the three dev practitioners are not created, on
   purpose; the dev seed still inserts their rows, they just cannot log in there.
-- V10 runs `CREATE EXTENSION IF NOT EXISTS btree_gist`: a trusted extension, so the database owner can create it;
+- V12 runs `CREATE EXTENSION IF NOT EXISTS btree_gist`: a trusted extension, so the database owner can create it;
   a deployed database whose migration role is not the owner needs it created once by an administrator.
 - `docker compose up -d` does not fail when `keycloak-dev-users` fails (it exits after its job): check
   `docker compose logs keycloak-dev-users` if a dev practitioner cannot log in.
