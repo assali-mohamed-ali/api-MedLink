@@ -261,7 +261,10 @@ class SlotSearchFunctionalTest extends FunctionalTestBase {
         return id;
     }
 
+    /** The practitioner works in the clinic (a slot elsewhere is refused by the schema), then the slot. */
     private UUID insertSlot(UUID practitioner, UUID clinic, Instant start, String status) {
+        jdbc.update("insert into practitioner_clinics (practitioner_id, clinic_id) values (?, ?) on conflict do nothing",
+                practitioner, clinic);
         UUID id = UUID.randomUUID();
         jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) values (?, ?, ?, ?, ?, ?)",
                 id, practitioner, clinic, Timestamp.from(start), Timestamp.from(start.plus(30, ChronoUnit.MINUTES)), status);

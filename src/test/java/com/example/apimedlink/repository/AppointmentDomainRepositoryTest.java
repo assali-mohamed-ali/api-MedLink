@@ -77,7 +77,8 @@ class AppointmentDomainRepositoryTest {
     @Test
     void aSlotAndTheAppointmentBookedOnItAreReadBack() {
         Clinic clinic = clinics.save(new Clinic("Clinique", "Sousse"));
-        Practitioner practitioner = practitioners.save(newPractitioner(clinic));
+        // Flushed first: Hibernate writes practitioner_clinics after the slot, which must be in one of those clinics
+        Practitioner practitioner = practitioners.saveAndFlush(newPractitioner(clinic));
         Patient patient = patients.save(newPatient());
         Slot slot = slots.save(new Slot(practitioner, clinic, NINE_AM, NINE_AM.plus(30, ChronoUnit.MINUTES)));
         slot.setStatus(SlotStatus.BOOKED);

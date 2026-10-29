@@ -21,7 +21,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 /**
  * The appointment domain tables (MLink-97), checked in SQL: practitioners share their user's id,
  * slots of one practitioner cannot overlap (adjacent ones can) or end before they start, appointments belong to a patient,
- * and a slot holds one active appointment at most (review on PR #87).
+ * a slot is in one of its practitioner's clinics, and a slot holds one active appointment at most (reviews on PR #87).
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
@@ -126,6 +126,29 @@ class AppointmentSchemaTest {
     }
 
     @Test
+    void aSlotInAClinicWhereThePractitionerDoesNotWorkIsRefused() {
+        UUID practitioner = insertPractitioner();
+        worksIn(practitioner, insertClinic());
+        UUID elsewhere = insertClinic();
+
+        assertThatThrownBy(() ->
+                insertSlotRow(practitioner, elsewhere, NINE_AM, NINE_AM.plus(30, ChronoUnit.MINUTES), "FREE"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void aSlotInOneOfThePractitionersClinicsIsAccepted() {
+        UUID practitioner = insertPractitioner();
+        UUID clinic = insertClinic();
+        worksIn(practitioner, clinic);
+
+        insertSlotRow(practitioner, clinic, NINE_AM, NINE_AM.plus(30, ChronoUnit.MINUTES), "FREE");
+
+        assertThat(jdbc.queryForObject("select count(*) from slots where practitioner_id = ? and clinic_id = ?",
+                Integer.class, practitioner, clinic)).isEqualTo(1);
+    }
+
+    @Test
     void anAppointmentIsHeldByAPatientAndRemembersWhoBookedIt() {
         UUID slot = insertSlot(insertPractitioner(), insertClinic(),
                 NINE_AM, NINE_AM.plus(30, ChronoUnit.MINUTES), "BOOKED");
@@ -217,7 +240,19 @@ class AppointmentSchemaTest {
         return id;
     }
 
+    /** A slot where it may be: the practitioner works in that clinic. */
     private UUID insertSlot(UUID practitioner, UUID clinic, Instant start, Instant end, String status) {
+        worksIn(practitioner, clinic);
+        return insertSlotRow(practitioner, clinic, start, end, status);
+    }
+
+    private void worksIn(UUID practitioner, UUID clinic) {
+        jdbc.update("insert into practitioner_clinics (practitioner_id, clinic_id) values (?, ?) on conflict do nothing",
+                practitioner, clinic);
+    }
+
+    /** The slot row alone, whatever the clinic. */
+    private UUID insertSlotRow(UUID practitioner, UUID clinic, Instant start, Instant end, String status) {
         UUID id = UUID.randomUUID();
         jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) values (?, ?, ?, ?, ?, ?)",
                 id, practitioner, clinic, Timestamp.from(start), Timestamp.from(end), status);
