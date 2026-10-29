@@ -13,6 +13,11 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-29:** `epic/MLink-8` (PR #87, ready for review): `master` merged after #97 and #99, so the appointment
+migration is renumbered **V13** (`V13__appointment_domain.sql`); dev databases that ran an older number need the
+setup script with `--reset` (`-Reset`) once. Code owner's review: a slot must be in one of its practitioner's clinics
+(composite foreign key), see the MLink-97 section. No new route.
+
 **2026-10-29:** #97 (MLink-62/63) was merged before its review round 1 reached it, so `master` still has the
 first-enrolment takeover and the `/patients` default group. `fix/ss3-review-round-1` (one PR based on `master`)
 brings that round: the first setup needs a link mailed at login (**migration V12**), the realm adds no default group
@@ -417,6 +422,26 @@ fixes: `compose.yaml` (one dev-only service) and `ComposeFilesTest` (a `DEV_ONLY
   `pediatrician.dev`, ids `d0c70000-0000-4000-8000-00000000000{1,2,3}`), so they log in onto their seeded rows.
   They are **not** in the shared realm file: they live in `keycloak/dev/dev-practitioners.json` and are added by
   the dev-only compose service `keycloak-dev-users` (see the review below). `practitioner.dev` is unchanged.
+
+**Code owner's third review on PR #87 (2026-10-29): a slot is in one of its practitioner's clinics.**
+Nothing stopped a slot in a clinic where its practitioner does not work. The slots table now carries
+`CONSTRAINT slots_practitioner_works_in_clinic FOREIGN KEY (practitioner_id, clinic_id) REFERENCES
+practitioner_clinics (practitioner_id, clinic_id)`; a clinic that still holds a practitioner's slots cannot be taken
+off them. The dev seed already put each slot in one of its practitioner's two clinics: no seed change. The slot
+helpers of `AppointmentSchemaTest` and `SlotSearchFunctionalTest` link the practitioner to the clinic first, and
+`AppointmentDomainRepositoryTest` flushes the practitioner before saving a slot (Hibernate writes the
+`practitioner_clinics` rows after the entity inserts). New tests: a slot in a clinic where the practitioner does not
+work is refused, a slot in one of their clinics is accepted. Same day, `master` merged twice: #97 took V11 and #99
+took V12, so the migration is now **V13** (17986d0); a dev database that ran an older number needs `--reset` once.
+The first merge dropped the `devPassword` Postman variable (folder 7's login answered 401); restored in 1e2c6ec.
+Proof:
+- red first (172e4a0, CI red on that commit): `AppointmentSchemaTest` 16 tests, 1 failure,
+  `aSlotInAClinicWhereThePractitionerDoesNotWorkIsRefused`; green (4107099): the four touched classes, 35 tests,
+  0 failures;
+- mutation check: without the constraint, the same test turns red again (16 tests, 1 failure);
+- `./mvnw -B clean verify` 411 tests, 0 failures (4107099); after the V13 merge, reverse order
+  (`-Dsurefire.runOrder=reversealphabetical`) 434 tests, 0 failures, and CI `build-test` green (7cec64c);
+- `setup-dev --reset` then newman: 119 requests, 285 assertions, 0 failures (V13).
 
 **Code owner's second review on draft PR #87 (2026-10-23): slots of a practitioner must not overlap.**
 `UNIQUE (practitioner_id, starts_at)` only refused equal start times: 09:00–10:00 and 09:30–10:00 could both exist.
