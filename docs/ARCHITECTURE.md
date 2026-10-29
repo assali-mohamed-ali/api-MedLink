@@ -17,8 +17,9 @@ codes, password changes and account management will too.
   page reaches the browser: [decision record 0001](decisions/0001-login-password-grant.md) (GitHub #50).
 - **Authorization:** deny by default, roles from the signed token, "own data only" checks, and a role × route
   matrix that fails the build when a route has no rule.
-- **Delivery:** security checks at every stage (local hooks, six scans in CI, owner review), promotion
-  `master` → `staging` → `prod`.
+- **Delivery:** CI/security checks on PRs to `staging`, deploy + smoke-test on merge, automatic checked
+  `staging` → `prod` promotion, Release Please SemVer release PR, lowercase `vX.Y.Z` tag and tag-only production deploy.
+  The release flow is being introduced by a reviewed migration PR; do not enable it on diverged branches until reconciled.
 - **Where we are:** sprint 2 builds the identity features; plan, contracts and progress are in
   [`docs/sprints/sprint-2/`](sprints/sprint-2/README.md).
 
@@ -236,7 +237,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | Threat model | STRIDE with controls mapped to code, `security/threat-model.md` | At design time, updated with the code | Guides reviews |
 | Decisions | `docs/decisions/`, the report's decisions log | Per decision | Reasons kept with the code |
-| Review gate | ruleset on `master`, `.github/CODEOWNERS`, PR template | Every PR | Code-owner approval and CodeQL required; merge commits only |
+| Review gate | existing ruleset on `master`, `.github/CODEOWNERS`, PR template; staged branch rules are part of migration | PRs | `master` currently requires code-owner approval and CodeQL; configure `staging`/`prod` to require checks and PRs, while allowing automatic merge without human approval on bot promotion/release PRs |
 | AI disclosure | `ai-disclosure.yml`, `.github/scripts/validate-ai-disclosure.mjs` | Every PR | Fails unless exactly one usage choice is checked; AI use also requires the human review acknowledgment |
 | Local hooks | `.pre-commit-config.yaml`: whitespace, YAML, large files, merge markers, gitleaks, checkov | Every commit once `pre-commit install` ran | Blocks the commit |
 | Build + tests | `ci.yml`: `./mvnw -B verify`, JaCoCo | Push/PR on `master`, `staging`, `prod` | Fails the run |
@@ -246,7 +247,7 @@ flowchart LR
 | Container + IaC | `container-scan.yml`: Trivy config and image | Push/PR | Fails on HIGH/CRITICAL |
 | DAST | `dast-zap.yml`: ZAP baseline against the running app | PRs, pushes to `master`/`staging`, Mondays | Fails on FAIL rules; unauthenticated only |
 | Dependency updates | `dependabot.yml`: Maven, Actions, Dockerfile and compose images, 7-day cooldown | Mondays | Opens grouped PRs, reviewed like any PR |
-| Release + deploy | `cd.yml`: image to GHCR, immutable digest, compose over SSH; GitHub Environments `staging` / `production` | Push to `staging`, `prod`, tags `v*`, manual dispatch | API rolled out and health-checked; rollback/recovery in `docs/DEPLOYMENT.md` |
+| Release + deploy | `cd.yml` + `release-please.yml`: image digest, SBOM/provenance, Cosign, Compose over SSH, staging smoke tests, SemVer release | PR to `staging`, push to `staging`, lowercase tags `v*` | Stage deployment is smoke-tested; checked promotion/release PRs; only release tags deploy production |
 | Monitoring | `monitoring/`: alerts AppDown, 5xx > 5 %, p95 > 1 s, heap > 90 % | Continuous | Alerts reach no one: Alertmanager has no target |
 | Audit | `audit_entries` (every 403), Keycloak events (logins, lockouts) | Continuous | Stored; reading the trail: MLink-115 |
 | Vulnerability intake | `SECURITY.md` | On report | Private disclosure path |
@@ -255,30 +256,35 @@ SonarQube settings exist (`sonar-project.properties`), but no workflow runs Sona
 
 ## Environments & branching
 
-Code moves one way, feature branch → `master` → `staging` → `prod`, and each environment gets the same image
-with its own profile and secrets.
+After the release-pipeline migration, product changes flow from a topic branch into `staging`. The merge deploys
+the candidate, and only a successful post-deployment smoke gate can trigger a checked PR from `staging` to `prod`.
+Release Please calculates the SemVer version from Conventional Commits and opens a version/changelog PR; the
+resulting lowercase `vX.Y.Z` tag triggers the production image build, scan, signature verification, and deploy.
 
 ```mermaid
 flowchart LR
-  F[feat/*, fix/*, docs/*, epic/*] -- PR + checks + owner review --> M[master]
-  M -- merge, no fast-forward --> S[staging]
-  S -- validated: app, ZAP, Prometheus --> P[prod]
-  P -. tag v* .-> T[release v1.x.y]
-  S -. CD .-> E2[(staging env)]
-  P -. CD .-> E1[(production env)]
-  T -. CD .-> E1
+  F[feat/*, fix/*, core/*, docs/*] -->|PR + CI/security checks| S[staging]
+  S -->|deploy immutable digest| SE[staging environment]
+  SE -->|smoke tests pass| PR[PR staging -> prod]
+  PR -->|checks pass, auto-merge| P[prod]
+  P -->|Release Please PR + version bump| R[release commit]
+  R -->|tag vX.Y.Z| T[GHCR image + attestations + signature]
+  T -->|verify signature, deploy by digest| PE[production environment]
 ```
 
-| Environment | Branch | Spring profile | Env file | Keycloak mode | Where secrets live |
-| --- | --- | --- | --- | --- | --- |
-| Local dev | any | `dev` | `.env` (made by the setup script) | `start-dev` | Your `.env` (git-ignored) |
-| Staging | `staging` | `staging` (port 8081) | `.env.staging` | `start` behind an HTTPS proxy | GitHub Environment `staging` |
-| Production | `prod`, tags `v*` | `prod` | `.env.prod` | `start` behind an HTTPS proxy | GitHub Environment `production` |
+| Environment/ref | Role | Spring profile | Env file | Keycloak mode | Where secrets live |
+|---|---|---|---|---|---|
+| Local dev | Any topic branch | `dev` | `.env` (made by setup script) | `start-dev` | `.env` (git-ignored) |
+| `staging` branch | Integration and candidate release | `staging` | `.env.staging` | `start` behind HTTPS proxy | GitHub Environment `staging` |
+| `prod` branch | Release history and versioned release PRs; **does not deploy directly** | `prod` | `.env.prod` | `start` behind HTTPS proxy | GitHub Environment `production` |
+| `vX.Y.Z` tag | Production build/deploy trigger | `prod` | `.env.prod` | `start` behind HTTPS proxy | GitHub Environment `production` |
+| `master` | Repository default and one-time workflow bootstrap during migration | existing | — | — | — |
 
-- **Never push directly** to `master`, `staging` or `prod`; never base a PR on another branch than `master`.
-- **Secrets never enter git.** `.env*` files are ignored except the `*.example` templates.
-- **Fail fast:** the Keycloak client secrets have no default outside dev, so a missing secret stops startup.
-  The datasource credentials still have defaults (GitHub #64).
+- **Never push directly** to `master`, `staging`, or `prod`.
+- Keep PR/check-required protections on `staging` and `prod`. For fully automatic promotion, do not configure a human reviewer gate on the production environment or required code-owner approval for bot-created promotion/release PRs. All configured CI/security checks must still pass before merge.
+- **One-time migration warning:** the current `master`, `staging`, and `prod` branches have different/diverged history. This design is not active on staging/prod until workflows and release configuration are carried over by deliberately reviewed PRs and branch baselines are reconciled. Do not merge the historical branch differences blindly.
+- **Secrets never enter git.** `.env*` files are ignored except `*.example` templates.
+- **Fail fast:** Keycloak client secrets have no default outside dev, so a missing secret stops startup. Datasource credentials still have defaults (GitHub #64).
 
 ## ISO/IEC 27001:2022 mapping
 
@@ -339,8 +345,7 @@ blocking SCA and Trivy, cookie hardening, `postgres:latest` pinned, staff withou
 
 ### Rules
 
-1. One YouTrack task per change; branch from `master` (`feat/`, `fix/`, `docs/`, `chore/`, or the shared
-   `epic/MLink-<n>`); PR to `master`, never stacked; fill the template honestly, including the AI disclosure.
+1. One YouTrack task per change. After the staged-release migration, branch from `staging` (`feat/`, `fix/`, `core/`, `docs/`, `chore/`) and PR to `staging`; workflow/config bootstrap changes may first PR to `master`. Fill the template honestly, including AI disclosure.
 2. Never store or accept a password or a role in the API, and never take the caller's role or id from a request body.
 3. New endpoint = DTO + mapper + service + controller + a line in the access matrix + a test for the right role
    and one for the wrong role. Services never return a DTO.
