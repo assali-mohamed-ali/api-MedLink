@@ -24,7 +24,7 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | A | SCA baseline, own PR (see "Review round 1") | MLink-127 | In review: [#98](https://github.com/assali-mohamed-ali/api-MedLink/pull/98) | 3c5215b (on `chore/sca-baseline`) |
 | B1 | Realm: no default group; console-made staff hold one role | MLink-62 | Done | 06c37f9 (red), 91185f5 (green) |
 | B2 | Login fails closed on more than one MedLink role | MLink-62 | Done | c400380 (red), 9ecb94d (green) |
-| B3 | `EmailToken.Purpose.MFA_ENROLMENT` (30 min), `requireValid`, V12 | MLink-62 | Done | 7339b36 (red), f0fd9b1 (green) |
+| B3 | `EmailToken.Purpose.MFA_ENROLMENT` (30 min), `requireValid`, V12 (renamed V13 on 2026-10-29: #87 took V12) | MLink-62 | Done | 7339b36 (red), f0fd9b1 (green) |
 | B4 | Enrolment mail at a staff login that needs setup (`MfaEnrolmentLinks`) | MLink-62 | Done | 4eda38c (red), be37064 (green) |
 | B5 | `/setup` needs the mailed token (takeover tests) | MLink-62 | Done | 58503f7 (red), a412a59 (green) |
 | B6 | Postman folders 6 and 8 | MLink-62 | Done: newman 106 requests, 252 assertions, 0 failures, twice | 1696d0a |
@@ -71,8 +71,8 @@ teammate's file beyond those below, or a contract change not written here.
 - **B3:** `EmailToken.Purpose` carries its validity (`VERIFY_EMAIL` and `ACTIVATE_ACCOUNT` 24 h,
   `MFA_ENROLMENT` 30 min). `EmailTokenService.requireValid(raw, purpose, userId)` checks without consuming
   (unknown, other purpose or **other user** → 400 `INVALID_TOKEN`; expired or used → 410 `TOKEN_EXPIRED`) and
-  shares its lookup with `consume`. `V12__email_token_mfa_enrolment.sql` re-creates the `purpose` CHECK. Draft
-  for #87 (V12).
+  shares its lookup with `consume`. `V13__email_token_mfa_enrolment.sql` (V12 until 2026-10-29) re-creates the `purpose` CHECK. Draft
+  for #87 (V13).
 - **B4:** `MailService.sendMfaEnrolmentLink(to, firstName, token)`: link `{app.frontend-url}/configurer-code?token=…`,
   valid 30 min, "if this wasn't you, someone knows your password". New `service/MfaEnrolmentLinks`:
   `send(user, firstName)` (`MailThrottle.allow("mfa-enrolment", email)` → `cancelUnused` → `issue` → mail; a
@@ -296,7 +296,7 @@ teammate's file beyond those below, or a contract change not written here.
 > patients). Nothing to change in the scripts: they check the groups exist, not the default. A dev stack needs
 > `-Reset` once to re-import the realm (the import runs into an empty database only).
 
-**#87 (Ela):** Heads-up: #97 now also takes Flyway **V12** (`V12__email_token_mfa_enrolment.sql`, the
+**#87 (Ela):** Heads-up: #97 now also takes Flyway **V13** (`V13__email_token_mfa_enrolment.sql`, the
 `email_tokens.purpose` CHECK), after your V10 and our V11.
 
 **#90 / #93 (Chourouk):** #97 adds one check at the top of `LoginService.login` (a token with more than one MedLink

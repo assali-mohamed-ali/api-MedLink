@@ -15,7 +15,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 
 **2026-10-29:** #97 (MLink-62/63) was merged before its review round 1 reached it, so `master` still has the
 first-enrolment takeover and the `/patients` default group. `fix/ss3-review-round-1` (one PR based on `master`)
-brings that round: the first setup needs a link mailed at login (**migration V12**), the realm adds no default group
+brings that round: the first setup needs a link mailed at login (**migration V13**), the realm adds no default group
 (staging and prod: a console step, see `docs/DEPLOYMENT.md`), and a login holding two MedLink roles is refused. Also
 the README tells manual-setup users to replace the `APP_MFA_ENCRYPTION_KEY` placeholder of `.env.example`. SCA on
 `master` is red again on a new finding, CVE-2026-116803/116804 (10.0) in DOMPurify 3.4.16 (Swagger UI 5.34.0): a
@@ -122,7 +122,7 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
     default out. **Fail closed:** a login whose token holds more than one MedLink role gets 403
     `ACCOUNT_SETUP_INCOMPLETE`, no session, its Keycloak session ended, logged (3 two-group cases).
   - **First-enrolment takeover:** the password alone no longer enrols a code. A login with `mfaSetupRequired:
-    true` mails a single-use link (`MfaEnrolmentLinks`, purpose `MFA_ENROLMENT`, **V12**, 30 minutes, at most one
+    true` mails a single-use link (`MfaEnrolmentLinks`, purpose `MFA_ENROLMENT`, **V13**, 30 minutes, at most one
     mail per 15 minutes, a "someone knows your password" warning); endpoint 8 needs its `{token}`, bound to the
     account (another staff member's valid link: 400 `INVALID_TOKEN`), and the first good code closes it.
     `MfaEnrolmentLinkFunctionalTest` (9, over HTTP) and `MfaEnrolmentLinksTest` (3: throttle, mail failure
