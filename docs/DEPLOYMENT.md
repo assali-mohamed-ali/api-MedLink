@@ -141,7 +141,7 @@ branch can contain a feature, a fix, or a refactor, so it is not automatically a
    - Require PRs and successful CI/security checks (at minimum `CI / build-test`, `CD / Verify, build and scan exact image`,
      and `PR title / conventional-title` where those checks apply).
    - Permit merge commits, because staging promotions preserve the Conventional Commit history.
-   - For full automation, do not require a human approval on the `prod` branch or the `production` environment.
+   - With this PAT-based full-automation design, do not require reviewers on `staging` or `prod`, or on the `production` environment. Otherwise the bot cannot merge `staging -> prod` promotion and `prod -> staging` version-sync PRs. Keep PR and required CI/security checks enabled. If mandatory human review must remain, use a dedicated GitHub App with narrowly scoped ruleset bypass for automation PRs.
 6. Reconcile the existing `master`, `staging`, and `prod` branch histories in reviewed PRs before enabling automatic
    production promotion. They currently diverge; do **not** blindly merge the entire legacy difference into production.
    The first migration must be deliberately reviewed and tested on staging.
