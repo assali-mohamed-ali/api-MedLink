@@ -36,6 +36,8 @@ CREATE EXTENSION IF NOT EXISTS btree_gist;
 -- One practitioner is in one place at a time: two of their slots never overlap, in any clinic (review on PR #87).
 -- Ranges are [start, end): a slot ending at 09:30 and one starting at 09:30 are adjacent, not overlapping.
 -- The unique start time stays: it indexes the practitioner's agenda and is the dev seed's ON CONFLICT target.
+-- A slot is in one of its practitioner's clinics; a clinic that still holds their slots cannot be taken off them
+-- (review on PR #87).
 CREATE TABLE slots (
     id              UUID        PRIMARY KEY,
     practitioner_id UUID        NOT NULL REFERENCES practitioners (id),
@@ -46,6 +48,8 @@ CREATE TABLE slots (
     CONSTRAINT slots_practitioner_starts_at_unique UNIQUE (practitioner_id, starts_at),
     CONSTRAINT slots_no_overlap EXCLUDE USING gist
         (practitioner_id WITH =, tstzrange(starts_at, ends_at, '[)') WITH &&),
+    CONSTRAINT slots_practitioner_works_in_clinic FOREIGN KEY (practitioner_id, clinic_id)
+        REFERENCES practitioner_clinics (practitioner_id, clinic_id),
     CONSTRAINT slots_ends_after_start CHECK (ends_at > starts_at),
     CONSTRAINT slots_status_check CHECK (status IN ('FREE', 'BOOKED'))
 );
