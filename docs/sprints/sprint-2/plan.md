@@ -188,7 +188,9 @@ access token with the refresh token and ends the session when Keycloak refuses (
 valid", GitHub #28). Logout (endpoint 7) uses the same refresh token to end the Keycloak session.
 
 ### 6 · `GET /api/auth/me`
-→ **200** `{ "user": {…} }` from the session · **401**.
+→ **200** `{ "user": {…} }` from the session · **401** `UNAUTHENTICATED` (no session, logged out, or only a
+pending code step). Built 2026-10-29 (MLink-53): read from the session the login opened, no Keycloak or
+database call. React calls it on page load to restore who is logged in.
 
 ### 7 · `POST /api/auth/logout`
 → **204**. The API ends the Keycloak session (logout endpoint with the stored refresh token;
