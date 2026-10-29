@@ -8,10 +8,10 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
-import java.time.Duration;
 import java.time.Instant;
 import java.util.Base64;
 import java.util.HexFormat;
+import java.util.Optional;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
@@ -19,13 +19,11 @@ import org.springframework.transaction.annotation.Transactional;
 
 /**
  * Single-use tokens for the links we mail: 32 random bytes (URL-safe Base64) go in the link,
- * only their SHA-256 is stored, valid 24 hours.
+ * only their SHA-256 is stored, valid as long as their {@link Purpose} says.
  */
 @Service
 @Transactional
 public class EmailTokenService {
-
-    static final Duration VALIDITY = Duration.ofHours(24);
 
     private static final SecureRandom RANDOM = new SecureRandom();
 
@@ -44,7 +42,7 @@ public class EmailTokenService {
                 .userId(userId)
                 .purpose(purpose)
                 .tokenHash(hash(raw))
-                .expiresAt(Instant.now().plus(VALIDITY))
+                .expiresAt(Instant.now().plus(purpose.validity()))
                 .build());
         return raw;
     }
@@ -55,16 +53,29 @@ public class EmailTokenService {
      * failure after this call leaves the token usable.
      */
     public EmailToken consume(String raw, Purpose purpose) {
-        EmailToken token = tokens.lockByTokenHash(hash(raw))
+        EmailToken token = usable(tokens.lockByTokenHash(hash(raw)), purpose);
+        token.setUsedAt(Instant.now());
+        return token;
+    }
+
+    /**
+     * Checks that this user's token is usable, without using it (the link keeps working until its owner
+     * closes it). Errors as {@link #consume}; another user's token is {@code INVALID_TOKEN} too.
+     */
+    @Transactional(readOnly = true)
+    public void requireValid(String raw, Purpose purpose, UUID userId) {
+        usable(tokens.findByTokenHash(hash(raw)).filter(t -> t.getUserId().equals(userId)), purpose);
+    }
+
+    private static EmailToken usable(Optional<EmailToken> found, Purpose purpose) {
+        EmailToken token = found
                 .filter(t -> t.getPurpose() == purpose)
                 .orElseThrow(() -> new ApiException(HttpStatus.BAD_REQUEST, "INVALID_TOKEN",
                         "Ce lien n'est pas valide. Vérifiez qu'il est complet ou demandez-en un nouveau."));
-        Instant now = Instant.now();
-        if (token.getUsedAt() != null || !now.isBefore(token.getExpiresAt())) {
+        if (token.getUsedAt() != null || !Instant.now().isBefore(token.getExpiresAt())) {
             throw new ApiException(HttpStatus.GONE, "TOKEN_EXPIRED",
                     "Ce lien a expiré ou a déjà été utilisé. Demandez-en un nouveau.");
         }
-        token.setUsedAt(now);
         return token;
     }
 

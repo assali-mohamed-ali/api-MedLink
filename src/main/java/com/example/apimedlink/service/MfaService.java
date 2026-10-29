@@ -44,6 +44,13 @@ public class MfaService {
         return store.isEnabled(userId);
     }
 
+    /** @throws ApiException 409 {@code MFA_ALREADY_ENROLLED}, before anything else is checked for a setup */
+    public void requireNotEnrolled(UUID userId) {
+        if (isEnrolled(userId)) {
+            throw alreadyEnrolled();
+        }
+    }
+
     /**
      * A new secret, stored sealed and not yet enabled; it replaces one that was never used.
      *
@@ -52,8 +59,7 @@ public class MfaService {
     public Enrolment startEnrolment(UUID userId, String email) {
         byte[] secret = Totp.newSecret();
         if (!store.saveSecret(userId, cipher.encrypt(userId, secret))) {
-            throw new ApiException(HttpStatus.CONFLICT, "MFA_ALREADY_ENROLLED",
-                    "Un code est déjà configuré pour ce compte.");
+            throw alreadyEnrolled();
         }
         log.info("Staff code enrolment started for user {}", userId);
         String base32 = Totp.base32(secret);
@@ -100,6 +106,10 @@ public class MfaService {
 
     private static boolean lockedAt(Instant lockedUntil, Instant now) {
         return lockedUntil != null && lockedUntil.isAfter(now);
+    }
+
+    private static ApiException alreadyEnrolled() {
+        return new ApiException(HttpStatus.CONFLICT, "MFA_ALREADY_ENROLLED", "Un code est déjà configuré pour ce compte.");
     }
 
     private static ApiException invalidCode() {

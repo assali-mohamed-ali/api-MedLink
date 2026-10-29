@@ -201,6 +201,12 @@ public abstract class FunctionalTestBase {
 
         private static final ObjectMapper JSON = new ObjectMapper();
 
+        /** The {@code user} of the last answer that opened a session ({@link #login}). */
+        private Map<?, ?> sessionUser;
+
+        /** The email of the last login through {@link #apiLogin}: whose mailbox holds the setup link. */
+        private String loginEmail;
+
         /**
          * Logs in through our login endpoint (MLink-55), as a person does in React; the password answer is not
          * checked here. A practitioner or staff member then does the code step (MLink-62/63) as with their
@@ -210,6 +216,7 @@ public abstract class FunctionalTestBase {
         Browser login(String email, String password) throws Exception {
             Map<?, ?> answer = json(apiLogin(email, password));
             if (!Boolean.TRUE.equals(answer.get("mfaRequired"))) {
+                sessionUser = (Map<?, ?>) answer.get("user");
                 return this;
             }
             String who = email.toLowerCase();
@@ -228,12 +235,27 @@ public abstract class FunctionalTestBase {
             if (verify.statusCode() != 200) {
                 throw new AssertionError("code step for " + email + ": " + verify.statusCode() + " " + verify.body());
             }
+            sessionUser = (Map<?, ?>) json(verify).get("user");
             return this;
         }
 
-        /** Endpoint 8, as React does: no body, the pending code step is the session's. */
+        /** The roles the API gave the session that {@link #login} opened, as React reads them. */
+        List<String> sessionRoles() {
+            return sessionUser == null ? List.of()
+                    : ((List<?>) sessionUser.get("roles")).stream().map(String::valueOf).toList();
+        }
+
+        /**
+         * Endpoint 8, as React does once the person opened the setup link mailed at this login (review of #97): the
+         * token of the newest such mail to the address this browser logged in with.
+         */
         HttpResponse<String> mfaSetup() throws Exception {
-            return post("/api/auth/mfa/setup", "", true);
+            return mfaSetup(new Mailbox().enrolmentToken(loginEmail));
+        }
+
+        /** Endpoint 8 with this token ({@code null}: no body), the pending code step being the session's. */
+        HttpResponse<String> mfaSetup(String token) throws Exception {
+            return post("/api/auth/mfa/setup", token == null ? "" : "{\"token\":\"" + token + "\"}", true);
         }
 
         /** Endpoint 9, as React does. */
@@ -249,6 +271,7 @@ public abstract class FunctionalTestBase {
 
         /** Logs in through our login endpoint (MLink-55), as React does: CSRF cookie first, then the JSON post. */
         HttpResponse<String> apiLogin(String email, String password) throws Exception {
+            loginEmail = email;
             call("/api/auth/csrf");
             return post("/api/auth/login", "{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}", true);
         }
@@ -361,32 +384,36 @@ public abstract class FunctionalTestBase {
 
         /** Same, choosing whether the email is verified (an unverified one: a sign-up whose link was never opened). */
         UUID createUser(String email, String password, boolean emailVerified) {
-            return createUser(email, password, emailVerified, "/patients");
+            return createUser(email, password, emailVerified, List.of("/patients"));
         }
 
         /**
          * A practitioner ({@code /practitioners}) or staff member ({@code /administrative-staff}) made in the
-         * console. The realm's default group {@code /patients} is added to every new user, so the admin takes it
-         * off: a person holds one role only.
+         * console, in that group only: exactly what the admin does, nothing cleaned up after.
          */
         UUID createUser(String email, String password, String group) {
-            UUID id = createUser(email, password, true, group);
-            List<?> patients = (List<?>) read("/groups?search=patients&exact=true");
-            String patientsGroup = (String) ((Map<?, ?>) patients.get(0)).get("id");
-            http.delete().uri("/admin/realms/medlink/users/{id}/groups/{group}", id, patientsGroup)
-                    .header(HttpHeaders.AUTHORIZATION, token())
-                    .retrieve()
-                    .toBodilessEntity();
-            return id;
+            return createUser(email, password, true, List.of(group));
         }
 
-        private UUID createUser(String email, String password, boolean emailVerified, String group) {
+        /** An account an admin put in several groups by mistake (a person holds one role only). */
+        UUID createUserInGroups(String email, String password, List<String> groups) {
+            return createUser(email, password, true, groups);
+        }
+
+        /** The paths of the user's groups, as the console's Groups tab lists them. */
+        List<String> groups(UUID user) {
+            return ((List<?>) read("/users/{id}/groups", user)).stream()
+                    .map(group -> (String) ((Map<?, ?>) group).get("path"))
+                    .toList();
+        }
+
+        private UUID createUser(String email, String password, boolean emailVerified, List<String> groups) {
             URI location = http.post().uri("/admin/realms/medlink/users")
                     .header(HttpHeaders.AUTHORIZATION, token())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of(
                             "username", email, "email", email, "firstName", "Console", "lastName", "User",
-                            "enabled", true, "emailVerified", emailVerified, "groups", List.of(group),
+                            "enabled", true, "emailVerified", emailVerified, "groups", groups,
                             "credentials", List.of(Map.of("type", "password", "value", password, "temporary", false))))
                     .retrieve()
                     .toBodilessEntity()
@@ -467,7 +494,11 @@ public abstract class FunctionalTestBase {
     /** The mails the API sent, read through Mailpit's API. */
     static final class Mailbox {
 
+        static final String VERIFICATION_SUBJECT = "Confirmez votre adresse e-mail MedLink";
+        static final String ENROLMENT_SUBJECT = "Configurez votre code de connexion MedLink";
+
         private static final Pattern VERIFY_LINK = Pattern.compile("verifier-email[?]token=([A-Za-z0-9_-]+)");
+        private static final Pattern ENROLMENT_LINK = Pattern.compile("configurer-code[?]token=([A-Za-z0-9_-]+)");
 
         private final RestClient http =
                 RestClient.builder().baseUrl("http://localhost:" + MAILPIT.getMappedPort(8025)).build();
@@ -493,13 +524,22 @@ public abstract class FunctionalTestBase {
 
         /** The token in the newest verification mail to this address. */
         String verificationToken(String email) {
-            List<Map<?, ?>> mails = to(email, "Confirmez votre adresse e-mail MedLink");
+            return token(email, VERIFICATION_SUBJECT, VERIFY_LINK);
+        }
+
+        /** The token in the newest staff-code setup mail to this address (MLink-62, review of #97). */
+        String enrolmentToken(String email) {
+            return token(email, ENROLMENT_SUBJECT, ENROLMENT_LINK);
+        }
+
+        private String token(String email, String subject, Pattern linkPattern) {
+            List<Map<?, ?>> mails = to(email, subject);
             if (mails.isEmpty()) {
-                throw new AssertionError("no verification mail to " + email);
+                throw new AssertionError("no mail \"" + subject + "\" to " + email);
             }
-            Matcher link = VERIFY_LINK.matcher(text(mails.get(0)));
+            Matcher link = linkPattern.matcher(text(mails.get(0)));
             if (!link.find()) {
-                throw new AssertionError("no verification link in the mail to " + email);
+                throw new AssertionError("no link in the mail \"" + subject + "\" to " + email);
             }
             return link.group(1);
         }

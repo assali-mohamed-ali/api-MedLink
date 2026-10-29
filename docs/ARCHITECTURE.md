@@ -101,7 +101,8 @@ sequenceDiagram
   and expires the cookie: 204.
 - **Staff code (MLink-62/63):** for practitioners and staff, the password alone answers
   `{ "mfaRequired": true, "mfaSetupRequired": … }` and opens no session; the accepted login (tokens included)
-  waits 5 minutes in the server session (`MfaPending`). The first time, `POST /api/auth/mfa/setup` gives a QR
+  waits 5 minutes in the server session (`MfaPending`). The first time, the API mails a 30-minute link to the
+  account's own address (`MfaEnrolmentLinks`), and `POST /api/auth/mfa/setup` with its token gives a QR
   code for an authenticator app (TOTP, RFC 6238, our own code plus ZXing for the image); the secret is stored
   AES-256-GCM encrypted (`user_mfa`, key `APP_MFA_ENCRYPTION_KEY`). `POST /api/auth/mfa/verify` checks the code
   (each works once) and opens the session; 5 wrong codes lock the code step for 15 minutes across logins and
