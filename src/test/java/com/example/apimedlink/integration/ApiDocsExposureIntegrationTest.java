@@ -53,7 +53,8 @@ class ApiDocsExposureIntegrationTest {
                 HttpResponse<String> response = get(port, path);
 
                 assertThat(response.statusCode()).as(path).isIn(401, 404);
-                assertThat(response.body()).as(path).doesNotContain("openapi", "swagger-ui", "/api/auth/");
+                // what only a real description or the UI holds (a 404 body echoes the path itself)
+                assertThat(response.body()).as(path).doesNotContain("\"openapi\"", "\"paths\"", "swagger-ui-bundle");
             }
         }
     }
@@ -78,7 +79,7 @@ class ApiDocsExposureIntegrationTest {
             HttpResponse<String> response = get(port, "/swagger-ui/index.html");
 
             assertThat(response.statusCode()).isEqualTo(200);
-            assertThat(response.body()).contains("swagger-ui");
+            assertThat(response.body()).contains("swagger-ui-bundle");
         }
     }
 

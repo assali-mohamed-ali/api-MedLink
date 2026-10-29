@@ -15,4 +15,15 @@
     <packageUrl regex="true">^pkg:maven/org\.springframework\.boot/spring-boot-devtools@.*$</packageUrl>
     <cve>CVE-2022-31691</cve>
   </suppress>
+  <suppress until="2026-12-31">
+    <notes><![CDATA[Risque accepté, temporaire : DOMPurify 3.4.16 est figé dans le bundle de Swagger UI 5.34.0
+    (springdoc 3.2.0, les dernières versions publiées) ; le correctif DOMPurify 3.4.17 n'est encore livré par
+    aucune version de Swagger UI. Swagger UI et /v3/api-docs ne sont plus servis en staging ni en prod
+    (GitHub #65, ApiDocsExposureIntegrationTest) : le bundle n'atteint un navigateur qu'en dev. Seule cette
+    version est visée : retirer dès que springdoc embarque DOMPurify >= 3.4.17. Ticket: MLink-127.]]></notes>
+    <packageUrl regex="true">^pkg:javascript/DOMPurify@3\.4\.16$</packageUrl>
+    <cve>CVE-2026-116802</cve>
+    <cve>CVE-2026-116803</cve>
+    <cve>CVE-2026-116804</cve>
+  </suppress>
 </suppressions>
