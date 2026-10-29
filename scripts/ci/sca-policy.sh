@@ -1,13 +1,10 @@
 #!/usr/bin/env bash
 # Decide which SCA scanner this run may use, and whether the fallback is allowed.
-# Prints key=value lines for $GITHUB_OUTPUT; never fails on its own so the scan
-# can still run and publish findings before the policy gate rejects it.
+# Pull requests use Trivy so they do not block for the first-time NVD database
+# download. OWASP Dependency-Check remains the primary scanner for keyed
+# branch pushes, scheduled scans, and manual full scans.
 #
 # Usage: scripts/ci/sca-policy.sh <event> <ref> <has_nvd_key> <allow_fallback>
-#   event           GitHub event name (push, pull_request, schedule, workflow_dispatch, ...)
-#   ref             full git ref (refs/heads/master, refs/tags/v1.0.0, ...)
-#   has_nvd_key     true when secrets.NVD_API_KEY is set
-#   allow_fallback  true when vars.ALLOW_TRIVY_FALLBACK explicitly accepts the fallback
 set -uo pipefail
 
 event="${1:-}"
@@ -33,16 +30,19 @@ scanner='trivy'
 fallback_allowed='false'
 reason=''
 
-if truthy "$has_key"; then
+# PRs must get fast, actionable dependency feedback. Dependency-Check's NVD
+# database bootstrap/update can consume most of the 60-minute job timeout.
+# Trivy scans the packaged application and gates fixed CRITICAL/HIGH findings.
+if [ "$event" = "pull_request" ]; then
+    scanner='trivy'
+    fallback_allowed='true'
+    reason='Pull requests use the fast Trivy package scan; OWASP Dependency-Check runs on branch pushes and scheduled/manual full scans.'
+elif truthy "$has_key"; then
     scanner='dependency-check'
     fallback_allowed='true'
-    reason='NVD_API_KEY is set: OWASP Dependency-Check (NVD) is the primary scanner.'
+    reason='NVD_API_KEY is set: OWASP Dependency-Check (NVD) is the primary scanner for this full scan.'
 else
     case "$event" in
-        pull_request)
-            fallback_allowed='true'
-            reason='NVD_API_KEY is not set: this pull request uses the Trivy fallback; it is not equivalent to the primary NVD scan.'
-            ;;
         schedule)
             fallback_allowed='true'
             reason='NVD_API_KEY is not set: the scheduled run uses the Trivy fallback; it is not equivalent to the primary NVD scan.'
@@ -67,7 +67,7 @@ else
             ;;
         *)
             fallback_allowed='false'
-            reason="NVD_API_KEY is not set and event '${event}' is not allowed to use the Trivy fallback."
+            reason="NVD_API_KEY is not set and event '$event' is not allowed to use the Trivy fallback."
             ;;
     esac
 fi
