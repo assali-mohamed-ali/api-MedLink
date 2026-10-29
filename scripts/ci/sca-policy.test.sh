@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests the scanner policy for primary and fast pull-request scan paths.
+# Tests the scanner policy for fast CI scans and full NVD-backed scans.
 set -euo pipefail
 
 SCRIPT="$(cd "$(dirname "$0")" && pwd)/sca-policy.sh"
@@ -28,13 +28,14 @@ expect() {
     fi
 }
 
-# Pull requests use fast Trivy regardless of whether the NVD key exists.
+# Fast scanner for PRs and pushes, even when the NVD key exists.
 expect 'NVD key on PR uses fast Trivy' trivy true pull_request refs/pull/1/merge true false
 expect 'missing key on PR' trivy true pull_request refs/pull/1/merge false false
+expect 'NVD key on master push uses fast Trivy' trivy true push refs/heads/master true false
+expect 'NVD key on staging push uses fast Trivy' trivy true push refs/heads/staging true false
+expect 'NVD key on feature push uses fast Trivy' trivy true push refs/heads/fix/54-sca-fallback true false
 
-# Primary scanner is retained for keyed branch pushes, scheduled and manual full scans.
-expect 'NVD key on master' dependency-check true push refs/heads/master true false
-expect 'NVD key on staging' dependency-check true push refs/heads/staging true false
+# Full NVD-backed scan remains available for scheduled and manual runs.
 expect 'NVD key on schedule' dependency-check true schedule refs/heads/master true false
 expect 'NVD key on manual run' dependency-check true workflow_dispatch refs/heads/master true false
 
