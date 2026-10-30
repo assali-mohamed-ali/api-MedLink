@@ -340,7 +340,7 @@ jobs:
           if [ -z "$PR_NUMBER" ]; then
             gh pr create --repo "$GITHUB_REPOSITORY" --base prod --head staging \
               --title "$TITLE" \
-              --body "$(printf '%s\\n' \
+              --body "$(printf '%s\n' \
                 "Automated promotion after the staging deployment and post-deployment smoke tests passed. The promotion job waits for this PR's CI and security checks before merging." \
                 "" \
                 "## Utilisation de l'IA" \
