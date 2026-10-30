@@ -48,7 +48,7 @@ team's realm file. All options: [§8](#8-dev-setup-in-detail).
 | Service | URL |
 |---|---|
 | API | http://localhost:8080 |
-| Swagger UI | http://localhost:8080/swagger-ui.html |
+| Scalar API Reference | http://localhost:8080/scalar |
 | Health | http://localhost:8080/actuator/health |
 | Mailpit (every mail the API sends in dev) | http://localhost:8025 |
 | Keycloak admin console (`admin` / `admin`) | http://localhost:8180 |
@@ -334,7 +334,7 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 **Report a vulnerability privately**, never in a public issue: see [SECURITY.md](SECURITY.md)
 (`security@medlink.example.com`, or a DM to @assali-mohamed-ali starting with `[SECURITY]`).
 
-Known open item: Swagger and `/v3/api-docs` are public in production (GitHub #65). In staging and prod the
+Known open item: Scalar and `/v3/api-docs` are public in production (GitHub #65). In staging and prod the
 actuator (metrics, `/actuator/health`) is only on the private management port 9000, never published; the public
 port keeps `/livez` and `/readyz` (GitHub #49). The
 actuator exposes only `health,info,prometheus`: don't open more without a security review.
