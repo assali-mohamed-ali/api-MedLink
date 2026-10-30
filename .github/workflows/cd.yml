@@ -340,16 +340,14 @@ jobs:
           if [ -z "$PR_NUMBER" ]; then
             gh pr create --repo "$GITHUB_REPOSITORY" --base prod --head staging \
               --title "$TITLE" \
-              --body "$(cat <<'EOF'
-Automated promotion after the staging deployment and post-deployment smoke tests passed. The promotion job waits for this PR's CI and security checks before merging.
-
-## Utilisation de l'IA
-
-- [x] Cette PR n'utilise pas d'outils d'IA générative.
-- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR.
-- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.
-EOF
-)"
+              --body "$(printf '%s\\n' \
+                "Automated promotion after the staging deployment and post-deployment smoke tests passed. The promotion job waits for this PR's CI and security checks before merging." \
+                "" \
+                "## Utilisation de l'IA" \
+                "" \
+                "- [x] Cette PR n'utilise pas d'outils d'IA générative." \
+                "- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR." \
+                "- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.")"
             PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base prod --head staging --state open --json number --jq '.[0].number // empty')"
           else
             gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$TITLE"
