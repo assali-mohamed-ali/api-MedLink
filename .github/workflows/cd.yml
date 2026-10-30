@@ -8,7 +8,9 @@ on:
   pull_request:
     branches: [master, main, staging, prod]
   push:
-    branches: [staging, prod]
+    # A direct push to prod is never deployed. Production starts only from
+    # a Release Please tag after a tested release PR has merged.
+    branches: [staging]
     tags: ['v*']
   workflow_dispatch:
     inputs:
@@ -29,7 +31,7 @@ concurrency:
 jobs:
   build-and-scan:
     name: Verify, build and scan exact image
-    if: github.event_name == 'pull_request' || github.event_name == 'push' || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && (github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v')))))
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || (startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_AUTO_PROMOTION == 'true'))) || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && vars.ENABLE_AUTO_PROMOTION == 'true' && startsWith(github.ref, 'refs/tags/v'))))
     runs-on: ubuntu-latest
     timeout-minutes: 45
     permissions:
@@ -111,7 +113,7 @@ jobs:
   publish-and-attest:
     name: Publish and attest the scanned image
     needs: build-and-scan
-    if: (github.event_name == 'push') || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && (github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v')))))
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || (startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_AUTO_PROMOTION == 'true'))) || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && vars.ENABLE_AUTO_PROMOTION == 'true' && startsWith(github.ref, 'refs/tags/v'))))
     runs-on: ubuntu-latest
     timeout-minutes: 25
     permissions:
@@ -152,6 +154,15 @@ jobs:
         run: |
           set -o pipefail
           docker push "$IMAGE" 2>&1 | tee push.log
+
+          # On a semantic release tag, add a human-friendly GHCR alias to the
+          # exact same image (no second build). The digest remains the deploy ID.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSIONED_IMAGE="ghcr.io/assali-mohamed-ali/api-medlink:${GITHUB_REF_NAME}"
+            docker tag "$IMAGE" "$VERSIONED_IMAGE"
+            docker push "$VERSIONED_IMAGE" 2>&1 | tee -a push.log
+          fi
+
           DIGEST="$(grep -Eo 'digest: sha256:[0-9a-f]{64}' push.log | tail -n 1 | cut -d' ' -f2)"
           test -n "$DIGEST" || { echo "::error::Could not obtain the GHCR digest from docker push."; exit 1; }
           echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
@@ -222,9 +233,134 @@ jobs:
           image: ${{ needs.publish-and-attest.outputs.image }}
           ghcr_token: ${{ secrets.GITHUB_TOKEN }}
 
+
+  # Run tests against the deployed service, not only against the source tree.
+  # This gate must pass before an automated promotion PR can be opened.
+  staging-smoke-test:
+    name: Smoke test deployed staging
+    needs: deploy-staging
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Probe readiness and liveness
+        env:
+          HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$HEALTH_URL" || { echo "::error::staging DEPLOY_HEALTH_URL is not configured"; exit 1; }
+          [[ "$HEALTH_URL" == */readyz ]] || { echo "::error::DEPLOY_HEALTH_URL must end in /readyz"; exit 1; }
+          BASE_URL="${HEALTH_URL%/readyz}"
+          READY="$(curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 "$HEALTH_URL")"
+          echo "$READY"
+          grep -q '"status":"UP"' <<< "$READY"
+          LIVE="$(curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 "$BASE_URL/livez")"
+          echo "$LIVE"
+          grep -q '"status":"UP"' <<< "$LIVE"
+
+      - name: Verify the public CSRF bootstrap endpoint
+        env:
+          HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          BASE_URL="${HEALTH_URL%/readyz}"
+          HEADERS="$(mktemp)"
+          trap 'rm -f "$HEADERS"' EXIT
+          STATUS="$(curl --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
+            --dump-header "$HEADERS" --output /dev/null --write-out '%{http_code}' \
+            "$BASE_URL/api/auth/csrf")"
+          test "$STATUS" = "204" || { echo "::error::Expected /api/auth/csrf to return 204, got $STATUS"; exit 1; }
+          grep -qi '^set-cookie: XSRF-TOKEN=' "$HEADERS" || {
+            echo "::error::The CSRF bootstrap endpoint did not set XSRF-TOKEN"; exit 1;
+          }
+
+  # Once staging deployment and smoke tests pass, create a real staging -> prod
+  # PR and merge it only after its own CI/security checks complete successfully.
+  # PROMOTION_TOKEN is a fine-grained PAT so the resulting PR workflows run.
+  promote-staging-to-prod:
+    name: Promote staging to prod
+    needs: staging-smoke-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && vars.ENABLE_AUTO_PROMOTION == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Find staged commits not yet in prod
+        id: diff
+        run: |
+          set -euo pipefail
+          git fetch origin prod staging
+          # Compare trees, not only commit counts: the automatic prod -> staging
+          # version-sync PR may add a merge commit with an identical tree.
+          if git diff --quiet origin/prod origin/staging --; then
+            echo "ahead=0" >> "$GITHUB_OUTPUT"
+            echo "Staging and prod have identical content; no promotion needed."
+          else
+            echo "ahead=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate the promotion token
+        if: steps.diff.outputs.ahead != '0'
+        run: |
+          test -n "$GH_TOKEN" || {
+            echo "::error::Add repository secret PROMOTION_TOKEN (GitHub App token or fine-grained PAT: Contents and Pull requests read/write; Issues read/write for Release Please)."
+            exit 1
+          }
+
+      - name: Create or update the staging -> prod PR, wait for checks, then merge
+        if: steps.diff.outputs.ahead != '0'
+        env:
+          GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          SUBJECTS="$(git log --format='%s' origin/prod..origin/staging)"
+          BODIES="$(git log --format='%B' origin/prod..origin/staging)"
+          if grep -Eq 'BREAKING CHANGE:|^[[:space:]]*[[:alnum:]]+(\([^)]*\))?!:' <<< "$BODIES"; then
+            TITLE='feat!: promote staging to prod'
+          elif grep -Eq '^feat(\([^)]*\))?:' <<< "$SUBJECTS"; then
+            TITLE='feat: promote staging to prod'
+          elif grep -Eq '^fix(\([^)]*\))?:' <<< "$SUBJECTS"; then
+            TITLE='fix: promote staging to prod'
+          else
+            TITLE='chore: promote staging to prod'
+          fi
+
+          PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base prod --head staging --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --base prod --head staging \
+              --title "$TITLE" \
+              --body "$(printf '%s\n' \
+                "Automated promotion after the staging deployment and post-deployment smoke tests passed. The promotion job waits for this PR's CI and security checks before merging." \
+                "" \
+                "## Utilisation de l'IA" \
+                "" \
+                "- [x] Cette PR n'utilise pas d'outils d'IA générative." \
+                "- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR." \
+                "- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.")"
+            PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base prod --head staging --state open --json number --jq '.[0].number // empty')"
+          else
+            gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$TITLE"
+          fi
+          test -n "$PR_NUMBER" || { echo "::error::Unable to find/create the staging -> prod PR"; exit 1; }
+
+          # PROMOTION_TOKEN ensures the PR workflows start automatically.
+          gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --watch --fail-fast
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge
+
   deploy-prod:
     needs: publish-and-attest
-    if: (github.event_name == 'push' && (github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && inputs.target == 'production' && (github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v')))
+    if: vars.ENABLE_AUTO_PROMOTION == 'true' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.target == 'production' && startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
     timeout-minutes: 20
     environment: production

@@ -1,0 +1,14 @@
+{
+  "$schema": "https://raw.githubusercontent.com/googleapis/release-please/main/schemas/config.json",
+  "release-type": "maven",
+  "include-v-in-tag": true,
+  "include-v-in-release-name": true,
+  "bootstrap-sha": "48754eac5c4fcb1d2740941a4f9fbc8016844335",
+  "packages": {
+    ".": {
+      "release-type": "maven",
+      "package-name": "com.example:api-MedLink",
+      "changelog-path": "CHANGELOG.md"
+    }
+  }
+}
