@@ -2,7 +2,7 @@ name: CD
 
 # Release lifecycle: verify, build once, scan the exact image, generate an SBOM,
 # publish by digest, attest/sign, verify before deployment, then deploy by digest.
-# Deployment uses Docker Compose over SSH. Kubernetes and Argo CD are not used.
+# CI validates the container stack on ephemeral GitHub runners; production deployment uses Docker Compose over SSH when configured. No Kubernetes or Argo CD.
 
 on:
   pull_request:
@@ -112,7 +112,7 @@ jobs:
 
   publish-and-attest:
     name: Publish and attest the scanned image
-    needs: build-and-scan
+    needs: [build-and-scan, runner-container-test]
     if: (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || (startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_AUTO_PROMOTION == 'true'))) || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && vars.ENABLE_AUTO_PROMOTION == 'true' && startsWith(github.ref, 'refs/tags/v'))))
     runs-on: ubuntu-latest
     timeout-minutes: 25
@@ -191,98 +191,82 @@ jobs:
           IMAGE: ${{ steps.publish.outputs.ref }}
         run: cosign sign --yes "$IMAGE"
 
-  deploy-staging:
-    needs: publish-and-attest
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'))
+  # Validate the exact scanned image on an ephemeral GitHub-hosted runner.
+  # No SSH host, public URL, or GitHub Environment secrets are needed.
+  runner-container-test:
+    name: Run container stack and smoke tests on GitHub runner
+    needs: build-and-scan
+    if: success()
     runs-on: ubuntu-latest
-    timeout-minutes: 20
-    environment: staging
+    timeout-minutes: 25
     permissions:
       contents: read
-      packages: read
     steps:
       - uses: actions/checkout@v7
 
-      - name: Log in to GHCR for signature verification
-        uses: docker/login-action@v4
+      - name: Download the exact scanned image
+        uses: actions/download-artifact@v8
         with:
-          registry: ghcr.io
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
+          name: api-medlink-image-${{ github.sha }}
+          path: bundle
 
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@v4.1.2
+      - name: Load the scanned image
+        run: docker load --input bundle/image.tar
 
-      - name: Verify image signature before deployment
+      - name: Start PostgreSQL, Keycloak, Mailpit and the API
         env:
-          IMAGE: ${{ needs.publish-and-attest.outputs.image }}
-        run: |
-          test -n "$IMAGE"
-          cosign verify --certificate-identity-regexp '^https://github.com/assali-mohamed-ali/api-MedLink/.github/workflows/cd.yml@refs/(heads/(master|main|staging|prod)|tags/v.*)$' --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
-
-      - name: Deploy the verified immutable image
-        uses: ./.github/actions/deploy-compose
-        with:
-          host: ${{ vars.DEPLOY_HOST }}
-          user: ${{ vars.DEPLOY_USER }}
-          path: ${{ vars.DEPLOY_PATH }}
-          health_url: ${{ vars.DEPLOY_HEALTH_URL }}
-          ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
-          known_hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          env_file: ${{ secrets.DEPLOY_ENV_FILE }}
-          image: ${{ needs.publish-and-attest.outputs.image }}
-          ghcr_token: ${{ secrets.GITHUB_TOKEN }}
-
-
-  # Run tests against the deployed service, not only against the source tree.
-  # This gate must pass before an automated promotion PR can be opened.
-  staging-smoke-test:
-    name: Smoke test deployed staging
-    needs: deploy-staging
-    if: (github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'))
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    environment: staging
-    permissions:
-      contents: read
-    steps:
-      - name: Probe readiness and liveness
-        env:
-          HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL }}
+          APP_IMAGE: ${{ needs.build-and-scan.outputs.image_tag }}
         run: |
           set -euo pipefail
-          test -n "$HEALTH_URL" || { echo "::error::staging DEPLOY_HEALTH_URL is not configured"; exit 1; }
-          [[ "$HEALTH_URL" == */readyz ]] || { echo "::error::DEPLOY_HEALTH_URL must end in /readyz"; exit 1; }
-          BASE_URL="${HEALTH_URL%/readyz}"
-          READY="$(curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 "$HEALTH_URL")"
-          echo "$READY"
-          grep -q '"status":"UP"' <<< "$READY"
-          LIVE="$(curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 "$BASE_URL/livez")"
+          docker compose --file compose.yaml --profile full up --detach --no-build app
+
+      - name: Wait for API readiness
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            if body="$(curl --fail --silent --show-error --max-time 5 http://localhost:8080/readyz 2>/dev/null)"; then
+              if grep -q '"status":"UP"' <<< "$body"; then
+                echo "API is ready: $body"
+                exit 0
+              fi
+            fi
+            echo "Waiting for API readiness ($attempt/90)..."
+            sleep 5
+          done
+          echo "::error::API did not become ready within 7.5 minutes."
+          docker compose --file compose.yaml --profile full ps
+          docker compose --file compose.yaml --profile full logs --no-color --tail=200
+          exit 1
+
+      - name: Smoke test liveness and CSRF bootstrap
+        run: |
+          set -euo pipefail
+          LIVE="$(curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 http://localhost:8080/livez)"
           echo "$LIVE"
           grep -q '"status":"UP"' <<< "$LIVE"
 
-      - name: Verify the public CSRF bootstrap endpoint
-        env:
-          HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL }}
-        run: |
-          set -euo pipefail
-          BASE_URL="${HEALTH_URL%/readyz}"
           HEADERS="$(mktemp)"
           trap 'rm -f "$HEADERS"' EXIT
-          STATUS="$(curl --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
-            --dump-header "$HEADERS" --output /dev/null --write-out '%{http_code}' \
-            "$BASE_URL/api/auth/csrf")"
+          STATUS="$(curl --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --dump-header "$HEADERS" --output /dev/null --write-out '%{http_code}' http://localhost:8080/api/auth/csrf)"
           test "$STATUS" = "204" || { echo "::error::Expected /api/auth/csrf to return 204, got $STATUS"; exit 1; }
           grep -qi '^set-cookie: XSRF-TOKEN=' "$HEADERS" || {
             echo "::error::The CSRF bootstrap endpoint did not set XSRF-TOKEN"; exit 1;
           }
 
-  # Once staging deployment and smoke tests pass, create a real staging -> prod
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose --file compose.yaml --profile full logs --no-color --tail=300
+
+      - name: Tear down the ephemeral test stack
+        if: always()
+        run: docker compose --file compose.yaml --profile full down --volumes --remove-orphans
+
+  # Once runner-based container tests pass, create a real staging -> prod
   # PR and merge it only after its own CI/security checks complete successfully.
   # PROMOTION_TOKEN is a fine-grained PAT so the resulting PR workflows run.
   promote-staging-to-prod:
     name: Promote staging to prod
-    needs: staging-smoke-test
+    needs: runner-container-test
     if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && vars.ENABLE_AUTO_PROMOTION == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -341,7 +325,7 @@ jobs:
             gh pr create --repo "$GITHUB_REPOSITORY" --base prod --head staging \
               --title "$TITLE" \
               --body "$(printf '%s\n' \
-                "Automated promotion after the staging deployment and post-deployment smoke tests passed. The promotion job waits for this PR's CI and security checks before merging." \
+                "Automated promotion after the runner-based container stack and smoke tests passed. The promotion job waits for this PR's CI and security checks before merging." \
                 "" \
                 "## Utilisation de l'IA" \
                 "" \
