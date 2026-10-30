@@ -523,10 +523,10 @@ esac
 STATUS="$(http_status "$APP_URL/api/users")"
 if [ "$STATUS" = 401 ]; then ok '/api/users without a session returns 401'; else bad "/api/users without a session returned $STATUS, expected 401"; fi
 
-SWAGGER="$(http_status "$APP_URL/swagger-ui.html")"
-case "$SWAGGER" in
-    200 | 302) ok 'Swagger UI reachable' ;;
-    *) warn "Swagger UI returned $SWAGGER" ;;
+SCALAR="$(http_status "$APP_URL/scalar")"
+case "$SCALAR" in
+    200 | 302) ok 'Scalar API docs reachable' ;;
+    *) warn "Scalar API docs returned $SCALAR" ;;
 esac
 
 # End-to-end: log in as patient.dev through our login endpoint, as React does (CSRF cookie, then
@@ -610,7 +610,7 @@ cat <<EOF
 
   API             $APP_URL
   Login           POST $APP_URL/api/auth/login   (JSON email + password, X-XSRF-TOKEN header)
-  Swagger UI      $APP_URL/swagger-ui.html
+  Scalar API docs $APP_URL/scalar
   Mail inbox      http://localhost:8025   (every mail the API sends, Mailpit)
   Keycloak admin  $KEYCLOAK_URL   (user: $KC_ADMIN_USER, password: $ADMIN_PASSWORD_HINT)
   Test users      staff.dev / practitioner.dev / patient.dev   (password: $USERS_PASSWORD_HINT)
