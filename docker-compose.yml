@@ -1,12 +1,16 @@
 services:
   postgres:
-    image: postgres:16
+    image: postgres:18
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-mydatabase}
       POSTGRES_USER: ${POSTGRES_USER:-myuser}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      # Postgres 18 otherwise looks in /var/lib/postgresql/<major>/docker.
+      PGDATA: /var/lib/postgresql/data
     ports:
-      - '5432:5432'
+      # Host side only (the app reaches postgres:5432 inside the network). The setup scripts pick
+      # another host port when a local PostgreSQL already uses 5432.
+      - '${POSTGRES_HOST_PORT:-5432}:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -16,11 +20,12 @@ services:
       retries: 10
 
   app:
+    image: ${APP_IMAGE:-api-medlink:local}
     build:
       context: .
       dockerfile: docker/Dockerfile
     environment:
-      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-prod}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-mydatabase}
       SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-myuser}
       SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-secret}
@@ -29,6 +34,15 @@ services:
       KEYCLOAK_REALM: medlink
       KEYCLOAK_CLIENT_ID: medlink-bff
       KEYCLOAK_CLIENT_SECRET: ${KC_BFF_CLIENT_SECRET:?KC_BFF_CLIENT_SECRET must be set}
+      KEYCLOAK_ADMIN_CLIENT_SECRET: ${KC_ADMIN_CLIENT_SECRET:?KC_ADMIN_CLIENT_SECRET must be set}
+      APP_MFA_ENCRYPTION_KEY: ${APP_MFA_ENCRYPTION_KEY:?APP_MFA_ENCRYPTION_KEY must be set}
+      # Dev and local runs: Mailpit below. Staging/prod: the real SMTP server.
+      MAIL_HOST: ${MAIL_HOST:-mailpit}
+      MAIL_PORT: ${MAIL_PORT:-1025}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-MedLink <no-reply@medlink.local>}
+      APP_FRONTEND_URL: ${APP_FRONTEND_URL:-http://localhost:3000}
     ports:
       - '8080:8080'
     depends_on:
@@ -39,11 +53,13 @@ services:
 
   # Keycloak has its own database (separate container + volume), never the app's one.
   keycloak-db:
-    image: postgres:16
+    image: postgres:18
     environment:
       POSTGRES_DB: ${KEYCLOAK_DB_NAME:-keycloak}
       POSTGRES_USER: ${KEYCLOAK_DB_USER:-keycloak}
       POSTGRES_PASSWORD: ${KEYCLOAK_DB_PASSWORD:?KEYCLOAK_DB_PASSWORD must be set}
+      # Same data-directory pin as the app database.
+      PGDATA: /var/lib/postgresql/data
     volumes:
       - keycloak-db-data:/var/lib/postgresql/data
     healthcheck:
@@ -53,7 +69,7 @@ services:
       retries: 10
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.7.5
+    image: quay.io/keycloak/keycloak:26.8.1
     # start-dev locally; set KEYCLOAK_START_MODE=start for staging/prod.
     # --import-realm only creates the realm if it does not exist yet (data kept in keycloak-db-data).
     command: ['${KEYCLOAK_START_MODE:-start-dev}', '--import-realm']
@@ -71,6 +87,7 @@ services:
       KC_METRICS_ENABLED: 'true'
       # Placeholders resolved inside keycloak/realm-medlink.json at import
       KC_BFF_CLIENT_SECRET: ${KC_BFF_CLIENT_SECRET:?KC_BFF_CLIENT_SECRET must be set}
+      KC_ADMIN_CLIENT_SECRET: ${KC_ADMIN_CLIENT_SECRET:?KC_ADMIN_CLIENT_SECRET must be set}
       KC_BFF_BASE_URL: ${APP_PUBLIC_URL:-http://localhost:8080}
       KC_DEV_USERS_PASSWORD: ${KC_DEV_USERS_PASSWORD:?KC_DEV_USERS_PASSWORD must be set}
     volumes:
@@ -88,8 +105,15 @@ services:
       retries: 30
       start_period: 30s
 
+  # Catches every mail in dev and local runs: inbox at http://localhost:8025.
+  mailpit:
+    image: axllent/mailpit:v1.31.6
+    ports:
+      - '1025:1025'
+      - '8025:8025'
+
   prometheus:
-    image: prom/prometheus:v2.53.0
+    image: prom/prometheus:v3.15.0
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alerts/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro

@@ -1,3 +1,15 @@
+# Same bytes on Windows, macOS and Linux: text is stored with LF in the repository.
+* text=auto
+
+# Run by a Unix shell (also inside the Docker build): must stay LF on every machine.
 /mvnw text eol=lf
+*.sh text eol=lf
+
+# Run by Windows tools: must stay CRLF.
 *.cmd text eol=crlf
 *.ps1 text eol=crlf
+
+*.jar binary
+*.png binary
+*.jpg binary
+*.pdf binary

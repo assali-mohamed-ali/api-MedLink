@@ -19,7 +19,8 @@ public class CorsConfig {
         CorsConfiguration cfg = new CorsConfiguration();
         cfg.setAllowedOrigins(allowedOrigins);
         cfg.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        cfg.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With"));
+        // X-XSRF-TOKEN: React echoes the XSRF-TOKEN cookie on every write
+        cfg.setAllowedHeaders(List.of("Authorization", "Content-Type", "X-Requested-With", "X-XSRF-TOKEN"));
         cfg.setAllowCredentials(true);
         cfg.setMaxAge(3600L);
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();

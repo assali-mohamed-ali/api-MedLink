@@ -1,189 +1,363 @@
-# api-MedLink — Dev Workflow Guide (for DevSecOps beginners)
+# api-MedLink
 
-Spring Boot 4.1 / Java 17 API. Package: `com.example.apimedlink`.
+[![CI](https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/ci.yml)
+[![CodeQL](https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/sast-codeql.yml/badge.svg?branch=master)](https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/sast-codeql.yml)
+![Java 17](https://img.shields.io/badge/Java-17-informational)
+![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1-informational)
+![Keycloak](https://img.shields.io/badge/Keycloak-26-informational)
 
-> New here? Start with [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md): architecture, auth flow,
-> DevSecOps pipeline, ISO 27001 mapping and onboarding steps.
+The API of **MedLink**, a health portal for patients, practitioners and administrative staff across three
+clinics.
 
-Branches: `master` (integration) → `staging` (pre-prod) → `prod` (release).
-Flow: feature PR → `master`, promote `master` → `staging`, validate, then
-`staging` → `prod` (or tag `v*` for release). CI runs on all three;
-DAST runs on `master`/`staging`; CD deploys `staging` → `staging` env and
-`prod`/`master`/`v*` → `production` env.
-Profiles: `dev` (local) → `staging` (`application-staging.yml`) →
-`prod` (`application-prod.yml`). Select via `SPRING_PROFILES_ACTIVE`.
+> **The browser never talks to Keycloak.** This API is the only component that does. The browser holds an
+> HttpOnly session cookie and a readable `XSRF-TOKEN` cookie, never a token, a Keycloak page, link or mail.
 
-## 1. Setup (once)
+## Contents
 
-Windows shortcut: [`scripts/setup-dev.ps1`](scripts/setup-dev.ps1) clones the repo, creates `.env`,
-starts Postgres + Keycloak, verifies the realm, runs the tests, starts the API and logs in as
-`doctor.dev` to prove the whole chain works:
+1. [Quick start](#1-quick-start)
+2. [How auth works](#2-how-auth-works)
+3. [Project structure](#3-project-structure)
+4. [Rules for code](#4-rules-for-code)
+5. [From ticket to merge](#5-from-ticket-to-merge)
+6. [CI checks](#6-ci-checks)
+7. [Environments](#7-environments)
+8. [Dev setup in detail](#8-dev-setup-in-detail)
+9. [Troubleshooting](#9-troubleshooting)
+10. [Security and docs](#10-security-and-docs)
 
-```powershell
-powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1            # or -SkipTests, -FullStack, -Reset, -Stop
-```
+## 1. Quick start
+
+You need **Git** and **Docker Desktop** (running). A JDK 17 is used if present, but not required.
 
 ```bash
 git clone https://github.com/assali-mohamed-ali/api-MedLink.git
 cd api-MedLink
-cp .env.example .env        # then edit secrets inside, never commit .env
-# Java 17 + Docker Desktop required (tests use Testcontainers/Postgres)
-./mvnw -B -DskipTests compile
 ```
 
-Run locally:
+| Windows (PowerShell) | macOS / Linux |
+|---|---|
+| `powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1` | `./scripts/setup-dev.sh` |
 
-```bash
-# Option A: Postgres + Keycloak via compose.yaml + app via Maven (dev profile)
-docker compose -f compose.yaml up -d
-SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run
+The script creates `.env` with random secrets, starts Postgres, Keycloak and Mailpit, checks the realm, runs
+the tests, starts the API and logs in as `patient.dev` to prove the whole chain works. Add `-SkipTests` /
+`--skip-tests` for a faster run. **Re-run it after every `git pull`**: it keeps your Keycloak in step with the
+team's realm file. All options: [§8](#8-dev-setup-in-detail).
 
-# Option B: full stack (app + postgres + keycloak + keycloak-db + prometheus)
-# fill .env first (KC_BFF_CLIENT_SECRET, KEYCLOAK_DB_PASSWORD, KEYCLOAK_ADMIN_PASSWORD, KC_DEV_USERS_PASSWORD)
-docker compose -f docker-compose.yml up --build
-# Staging / prod: same file, different env + profile
-docker compose --env-file .env.staging -f docker-compose.yml up --build   # SPRING_PROFILES_ACTIVE=staging
-docker compose --env-file .env.prod -f docker-compose.yml up --build -d    # SPRING_PROFILES_ACTIVE=prod
+**What you get**
+
+| Service | URL |
+|---|---|
+| API | http://localhost:8080 |
+| Scalar API Reference | http://localhost:8080/scalar |
+| Health | http://localhost:8080/actuator/health |
+| Mailpit (every mail the API sends in dev) | http://localhost:8025 |
+| Keycloak admin console (`admin` / `admin`) | http://localhost:8180 |
+| Prometheus (full-stack mode only) | http://localhost:9090 |
+
+**Test users** (dev only): `patient.dev`, `practitioner.dev`, `staff.dev`, all `@medlink.local`, password
+`MedLink-Dev-2026!` (the value of `KC_DEV_USERS_PASSWORD`). `practitioner.dev` and `staff.dev` also need a code
+from an authenticator app (Google Authenticator, Aegis, …): their first login enrols it with a QR code.
+
+**Stack:** Spring Boot 4.1 · Java 17 · Keycloak 26 · PostgreSQL · Flyway · Testcontainers. Package
+`com.example.apimedlink`. Do not downgrade a version to make code compile.
+
+## 2. How auth works
+
+```mermaid
+sequenceDiagram
+    participant B as Browser (React)
+    participant A as api-MedLink
+    participant K as Keycloak
+    B->>A: GET /api/auth/csrf
+    A-->>B: 204 + XSRF-TOKEN cookie
+    B->>A: POST /api/auth/login (email, password) + X-XSRF-TOKEN
+    A->>K: password grant, server to server (client medlink-bff)
+    K-->>A: tokens, kept in the server session
+    A-->>B: 200 user + HttpOnly session cookie
+    B->>A: any /api call with the cookie
+    A-->>B: 200, or 401 / 403 as JSON
+    B->>A: POST /api/auth/logout
+    A->>K: end the Keycloak session
+    A-->>B: 204
 ```
 
-Useful URLs: API `http://localhost:8080`, Swagger `http://localhost:8080/swagger-ui.html`,
-health `http://localhost:8080/actuator/health`, Prometheus `http://localhost:9090`,
-Keycloak `http://localhost:8180` (admin console: `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD`, `admin`/`admin` with `compose.yaml`).
+- **Session:** a new HttpOnly cookie at login (`SameSite=Strict`, `Secure` in staging/prod). It ends after
+  **15 idle minutes**, or as soon as Keycloak refuses to renew the token (account disabled, signed out).
+- **Staff code:** for practitioners and staff, the login answers `{ "mfaRequired": true, "mfaSetupRequired": … }`
+  and no session yet; the browser then calls `/api/auth/mfa/setup` (first time only, with the token of the link the
+  API mails to the account's own address: a QR code for an authenticator app; the password alone enrols nothing) and `/api/auth/mfa/verify` with the 6-digit code, which opens the session. 5 wrong codes lock the code step
+  for 15 minutes. The secrets are encrypted with `APP_MFA_ENCRYPTION_KEY` (the API does not start without it).
+- **CSRF:** every write (`POST`, `PUT`, `DELETE`) echoes the `XSRF-TOKEN` cookie in `X-XSRF-TOKEN`, or gets 403.
+- **Password grant:** a consciously accepted exception to the OAuth best practice, so the login stays a
+  MedLink page. Why, and what it still needs: [decision record 0001](docs/decisions/0001-login-password-grant.md).
 
-### Keycloak (auth)
+### Endpoints
 
-- Keycloak owns logins, passwords and roles. The backend stores **no password and no role**.
-- Realm `medlink` is created from `keycloak/realm-medlink.json` on the first start
-  (`--import-realm`). If the realm already exists the file is ignored, so changes made in the
-  admin console are kept (data lives in the `keycloak-db-data` volume, separate `keycloak-db` Postgres).
-  To re-import from the file: `docker compose down -v` (deletes Keycloak data).
-- Access management: realm roles `ADMIN`, `DOCTOR`, `PATIENT`, given through groups
-  `/admins`, `/doctors`, `/patients` (new users land in `/patients`). To add a role: create the
-  role + a group holding it (console or JSON) — no backend change, `KeycloakRolesMapper` turns
-  every realm role from the `roles` claim into `ROLE_<NAME>`.
-- Client `medlink-bff`: confidential, authorization code + PKCE. The browser only gets a session
-  cookie; tokens stay in the backend (BFF). Login starts at `/oauth2/authorization/keycloak`.
-- Test users (dev): `admin.dev`, `doctor.dev`, `patient.dev`, password = `KC_DEV_USERS_PASSWORD`
-  (`MedLink-Dev-2026!` with `compose.yaml`). Delete them in staging/prod after the first start.
+| Endpoint | Who | Answers |
+|---|---|---|
+| `GET /api/auth/csrf` | anyone | 204 + `XSRF-TOKEN` cookie |
+| `POST /api/auth/register` | anyone | 201, the same whether or not the email is taken (the owner gets a mail) |
+| `POST /api/auth/verify-email` | anyone | 204 · 400 `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
+| `POST /api/auth/verify-email/resend` | anyone | 202, the same whether or not the account exists |
+| `POST /api/auth/login` | anyone | 200 (`user`, or `mfaRequired` for practitioners and staff) · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
+| `POST /api/auth/mfa/setup` | at the code step, `{token}` from the mailed link | 200 QR code, otpauth URL, secret · 401 · 409 `MFA_ALREADY_ENROLLED` · 400 `VALIDATION_FAILED` / `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
+| `POST /api/auth/mfa/verify` | at the code step | 200 `user` + session · 400 · 401 `INVALID_CODE` · 423 `MFA_LOCKED` |
+| `POST /api/auth/logout` | logged in | 204 |
+| `GET /api/users` | staff | 200 |
+| `GET /api/users/{id}` | the user themself, or staff | 200 · 403 for anyone else, whether the id exists or not |
+| `DELETE /api/users/{id}` | staff | 204 |
+| `GET /api/users/_health` | logged in | 200 |
 
-## 2. Where to code
+Full contracts: [plan.md §4](docs/sprints/sprint-2/plan.md).
+
+### Security rules behind them
+
+| Rule | How |
+|---|---|
+| One error shape | `{timestamp, status, error, code, message, details}`. 401 `UNAUTHENTICATED` / `SESSION_EXPIRED` (never a redirect), 403 `FORBIDDEN`, 503 `IDENTITY_UNAVAILABLE` when Keycloak is down |
+| No account enumeration | public endpoints answer the same for any email; a locked account answers like a wrong password |
+| Rate limits | per IP on login, register and resend: 429 `TOO_MANY_REQUESTS` + `Retry-After`, shared by every instance (Postgres). Per account: Keycloak locks after 5 failures for 15 minutes |
+| Deny by default | `SecurityConfig`; roles with `@PreAuthorize` and `security/Roles`; own data only with `security/OwnershipGuard` |
+| Access matrix | every `/api` route has a line in `functional/AccessMatrixFunctionalTest`. **A route without a line fails the build** |
+| Audit trail | every 403 is written to `audit_entries` with the caller, the IP and a redacted path; the table is append-only (triggers) |
+
+## 3. Project structure
 
 ```text
 src/main/java/com/example/apimedlink/
-  controller/   REST endpoints (thin, validation only)
-  service/      business logic
-  repository/   Spring Data JPA interfaces
-  model/        JPA entities
-  dto/          records for API in/out (never expose password hashes)
-  config/       SecurityConfig (oauth2Login BFF), CorsConfig
-  security/     KeycloakRolesMapper (Keycloak roles -> ROLE_*)
-  exception/    GlobalExceptionHandler
+├── controller/    REST endpoints: validate, then map through mapper/
+├── mapper/        entity <-> DTO, called by controllers only
+├── service/       business logic on entities (never a DTO)
+│                  the only Keycloak callers: KeycloakAdminService, KeycloakLoginClient
+├── repository/    Spring Data JPA
+├── model/         JPA entities
+├── dto/           API records (never a password hash or a token)
+├── config/        SecurityConfig, CORS, OpenAPI, Keycloak clients, rate limits
+├── security/      Roles, CurrentUser, OwnershipGuard, LoginSessions, session and rate-limit filters,
+│                  JSON 401/403 handlers, RouteWords (audit redaction)
+└── exception/     GlobalExceptionHandler, ErrorBody
+
 src/main/resources/
-  application.properties        base (name + Keycloak client registration)
-  application-dev.yml           local (localhost Postgres, show-sql)
-  application-prod.yml          docker/prod (strict, needs KEYCLOAK_CLIENT_SECRET env)
-  db/migration/V1__init.sql     Flyway migrations — see below
-keycloak/realm-medlink.json     Keycloak realm import (roles, groups, client, dev users)
-src/test/java/.../              mirror packages: controller/, service/, security/, integration/
+├── application.properties     every profile: session, cookies, mail, rate limits, Keycloak
+├── application-dev.yml        local
+├── application-staging.yml    pre-prod
+├── application-prod.yml       prod
+└── db/migration/              Flyway V*__*.sql
+
+src/test/java/.../functional/  real API + Keycloak + Postgres + Mailpit, driven over HTTP like a browser
+keycloak/realm-medlink.json    the realm: roles, groups, clients, lockout, dev users
+scripts/setup-dev.ps1 / .sh    one-command dev setup (keep both in step)
+docs/                          sprint plan and report, decisions, Postman collection
 ```
 
-Rules:
+## 4. Rules for code
 
-- New table/column → new Flyway file `V<N>__description.sql`, never edit an old `V*.sql`.
-  Prod uses `ddl-auto: validate`, so the migration IS the schema.
-- New endpoint → DTO + service method + controller method + test.
-- Passwords and roles: Keycloak only. Never store or accept a password in the backend.
-- Roles: assign them through Keycloak groups, never from request data.
-- Secrets (`KC_BFF_CLIENT_SECRET`, DB/admin passwords) come from env. No hardcoded secrets anywhere.
+| Topic | Rule |
+|---|---|
+| **Ids** | One id per person, Keycloak's: `users.id` = the `sub` claim. Create the Keycloak user first, never generate a user id. Other entities generate a UUID |
+| **Roles** | `PATIENT`, `PRACTITIONER`, `ADMINISTRATIVE_STAFF`, given through Keycloak groups. One role per person: `Patient extends User` (JPA `JOINED`). Never take a role or an id for the caller's own account from a request body |
+| **Layers** | Controller validates and maps; services take and return entities or plain values; only `KeycloakAdminService` and `KeycloakLoginClient` call Keycloak |
+| **New endpoint** | DTO + mapper + service + controller + **a line in the access matrix** + a test for the right role and one for the wrong role |
+| **Schema** | Flyway only: a new `V<N>__name.sql` with the next free number (check open PRs; the lower number merges first). Never edit a merged migration |
+| **Realm** | Change `keycloak/realm-medlink.json` in a PR, not only in your admin console |
+| **Secrets** | From environment variables only. Never log a password, token, code or secret |
+| **Tests** | Functional test first (`FunctionalTestBase`): commit it red, make it green, check once that it fails when the rule breaks. MockMvc only for what cannot be reached on demand |
 
-## 3. Before you commit (local gates — same as CI)
+## 5. From ticket to merge
+
+Tasks live in YouTrack, project `MLink` (https://medlink.youtrack.cloud).
+
+1. **Start:** move the task to *In Progress*. Shared file (`SecurityConfig`, `AuthBffController`,
+   `FunctionalTestBase`, the realm file, the setup scripts)? Say on the teammates' tickets what you change.
+2. **Branch for a change:** use `feat/<short-description>`, `fix/<short-description>`, `core/<short-description>`,
+   `docs/<short-description>`, or `chore/<short-description>`. The branch name is for organization; it does not
+   control the version number.
+3. **Use Conventional Commit titles/messages** so release automation can determine the version:
+   ```text
+   feat: add appointment booking       # minor version
+   fix(auth): reject expired sessions  # patch version
+   feat!: replace the public API       # major version
+   chore: update dependencies          # no release by itself
+   ```
+   A `BREAKING CHANGE:` footer also causes a major version bump. A branch called `core/*` does not automatically
+   mean major; choose the commit type based on what changed.
+4. **Check before the PR:**
+   ```bash
+   ./mvnw -B verify                                           # needs Docker
+   ./mvnw -B test -Dsurefire.runOrder=reversealphabetical
+   ```
+   Changed an endpoint? Run the Postman collection in `docs/postman/` with `npx newman@6.2.1 run <file>`.
+5. **Open the product PR against `staging`** (after the release-pipeline migration described in
+   [Deployment](docs/DEPLOYMENT.md)). Use a Conventional Commit title such as `feat: add appointment booking`.
+   The pipeline tests and scans the PR, deploys merged `staging` commits, then runs post-deployment smoke tests.
+6. **Promotion:** when staging smoke tests pass, automation opens a `staging -> prod` PR, runs its checks, and
+   merges it automatically. Release Please then opens a Maven release PR, bumps `pom.xml` and `CHANGELOG.md`,
+   and merges it after checks pass. The resulting `vX.Y.Z` tag builds/scans/signs the release image and deploys it
+   to production. A failed gate blocks the next step.
+7. **AI disclosure and review:** if an AI tool helped, tick *"J'ai utilisé des outils d'IA générative…"* and
+   tick *"Je confirme avoir relu…"* yourself only after reviewing the changes. Both must be in the same state.
+   Keep code-owner review and CodeQL on the setup/configuration PRs; fully automatic product promotion requires
+   that `prod` does not mandate a human review.
+
+## 6. CI checks
+
+| Check | Workflow | If red |
+|---|---|---|
+| Build + tests | `ci.yml` | run `./mvnw verify` locally in both class orders |
+| AI disclosure | `ai-disclosure.yml` | both AI checkboxes present once, in the same state |
+| CodeQL | `sast-codeql.yml` | fix the flagged pattern; never suppress without a comment |
+| Dependency CVEs | `sca-dependency-check.yml` | upgrade (fails on CVSS ≥ 7), or a justified suppression in `security/owasp-suppressions.xml` |
+| Secrets | `secrets-scan.yml` | remove and rotate the secret |
+| Image + config | `container-scan.yml` (Trivy) | bump the base image or fix the Dockerfile |
+| DAST | `dast-zap.yml` | fix the endpoint; `security/zap-rules.tsv` only with a reason |
+| Publish + deploy | `cd.yml` | env-gated image build, immutable digest, compose rollout over SSH, health check (staging, production) |
+
+Local secrets check: `gitleaks detect --source . --config security/.gitleaks.toml --redact -v`.
+Optional: `pre-commit run --all-files`.
+
+**Dependabot** opens grouped PRs every Monday (Maven, GitHub Actions, Dockerfile and compose images). Review
+them like any PR: compose images are not what the tests use, so a green CI proves little for them.
+**Never merge a Java jump** (`pom.xml` `java.version=17` moves first), and keep the Maven wrapper on 3.9.x
+(IntelliJ cannot import the project with 3.10, MLink-118).
+
+## 7. Environments and release flow
+
+| Ref / event | Result |
+|---|---|
+| PR to `staging` | CI, PR-title validation, and CD build/image security scan run; nothing is deployed from the PR |
+| Push to `staging` | Verify, build, scan, publish by commit SHA, attest/sign, deploy by immutable digest, smoke-test |
+| Staging smoke-test success | Open `staging -> prod` PR; wait for checks; merge automatically |
+| Push to `prod` | Release Please determines the next SemVer version from Conventional Commits and opens/updates a release PR |
+| Release PR merged | Create `vX.Y.Z` tag and GitHub Release; sync release metadata back to staging |
+| Push of `vX.Y.Z` | Build/test/scan the release, publish SBOM/provenance, sign image digest, deploy production by immutable digest |
+
+Production secrets live in GitHub Environments, never in git. Configure the `staging` and `production` environments,
+the repository secret `PROMOTION_TOKEN`, and branch/ruleset checks as described in
+[Deployment](docs/DEPLOYMENT.md). Production deploys only from lowercase `v*` tags; the legacy uppercase
+`V1.0.0` / `V1.0.1` tags are historical and are not used for new automated releases.
+
+**One-time migration warning:** the current `master`, `staging`, and `prod` branches have diverged. Keep repository variable `ENABLE_AUTO_PROMOTION` unset/false until the workflow files are carried across and branch baselines are deliberately reconciled in reviewed PRs. This PR adds
+the workflow/configuration on `master` only. Do not expect automation to run on `staging` or `prod` until these
+files are carried there and the branch baselines are reconciled in reviewed PRs. Do not blindly auto-merge the full
+legacy branch difference into production. See the migration checklist in [Deployment](docs/DEPLOYMENT.md).
+
+## 8. Dev setup in detail
+
+### Local pre-commit hooks
+
+Install the local Git hook once by following [CONTRIBUTING.md](CONTRIBUTING.md) and running:
 
 ```bash
-./mvnw -B verify                    # build + all tests + jacoco (needs Docker for Testcontainers)
-# If Docker is off, at least:
-./mvnw -B clean compile
-./mvnw -B -DskipTests test-compile
+bash scripts/setup-pre-commit.sh
 ```
 
-Secrets check (never commit `.env`, tokens, or `KC_BFF_CLIENT_SECRET` values):
+The hook checks staged files before each commit. CI also runs the complete pre-commit configuration across the repository.
 
-```bash
-gitleaks detect --source . --config security/.gitleaks.toml --redact -v
-```
 
-Optional but appreciated:
+<details>
+<summary><b>Setup script options</b></summary>
 
-```bash
-pre-commit run --all-files   # trailing whitespace, yaml, gitleaks, checkov
-```
+| Windows | macOS / Linux | What it does |
+|---|---|---|
+| *(none)* | *(none)* | containers, realm check, `./mvnw verify`, API, login check |
+| `-SkipTests` | `--skip-tests` | the same without the tests |
+| `-FullStack` | `--full-stack` | everything in containers, API and Prometheus included (no JDK needed) |
+| `-Reset` | `--reset` | delete the dev volumes first: fresh Keycloak and database |
+| `-KeepData` | `--keep-data` | never delete the dev volumes, even when the realm file changed |
+| `-Stop` | `--stop` | stop the API and the containers (volumes kept) |
 
-## 4. Commit → push → PR
+From Command Prompt: `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1 -SkipTests`.
+Logs of the last run: `%TEMP%\medlink-setup` (Windows) or `$TMPDIR/medlink-setup`.
 
-```bash
-git checkout master && git pull
-git checkout -b feat/short-description
-# ... code + tests ...
-git status --short              # review: no .env, no target/, no secrets
-git add <files>
-git commit -m "feat: what changed"   # or fix:/chore:/docs:
-git push -u origin feat/short-description
-```
+- **JDK:** the script finds a JDK 17+ and uses it for this run only. Without one it switches to full-stack mode.
+- **Realm changes:** when `keycloak/realm-medlink.json` changed, it deletes the dev volumes and re-imports
+  the realm. It first saves your realm to `.dev/realm-backups/` (no users, secrets masked, 10 kept).
 
-Then open a PR against `master` and fill the template checklist
-(`.github/pull_request_template.md`): tests, no secrets, dependency impact,
-Docker/Terraform validated if touched, Flyway tested if schema changed.
+</details>
 
-Branch naming: `feat/...`, `fix/...`, `chore/...`, `security/...`.
-Never push directly to `master`/`staging`/`prod`. One PR = one topic. Keep PRs small.
+<details>
+<summary><b>Two compose files, one job each</b></summary>
 
-Promote between environments (maintainers):
-
-```bash
-git checkout staging && git pull && git merge --no-ff master && git push origin staging
-# validate staging (app, ZAP, Prometheus), then:
-git checkout prod && git pull && git merge --no-ff staging && git push origin prod
-# release tag (triggers prod CD): git tag v1.0.0 && git push origin v1.0.0
-```
-
-`staging` uses `.env.staging` + `SPRING_PROFILES_ACTIVE=staging`
-(`application-staging.yml`, port 8081, `terraform.tfvars.staging.example`);
-`prod` uses `.env.prod` + `SPRING_PROFILES_ACTIVE=prod`
-(`application-prod.yml`, port 8080, `terraform.tfvars.prod.example`).
-Secrets (`KC_BFF_CLIENT_SECRET`, Keycloak admin, DB passwords) live in GitHub Environments
-(`staging`, `production`) — never in git.
-
-## 5. What CI does to your PR (and how to react)
-
-| Check | Workflow | Blocking? | If red |
+| Setup | File | Command | Secrets |
 |---|---|---|---|
-| Build + tests | `ci.yml` | YES — test failure fails job, blocks PR | run `./mvnw verify` locally, fix code/tests |
-| SAST (CodeQL) | `sast-codeql.yml` | YES — errors fail job, alerts to code scanning | fix flagged pattern, don't suppress without comment |
-| Deps CVEs | `sca-dependency-check.yml` | YES — fails on CVSS >= 7 | upgrade dep, or justify suppression in `security/owasp-suppressions.xml` with expiry + ticket |
-| Secrets | `secrets-scan.yml` | YES — any leak fails job | remove secret, rotate it, rewrite history if pushed |
-| Image + config | `container-scan.yml` (Trivy) | YES — CRITICAL/HIGH fails job | bump base image / fix Dockerfile misconfig |
-| DAST (ZAP) | `dast-zap.yml` (master/staging) | YES — `fail_action: true` | fix endpoint, update `security/zap-rules.tsv` only with reason |
-| Publish | `cd.yml` (staging→staging env, prod/v*→production env) | env-gated | builds + pushes `ghcr.io/...` image, validates terraform |
+| **A. Coding** (API on your machine) | `compose.yaml`: Postgres, Keycloak + its DB, Mailpit | `SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run` | fixed dev values, matching `application-dev.yml` |
+| **B. Full stack** (all in containers) | `docker-compose.yml`: the same + the API image + Prometheus | `docker compose -f docker-compose.yml up --build` | all from `.env`, required |
 
-Dependabot opens grouped PRs weekly (`dependabot.yml`):
-`maven-minor-patch`, `maven-major`, `gha-all`, `docker-all`.
-Merge order: minor-patch → actions → major. **Never merge a Java jump
-(e.g. `eclipse-temurin-17 → 25/26`)** — `pom.xml java.version=17` must move first,
-manually. Docker is pinned to Java 17 by ignore rules.
+The shared services must stay identical in both files (`ComposeFilesTest` fails when they drift).
+`compose.yaml` also defines the API under the `full` profile: `docker compose --profile full up --build`
+gives a zero-config dev stack with the fixed dev secrets, without touching the coding setup. Staging and
+prod use file B with `--env-file .env.staging` or `.env.prod`.
 
-## 6. Security contacts
+</details>
 
-Don't open public issues for vulnerabilities. See `SECURITY.md`:
-email `security@medlink.example.com` (or DM `@assali-mohamed-ali` with `[SECURITY]`),
-include version/commit, repro steps, impact. Threat overview: `security/threat-model.md`.
+<details>
+<summary><b>When dev data is kept or deleted</b></summary>
 
-## 7. Troubleshooting
+Volumes: `pgdata` (app database) and `keycloak-db-data` (Keycloak).
 
-- `mvnw.cmd` shows fully modified after pull → line endings. It's normalized
-  via `.gitattributes` (`*.cmd eol=crlf`); a `chore: normalize` commit is fine.
-- Tests need Docker (Testcontainers). Start Docker Desktop before `./mvnw verify`.
-- Spring Boot 4 moved test classes: `AutoConfigureMockMvc` is now in
-  `org.springframework.boot.webmvc.test.autoconfigure`, `TestRestTemplate` in
-  `org.springframework.boot.resttestclient`. Don't "fix" by downgrading Boot.
-- `KC_BFF_CLIENT_SECRET must be set` (or another `... must be set`) in compose → fill `.env` from `.env.example`.
-- Actuator exposes only `health,info,prometheus` — intentional, don't open more
-  without a security review.
+| You run | Volumes |
+|---|---|
+| the setup script again, same setup | **kept** |
+| the setup script after the realm file changed | **deleted** (realm saved first) |
+| the setup script in the other setup (A ↔ B) | **deleted** (realm saved first) |
+| `-Reset` / `--reset` | **deleted** (realm saved first) |
+| `-KeepData` / `--keep-data` | **kept**, even after a realm change |
+| `-Stop` / `--stop`, or `docker compose -f <file> down` | **kept** |
+| `docker compose -f <file> down -v` | **deleted**, no backup |
+
+After checking out a branch with other migrations, re-run with `-Reset` if Flyway refuses to start.
+
+</details>
+
+<details>
+<summary><b>Keycloak details</b></summary>
+
+- Realm `medlink` is imported from `keycloak/realm-medlink.json` only into an empty database; the setup
+  script re-imports it whenever the file changed.
+- Roles come from the groups `/patients`, `/practitioners`, `/administrative-staff` (new users land in
+  `/patients`). At login the API keeps only the three MedLink roles, so a new role needs code
+  (`security/Roles`, access rules, matrix lines).
+- Clients: `medlink-bff` (confidential, password grant, browser flow off) logs users in;
+  `medlink-admin` is the service account for admin calls (create a user, set a password, mark an email verified).
+- Delete the dev users in staging and prod after the first start.
+
+</details>
+
+## 9. Troubleshooting
+
+| Symptom | Fix |
+|---|---|
+| `Free these ports first` | something uses 8080 or 8180; stop it, or `-Stop` if it is an earlier run of ours |
+| `release version 17 not supported` | your default Java is older than 17: point `JAVA_HOME` at a JDK 17 (the setup script does it by itself) |
+| `mvnw` not recognized in PowerShell | type `.\mvnw` |
+| `Could not find a valid Docker environment` | start Docker Desktop (the tests use Testcontainers) |
+| `keycloak-db-1 exited (1)`, log says `in 18+, these Docker images…` | the compose files run PostgreSQL 18 with a PostgreSQL 16 volume path; `-Reset` does not help. Tracked on #74 |
+| `... must be set` from compose | `.env` is missing or incomplete: run the setup script, or copy `.env.example` and replace every `change-me` value (the setup script generates them for you) |
+| `app.mfa.encryption-key must be base64` or `must be 32 bytes` at startup | `APP_MFA_ENCRYPTION_KEY` still holds the `.env.example` placeholder: replace it with `openssl rand -base64 32` (32 random bytes in base64), or run the setup script |
+| roles look wrong, or `staff.dev` cannot log in | your Keycloak holds an old realm: re-run the setup script, or `-Reset` |
+| 401 with the right password | 5 wrong passwords lock the account for 15 minutes, answered like a wrong password: wait, or unlock it in the console |
+| `INVALID_CODE` with the code from the authenticator app | the phone's clock is off (a code lives 30 s, one step of tolerance): set the phone to automatic date and time. Also check you scanned the QR code of the last setup (a new setup replaces the secret) |
+| `MFA_LOCKED` | 5 wrong codes lock the code step for 15 minutes, even after a new login: wait |
+| a file shows fully modified after pull | line endings, normalized by `.gitattributes`; a `chore: normalize` commit is fine |
+| `permission denied: ./scripts/setup-dev.sh` | `chmod +x scripts/setup-dev.sh` |
+| a Spring Boot test class "is missing" | Spring Boot 4 moved them (`AutoConfigureMockMvc` → `org.springframework.boot.webmvc.test.autoconfigure`); don't downgrade |
+
+## 10. Security and docs
+
+**Report a vulnerability privately**, never in a public issue: see [SECURITY.md](SECURITY.md)
+(`security@medlink.example.com`, or a DM to @assali-mohamed-ali starting with `[SECURITY]`).
+
+Known open item: Scalar and `/v3/api-docs` are public in production (GitHub #65). In staging and prod the
+actuator (metrics, `/actuator/health`) is only on the private management port 9000, never published; the public
+port keeps `/livez` and `/readyz` (GitHub #49). The
+actuator exposes only `health,info,prometheus`: don't open more without a security review.
+
+| Document | What is in it |
+|---|---|
+| [CLAUDE.md](CLAUDE.md) | the team's rules, for people and AI sessions |
+| [docs/sprints/sprint-2/report.md](docs/sprints/sprint-2/report.md) | **Status**: what is merged, open, next; decisions log |
+| [docs/sprints/sprint-2/README.md](docs/sprints/sprint-2/README.md) | how a working session runs |
+| [docs/sprints/sprint-2/plan.md](docs/sprints/sprint-2/plan.md) | design and endpoint contracts |
+| [docs/decisions/](docs/decisions/) | decision records |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [security/threat-model.md](security/threat-model.md) | architecture, trust boundaries, threats and controls mapped to code and tests |
+| [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | staging/production host, GitHub Environment secrets, rollout, rollback and recovery |

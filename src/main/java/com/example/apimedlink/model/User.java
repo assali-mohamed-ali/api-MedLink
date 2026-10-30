@@ -2,44 +2,77 @@ package com.example.apimedlink.model;
 
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
-import jakarta.persistence.GeneratedValue;
-import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.Inheritance;
+import jakarta.persistence.InheritanceType;
+import jakarta.persistence.PostLoad;
+import jakarta.persistence.PostPersist;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.Transient;
 import java.time.Instant;
 import java.util.UUID;
-import lombok.AllArgsConstructor;
+import lombok.AccessLevel;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.springframework.data.domain.Persistable;
 
+/**
+ * A MedLink account. Each role is a subclass with its own table sharing this id
+ * ({@code JOINED}): a patient is a {@link Patient}. A person holds one role only, so there is
+ * never a second profile for the same login.
+ */
 @Entity
 @Table(name = "users")
+@Inheritance(strategy = InheritanceType.JOINED)
 @Getter
 @Setter
 @NoArgsConstructor
-@AllArgsConstructor
-@Builder
-public class User {
+public class User implements Persistable<UUID> {
 
+    /**
+     * Keycloak user id ({@code sub} claim): given by Keycloak, never generated here.
+     * Passwords and roles live in Keycloak only.
+     */
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
-    private Long id;
+    private UUID id;
 
-    @Column(nullable = false, unique = true, length = 50)
+    /** The login name in Keycloak: the email for patients. */
+    @Column(nullable = false, unique = true, length = 254)
     private String username;
 
     @Column(nullable = false, unique = true, length = 254)
     private String email;
 
-    /** Keycloak user id ({@code sub} claim). Passwords and roles live in Keycloak only. */
-    @Column(unique = true)
-    private UUID keycloakId;
-
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
+
+    /** The id is assigned, so Spring Data cannot tell a new row from an existing one by itself. */
+    @Transient
+    @Getter(AccessLevel.NONE)
+    @Setter(AccessLevel.NONE)
+    private boolean persisted;
+
+    @Builder
+    public User(UUID id, String username, String email, Instant createdAt) {
+        this.id = id;
+        this.username = username;
+        this.email = email;
+        this.createdAt = createdAt;
+    }
+
+    @Override
+    public boolean isNew() {
+        return !persisted;
+    }
+
+    @PostPersist
+    @PostLoad
+    void markPersisted() {
+        persisted = true;
+    }
 
     @PrePersist
     void onCreate() {

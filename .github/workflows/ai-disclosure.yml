@@ -1,0 +1,36 @@
+name: AI Contribution Disclosure
+
+on:
+  pull_request:
+    types:
+      - opened
+      - edited
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ai-disclosure-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  ai-disclosure:
+    name: Verify AI disclosure
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Test the disclosure validator
+        run: node --test .github/scripts/validate-ai-disclosure.test.mjs
+
+      # The validator is tested above and runs against the body of this PR.
+      # It fails when exactly one usage choice is not selected, when AI use has
+      # no human review acknowledgment, or when a declaration is contradictory.
+      - name: Validate the AI disclosure in the PR description
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node .github/scripts/validate-ai-disclosure.mjs

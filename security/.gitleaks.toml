@@ -1,5 +1,10 @@
 title = "api-MedLink gitleaks config"
 
+# Keep gitleaks' built-in rules (AWS keys, private keys, generic-api-key, ...)
+# and add ours on top. Without this, [[rules]] below would replace them all.
+[extend]
+useDefault = true
+
 [allowlist]
 description = "Faux positifs autorisés"
 paths = [
@@ -7,11 +12,18 @@ paths = [
   '''.*test.*''',
   '''HELP.md''',
 ]
-# Exemple : ignorer un hash de doc
-# regexes = ['''change-me-please-use-env.*''']
+# Documented placeholders and dev-only values, never real secrets.
+regexes = [
+  '''change-me''',
+  '''dev-only-''',
+  '''at-least-32-chars''',
+]
+# A single reviewed finding already in history: add its fingerprint to /.gitleaksignore.
 
 [[rules]]
 description = "JWT / secrets génériques"
 id = "generic-jwt"
-regex = '''(?i)(jwt_secret|api[_-]?key|secret)\s*[:=]\s*['\"][^'\"]{8,}['\"]'''
+# Literal values only: "$VAR", "${VAR:-x}" and "$(cmd)" are not secrets.
+regex = '''(?i)(?:jwt_secret|api[_-]?key|secret)\s*[:=]\s*['\"]([^'\"$\s]{8,})['\"]'''
+secretGroup = 1
 tags = ["secret"]

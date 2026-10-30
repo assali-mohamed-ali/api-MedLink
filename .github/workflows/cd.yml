@@ -1,58 +1,144 @@
 name: CD
 
-# Promotion model: feature PR -> master, promote master -> staging,
-# validate, then staging -> prod (or tag v* for release).
-# SAFEGUARD: master pushes do NOT auto-deploy prod. Only the prod
-# branch and v* tags reach the production environment.
+# Release lifecycle: verify, build once, scan the exact image, generate an SBOM,
+# publish by digest, attest/sign, verify before deployment, then deploy by digest.
+# Deployment uses Docker Compose over SSH. Kubernetes and Argo CD are not used.
 
 on:
+  pull_request:
+    branches: [master, main, staging, prod]
   push:
-    branches: [staging, prod]
+    # A direct push to prod is never deployed. Production starts only from
+    # a Release Please tag after a tested release PR has merged.
+    branches: [staging]
     tags: ['v*']
   workflow_dispatch:
     inputs:
       target:
-        description: 'Environment to deploy (re-run safeguards apply)'
+        description: Environment to deploy after security checks
         required: true
-        default: 'staging'
+        default: staging
         type: choice
         options: [staging, production]
 
 permissions:
   contents: read
-  packages: write
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_NAME: ${{ github.repository }}
 
 concurrency:
   group: cd-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  build-push:
+  build-and-scan:
+    name: Verify, build and scan exact image
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || (startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_AUTO_PROMOTION == 'true'))) || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && vars.ENABLE_AUTO_PROMOTION == 'true' && startsWith(github.ref, 'refs/tags/v'))))
     runs-on: ubuntu-latest
+    timeout-minutes: 45
+    permissions:
+      contents: read
     outputs:
-      image: ${{ steps.meta.outputs.tags }}
+      image_tag: ${{ steps.image.outputs.tag }}
     steps:
       - uses: actions/checkout@v7
-
-      - name: Validate Maven wrapper
-        run: |
-          test -f mvnw || (echo "mvnw missing" && exit 1)
-          chmod +x mvnw
-          ./mvnw --version
 
       - name: Set up JDK 17
         uses: actions/setup-java@v6
         with:
           java-version: '17'
-          distribution: 'temurin'
+          distribution: temurin
           cache: maven
 
-      - name: Build jar
-        run: ./mvnw --no-transfer-progress --fail-fast -DskipTests package
+      - name: Verify and test the application
+        run: |
+          test -f mvnw
+          chmod +x mvnw
+          ./mvnw --no-transfer-progress --fail-fast verify
+
+      - name: Define immutable image tag
+        id: image
+        env:
+          SHA: ${{ github.sha }}
+        run: echo "tag=ghcr.io/assali-mohamed-ali/api-medlink:${SHA}" >> "$GITHUB_OUTPUT"
+
+      - name: Build the runtime image once
+        env:
+          IMAGE: ${{ steps.image.outputs.tag }}
+        run: docker build --pull --file docker/Dockerfile --tag "$IMAGE" .
+
+      - name: Scan exact image (block on HIGH/CRITICAL)
+        id: trivy
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.tag }}
+          format: table
+          severity: CRITICAL,HIGH
+          exit-code: '1'
+          ignore-unfixed: true
+          scanners: vuln,secret,misconfig
+
+      - name: Generate CycloneDX SBOM from exact image
+        if: steps.trivy.outcome == 'success' || steps.trivy.outcome == 'failure'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          image-ref: ${{ steps.image.outputs.tag }}
+          format: cyclonedx
+          output: sbom.cdx.json
+          exit-code: '0'
+          scanners: vuln
+
+      - name: Save the scanned image for promotion
+        if: success()
+        env:
+          IMAGE: ${{ steps.image.outputs.tag }}
+        run: docker save --output image.tar "$IMAGE"
+
+      - name: Upload SBOM for audit even when the vulnerability gate blocks
+        if: always() && hashFiles('sbom.cdx.json') != ''
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-medlink-sbom-${{ github.sha }}
+          path: sbom.cdx.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload exact scanned image
+        if: success()
+        uses: actions/upload-artifact@v7
+        with:
+          name: api-medlink-image-${{ github.sha }}
+          path: image.tar
+          if-no-files-found: error
+          retention-days: 2
+
+  publish-and-attest:
+    name: Publish and attest the scanned image
+    needs: build-and-scan
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/staging' || (startsWith(github.ref, 'refs/tags/v') && vars.ENABLE_AUTO_PROMOTION == 'true'))) || (github.event_name == 'workflow_dispatch' && ((inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging')) || (inputs.target == 'production' && vars.ENABLE_AUTO_PROMOTION == 'true' && startsWith(github.ref, 'refs/tags/v'))))
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+      attestations: write
+    outputs:
+      digest: ${{ steps.publish.outputs.digest }}
+      image: ${{ steps.publish.outputs.ref }}
+    steps:
+      - name: Download the exact scanned image
+        uses: actions/download-artifact@v8
+        with:
+          name: api-medlink-image-${{ github.sha }}
+          path: bundle
+
+      - name: Download the SBOM for the same image
+        uses: actions/download-artifact@v8
+        with:
+          name: api-medlink-sbom-${{ github.sha }}
+          path: bundle
+
+      - name: Load the scanned image
+        run: docker load --input bundle/image.tar
 
       - name: Log in to GHCR
         uses: docker/login-action@v4
@@ -61,70 +147,255 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Docker metadata
-        id: meta
-        uses: docker/metadata-action@v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
-          tags: |
-            type=sha
-            type=ref,event=branch
-            type=semver,pattern={{version}}
+      - name: Publish the already-scanned image and capture digest
+        id: publish
+        env:
+          IMAGE: ${{ needs.build-and-scan.outputs.image_tag }}
+        run: |
+          set -o pipefail
+          docker push "$IMAGE" 2>&1 | tee push.log
 
-      - name: Build & push
-        uses: docker/build-push-action@v7
+          # On a semantic release tag, add a human-friendly GHCR alias to the
+          # exact same image (no second build). The digest remains the deploy ID.
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSIONED_IMAGE="ghcr.io/assali-mohamed-ali/api-medlink:${GITHUB_REF_NAME}"
+            docker tag "$IMAGE" "$VERSIONED_IMAGE"
+            docker push "$VERSIONED_IMAGE" 2>&1 | tee -a push.log
+          fi
+
+          DIGEST="$(grep -Eo 'digest: sha256:[0-9a-f]{64}' push.log | tail -n 1 | cut -d' ' -f2)"
+          test -n "$DIGEST" || { echo "::error::Could not obtain the GHCR digest from docker push."; exit 1; }
+          echo "digest=$DIGEST" >> "$GITHUB_OUTPUT"
+          echo "ref=ghcr.io/assali-mohamed-ali/api-medlink@$DIGEST" >> "$GITHUB_OUTPUT"
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@v4
         with:
-          context: .
-          file: docker/Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          subject-name: ghcr.io/assali-mohamed-ali/api-medlink
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          push-to-registry: true
+
+      - name: Attest SBOM for the published digest
+        uses: actions/attest-sbom@v4
+        with:
+          subject-name: ghcr.io/assali-mohamed-ali/api-medlink
+          subject-digest: ${{ steps.publish.outputs.digest }}
+          sbom-path: bundle/sbom.cdx.json
+          push-to-registry: true
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Sign the published image digest
+        env:
+          IMAGE: ${{ steps.publish.outputs.ref }}
+        run: cosign sign --yes "$IMAGE"
 
   deploy-staging:
-    needs: build-push
-    if: github.ref == 'refs/heads/staging' || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging')
+    needs: publish-and-attest
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'))
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: staging
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v4
+      - name: Log in to GHCR for signature verification
+        uses: docker/login-action@v4
         with:
-          terraform_version: 1.9.x
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Validate + plan (staging)
-        run: |
-          cd terraform
-          terraform init -backend=false
-          terraform fmt -check
-          terraform validate
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Verify image signature before deployment
         env:
-          TF_VAR_app_image: ${{ needs.build-push.outputs.image }}
-          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
-          TF_VAR_db_password: ${{ secrets.STAGING_DB_PASSWORD }}
+          IMAGE: ${{ needs.publish-and-attest.outputs.image }}
+        run: |
+          test -n "$IMAGE"
+          cosign verify --certificate-identity-regexp '^https://github.com/assali-mohamed-ali/api-MedLink/.github/workflows/cd.yml@refs/(heads/(master|main|staging|prod)|tags/v.*)$' --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
+
+      - name: Deploy the verified immutable image
+        uses: ./.github/actions/deploy-compose
+        with:
+          host: ${{ vars.DEPLOY_HOST }}
+          user: ${{ vars.DEPLOY_USER }}
+          path: ${{ vars.DEPLOY_PATH }}
+          health_url: ${{ vars.DEPLOY_HEALTH_URL }}
+          ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known_hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          env_file: ${{ secrets.DEPLOY_ENV_FILE }}
+          image: ${{ needs.publish-and-attest.outputs.image }}
+          ghcr_token: ${{ secrets.GITHUB_TOKEN }}
+
+
+  # Run tests against the deployed service, not only against the source tree.
+  # This gate must pass before an automated promotion PR can be opened.
+  staging-smoke-test:
+    name: Smoke test deployed staging
+    needs: deploy-staging
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment: staging
+    permissions:
+      contents: read
+    steps:
+      - name: Probe readiness and liveness
+        env:
+          HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          test -n "$HEALTH_URL" || { echo "::error::staging DEPLOY_HEALTH_URL is not configured"; exit 1; }
+          [[ "$HEALTH_URL" == */readyz ]] || { echo "::error::DEPLOY_HEALTH_URL must end in /readyz"; exit 1; }
+          BASE_URL="${HEALTH_URL%/readyz}"
+          READY="$(curl --fail --silent --show-error --retry 10 --retry-all-errors --retry-delay 2 "$HEALTH_URL")"
+          echo "$READY"
+          grep -q '"status":"UP"' <<< "$READY"
+          LIVE="$(curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 "$BASE_URL/livez")"
+          echo "$LIVE"
+          grep -q '"status":"UP"' <<< "$LIVE"
+
+      - name: Verify the public CSRF bootstrap endpoint
+        env:
+          HEALTH_URL: ${{ vars.DEPLOY_HEALTH_URL }}
+        run: |
+          set -euo pipefail
+          BASE_URL="${HEALTH_URL%/readyz}"
+          HEADERS="$(mktemp)"
+          trap 'rm -f "$HEADERS"' EXIT
+          STATUS="$(curl --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
+            --dump-header "$HEADERS" --output /dev/null --write-out '%{http_code}' \
+            "$BASE_URL/api/auth/csrf")"
+          test "$STATUS" = "204" || { echo "::error::Expected /api/auth/csrf to return 204, got $STATUS"; exit 1; }
+          grep -qi '^set-cookie: XSRF-TOKEN=' "$HEADERS" || {
+            echo "::error::The CSRF bootstrap endpoint did not set XSRF-TOKEN"; exit 1;
+          }
+
+  # Once staging deployment and smoke tests pass, create a real staging -> prod
+  # PR and merge it only after its own CI/security checks complete successfully.
+  # PROMOTION_TOKEN is a fine-grained PAT so the resulting PR workflows run.
+  promote-staging-to-prod:
+    name: Promote staging to prod
+    needs: staging-smoke-test
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && vars.ENABLE_AUTO_PROMOTION == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      pull-requests: write
+    env:
+      GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Find staged commits not yet in prod
+        id: diff
+        run: |
+          set -euo pipefail
+          git fetch origin prod staging
+          # Compare trees, not only commit counts: the automatic prod -> staging
+          # version-sync PR may add a merge commit with an identical tree.
+          if git diff --quiet origin/prod origin/staging --; then
+            echo "ahead=0" >> "$GITHUB_OUTPUT"
+            echo "Staging and prod have identical content; no promotion needed."
+          else
+            echo "ahead=1" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Validate the promotion token
+        if: steps.diff.outputs.ahead != '0'
+        run: |
+          test -n "$GH_TOKEN" || {
+            echo "::error::Add repository secret PROMOTION_TOKEN (GitHub App token or fine-grained PAT: Contents and Pull requests read/write; Issues read/write for Release Please)."
+            exit 1
+          }
+
+      - name: Create or update the staging -> prod PR, wait for checks, then merge
+        if: steps.diff.outputs.ahead != '0'
+        env:
+          GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          SUBJECTS="$(git log --format='%s' origin/prod..origin/staging)"
+          BODIES="$(git log --format='%B' origin/prod..origin/staging)"
+          if grep -Eq 'BREAKING CHANGE:|^[[:space:]]*[[:alnum:]]+(\([^)]*\))?!:' <<< "$BODIES"; then
+            TITLE='feat!: promote staging to prod'
+          elif grep -Eq '^feat(\([^)]*\))?:' <<< "$SUBJECTS"; then
+            TITLE='feat: promote staging to prod'
+          elif grep -Eq '^fix(\([^)]*\))?:' <<< "$SUBJECTS"; then
+            TITLE='fix: promote staging to prod'
+          else
+            TITLE='chore: promote staging to prod'
+          fi
+
+          PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base prod --head staging --state open --json number --jq '.[0].number // empty')"
+          if [ -z "$PR_NUMBER" ]; then
+            gh pr create --repo "$GITHUB_REPOSITORY" --base prod --head staging \
+              --title "$TITLE" \
+              --body "$(printf '%s\n' \
+                "Automated promotion after the staging deployment and post-deployment smoke tests passed. The promotion job waits for this PR's CI and security checks before merging." \
+                "" \
+                "## Utilisation de l'IA" \
+                "" \
+                "- [x] Cette PR n'utilise pas d'outils d'IA générative." \
+                "- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR." \
+                "- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.")"
+            PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base prod --head staging --state open --json number --jq '.[0].number // empty')"
+          else
+            gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$TITLE"
+          fi
+          test -n "$PR_NUMBER" || { echo "::error::Unable to find/create the staging -> prod PR"; exit 1; }
+
+          # PROMOTION_TOKEN ensures the PR workflows start automatically.
+          gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --watch --fail-fast
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge
 
   deploy-prod:
-    needs: build-push
-    # SAFEGUARD: prod deploys only from prod branch, v* tags, or explicit
-    # manual dispatch to production (still gated by the environment's
-    # required reviewers). master is intentionally excluded.
-    if: github.ref == 'refs/heads/prod' || startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && inputs.target == 'production')
+    needs: publish-and-attest
+    if: vars.ENABLE_AUTO_PROMOTION == 'true' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.target == 'production' && startsWith(github.ref, 'refs/tags/v')))
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     environment: production
+    permissions:
+      contents: read
+      packages: read
     steps:
       - uses: actions/checkout@v7
 
-      - uses: hashicorp/setup-terraform@v4
+      - name: Log in to GHCR for signature verification
+        uses: docker/login-action@v4
         with:
-          terraform_version: 1.9.x
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Validate + plan (prod)
-        run: |
-          cd terraform
-          terraform init -backend=false
-          terraform fmt -check
-          terraform validate
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Verify image signature before deployment
         env:
-          TF_VAR_app_image: ${{ needs.build-push.outputs.image }}
-          TF_VAR_jwt_secret: ${{ secrets.JWT_SECRET }}
-          TF_VAR_db_password: ${{ secrets.PROD_DB_PASSWORD }}
+          IMAGE: ${{ needs.publish-and-attest.outputs.image }}
+        run: |
+          test -n "$IMAGE"
+          cosign verify --certificate-identity-regexp '^https://github.com/assali-mohamed-ali/api-MedLink/.github/workflows/cd.yml@refs/(heads/(master|main|staging|prod)|tags/v.*)$' --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
+
+      - name: Deploy the verified immutable image
+        uses: ./.github/actions/deploy-compose
+        with:
+          host: ${{ vars.DEPLOY_HOST }}
+          user: ${{ vars.DEPLOY_USER }}
+          path: ${{ vars.DEPLOY_PATH }}
+          health_url: ${{ vars.DEPLOY_HEALTH_URL }}
+          ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known_hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          env_file: ${{ secrets.DEPLOY_ENV_FILE }}
+          image: ${{ needs.publish-and-attest.outputs.image }}
+          ghcr_token: ${{ secrets.GITHUB_TOKEN }}

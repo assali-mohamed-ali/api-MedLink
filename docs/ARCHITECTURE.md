@@ -1,345 +1,387 @@
-# api-MedLink — Architecture, Security & Onboarding Guide
+# api-MedLink — Architecture and security
 
-As of 2026-10-09 · living copy (with editable diagrams and the coverage tracker):
-[Claude Doc](https://claude.ai/code/artifact/f497ba3c-3de8-4b1f-af36-fb47ed612524)
+Updated 2026-10-20 against `master` (GitHub #66). Setup and day-to-day commands: [README](../README.md).
+Threats and controls: [security/threat-model.md](../security/threat-model.md). An older interactive copy of
+this guide exists as a [Claude Doc](https://claude.ai/code/artifact/f497ba3c-3de8-4b1f-af36-fb47ed612524)
+(2026-10-09); this file is the reference.
 
 ## TL;DR
 
-api-MedLink is a Spring Boot 4.1 / Java 17 health API where **Keycloak owns identity** (logins, passwords, roles) and the backend acts as an **auth BFF**: the browser only ever holds a session cookie. Security is built into every step of delivery: local hooks, six security scans in CI, and promotion through `master` → `staging` → `prod`.
+api-MedLink is a Spring Boot 4.1 / Java 17 health API. **Keycloak owns identity** (passwords, policy,
+lockout, roles) and the API is an **auth BFF**: the browser holds a session cookie only, and **never talks to
+Keycloak**. Sign-up, email verification, login and logout go browser → API → Keycloak → API → browser; staff
+codes, password changes and account management will too.
 
-- **State today:** Keycloak, its realm and the BFF skeleton are initialised on branch `feat/keycloak-init`. Feature APIs come next.
-- **How to read this:** new to the team → read *Day-1 onboarding*, then *Architecture* and *Rules of the road*. Reviewing security or compliance → jump to *DevSecOps in the SDLC* and *ISO 27001 mapping*.
+- **Login:** `POST /api/auth/login`; the API asks Keycloak with the **OAuth password grant**, server to
+  server. This is a consciously accepted exception to the OAuth best practice, chosen so that no Keycloak
+  page reaches the browser: [decision record 0001](decisions/0001-login-password-grant.md) (GitHub #50).
+- **Authorization:** deny by default, roles from the signed token, "own data only" checks, and a role × route
+  matrix that fails the build when a route has no rule.
+- **Delivery:** CI/security checks on PRs to `staging`, deploy + smoke-test on merge, automatic checked
+  `staging` → `prod` promotion, Release Please SemVer release PR, lowercase `vX.Y.Z` tag and tag-only production deploy.
+  The release flow is being introduced by a reviewed migration PR; do not enable it on diverged branches until reconciled.
+- **Where we are:** sprint 2 builds the identity features; plan, contracts and progress are in
+  [`docs/sprints/sprint-2/`](sprints/sprint-2/README.md).
 
-The ISO 27001 section maps the repo's technical controls to Annex A. The repo supplies evidence for an ISMS; it does not make the organisation certified on its own.
-
-## Day-1 onboarding
-
-Five steps take a new developer from clone to a running stack and a first PR.
-
-**Windows shortcut:** `scripts/setup-dev.ps1` runs steps 1–4 and checks everything (realm, tests, login). Run it with `powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1`.
-
-**Prerequisites:** JDK 17 (Temurin), Docker Desktop, Git, an IDE with Lombok support, and optionally `pre-commit` (`pip install pre-commit`) and `gitleaks`.
-
-1. Clone and prepare secrets
-   - `git clone https://github.com/assali-mohamed-ali/api-MedLink.git && cd api-MedLink`
-   - `cp .env.example .env`, then fill every `change-me` value. `.env` is git-ignored and must never be committed.
-   - `pre-commit install` (once) so the local checks run on every commit.
-2. Start the dependencies (Option A, recommended for coding)
-   - `docker compose -f compose.yaml up -d` starts Postgres, Keycloak and Keycloak's own database.
-   - `SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run` starts the API.
-3. Or run everything in containers (Option B)
-   - `docker compose -f docker-compose.yml up --build` adds the app image and Prometheus. It refuses to start until the `.env` secrets are set.
-4. Check it works
-   - `./mvnw -B verify` runs build, tests (Testcontainers needs Docker) and coverage.
-5. Make a first change
-   - Branch `feat/...`, commit, push, open a PR to `master`, fill the PR checklist. See *Rules of the road*.
-
-| What | URL | Login |
-| --- | --- | --- |
-| API | http://localhost:8080 | via Keycloak |
-| Start login | http://localhost:8080/oauth2/authorization/keycloak | test users below |
-| Swagger UI | http://localhost:8080/swagger-ui.html | public |
-| Health | http://localhost:8080/actuator/health | public |
-| Keycloak admin console | http://localhost:8180 | `admin` / `admin` (compose.yaml) or `KEYCLOAK_ADMIN` / `KEYCLOAK_ADMIN_PASSWORD` |
-| Prometheus (Option B) | http://localhost:9090 | none |
-
-**Test users (dev only):** `admin.dev`, `doctor.dev`, `patient.dev`. Password = `KC_DEV_USERS_PASSWORD` (`MedLink-Dev-2026!` with `compose.yaml`).
+The ISO 27001 section maps the repo's technical controls to Annex A. The repo supplies evidence for an ISMS;
+it does not make the organisation certified on its own.
 
 ## Architecture
 
-Six runtime components, two databases: identity lives in Keycloak, business data lives in the API's Postgres, and the two never share storage.
+Seven runtime components, two databases: identity lives in Keycloak, business data in the API's Postgres,
+and they never share storage.
 
 ```mermaid
 flowchart LR
-  BR["Browser / SPA<br/>session cookie only<br/>+ CSRF cookie"]
-  BFF["api-MedLink (BFF) :8080<br/>Spring Boot 4.1 · Java 17<br/>oauth2Login, server session<br/>tokens stay in the backend<br/>Keycloak roles → ROLE_*<br/>401 on /api/** if no session<br/>Flyway owns the schema"]
-  KC["Keycloak :8180<br/>v26.7.5, realm medlink<br/>logins, passwords, roles<br/>brute-force + pwd policy"]
-  KCDB[("keycloak-db<br/>Postgres 16, own container<br/>volume keycloak-db-data")]
-  APPDB[("Postgres · app data<br/>mydatabase · volume pgdata<br/>users table, no passwords")]
-  PROM["Prometheus :9090<br/>scrapes metrics"]
-  BR -- "1 login redirect (code + PKCE)" --> KC
-  BR -- "3 API calls + session cookie" --> BFF
-  BFF -- "2 back-channel: code → tokens, JWKS" --> KC
-  KC -- "4 JDBC" --> KCDB
-  BFF -- "4 JDBC" --> APPDB
-  PROM -- "5 /actuator/prometheus every 15 s" --> BFF
+  BR["Browser / React<br/>session cookie + XSRF-TOKEN only"]
+  API["api-MedLink (BFF) :8080<br/>Spring Boot 4.1 · Java 17<br/>server session holds the tokens<br/>deny by default, JSON 401/403<br/>Flyway owns the schema"]
+  KC["Keycloak :8180<br/>realm medlink<br/>passwords, policy, lockout,<br/>roles via groups, events"]
+  KCDB[("keycloak-db<br/>own container and volume")]
+  APPDB[("Postgres · app data<br/>users, patients, email tokens,<br/>audit_entries, rate_limits,<br/>session_revocations")]
+  MAIL["SMTP<br/>(Mailpit in dev)"]
+  PROM["Prometheus :9090"]
+  BR -- "1 every call: JSON + session cookie<br/>(login: email + password)" --> API
+  API -- "2 password grant, token renewal, logout<br/>(client medlink-bff)" --> KC
+  API -- "3 admin calls: create user, set password<br/>(service account medlink-admin)" --> KC
+  API -- "4 JDBC" --> APPDB
+  KC -- "JDBC" --> KCDB
+  API -- "5 verification and warning mails" --> MAIL
+  PROM -- "6 /actuator/prometheus every 15 s<br/>(private management port 9000)" --> API
 ```
 
-1. **Login:** the browser is redirected to Keycloak (authorization code + PKCE).
-2. **Back-channel:** the BFF swaps the code for tokens and checks their signature (JWKS).
-3. API calls carry only the session cookie; tokens never reach the browser.
-4. **JDBC:** Keycloak and the API each have their own database and volume.
-5. Prometheus scrapes `/actuator/prometheus` every 15 s.
+1. The browser only ever calls the API. At login it sends the email and password to the API.
+2. The API logs the user in at Keycloak (password grant), renews the token while the session lives, and
+   ends the Keycloak session at logout. Tokens are checked (signature, issuer, `azp`) and stay in the server
+   session.
+3. Account operations use a separate service account, `medlink-admin`.
+4. Keycloak and the API each have their own database and volume.
+5. Mails (verification links, "someone used your address") are the API's own, not Keycloak's.
+6. Prometheus scrapes the metrics. In staging and prod, Actuator is only on the private management port 9000
+   (`app:9000`, never published); the public port keeps `/livez` and `/readyz` (GitHub #49).
 
-The BFF is the only component that talks to both Keycloak and the app database. Keycloak's port 8180 is for browsers and admins; the API reaches it internally at `http://keycloak:8080`. Staging and prod run the same images with different `.env` values and Spring profiles.
+The browser never needs to reach Keycloak. Its port 8180 is for admins in dev; the API reaches Keycloak
+internally at `http://keycloak:8080`. Staging and prod run the same images with different `.env` values and
+Spring profiles.
 
-## Authentication & authorization
+## Authentication and authorization
 
-Keycloak decides who you are and which groups you belong to; the BFF only turns the signed `roles` claim into Spring authorities. The API stores no password and no role.
+Keycloak decides who you are and which groups you belong to; the API keeps the MedLink roles from the signed
+token and enforces every rule. The API stores no password and no role.
 
-### Login flow (authorization code + PKCE)
+### Login flow (password grant)
 
 ```mermaid
 sequenceDiagram
   autonumber
-  actor U as User (browser)
-  participant B as api-MedLink BFF
+  actor U as Browser (React)
+  participant A as api-MedLink
   participant K as Keycloak (realm medlink)
-  U->>B: GET /oauth2/authorization/keycloak
-  B-->>U: 302 to Keycloak /auth (state, nonce, PKCE S256)
-  U->>K: Login form (username + password)
-  K->>K: Brute-force check, password policy
-  K-->>U: 302 to /login/oauth2/code/keycloak?code=...
-  U->>B: Callback with the code
-  B->>K: POST /token (code + client secret + PKCE verifier)
-  K-->>B: ID token + access token (claim roles)
-  B->>K: GET /certs (JWKS) to verify signatures
-  B->>B: KeycloakRolesMapper: roles to ROLE_*
-  B-->>U: Session cookie + XSRF-TOKEN cookie
-  U->>B: GET /api/... with session cookie
-  B-->>U: 200, or 401 without a session
+  U->>A: GET /api/auth/csrf
+  A-->>U: 204 + XSRF-TOKEN cookie
+  U->>A: POST /api/auth/login (email, password) + X-XSRF-TOKEN
+  A->>A: CSRF check, per-IP rate limit (429 past the limit)
+  A->>K: POST /token, grant_type=password, client medlink-bff + secret
+  K->>K: lockout check (5 failures, 15 min), password check
+  K-->>A: ID token + access token + refresh token
+  A->>A: check signature (JWKS), issuer, azp, email verified
+  A->>A: create the users row if missing (id = sub), keep the MedLink roles
+  A->>A: new session id, tokens saved in the server session
+  A-->>U: 200 user + HttpOnly session cookie (SameSite=Strict)
+  U->>A: GET /api/... with the session cookie
+  A-->>U: 200, or 401 / 403 as JSON
 ```
 
-### Access model: users → groups → roles → authorities
+- **Refusals:** a wrong password, an unknown email and a locked account all get the same
+  401 `INVALID_CREDENTIALS` (no account enumeration). An unverified email: 403 `EMAIL_NOT_VERIFIED`, and the
+  Keycloak session just opened is ended. A disabled account: 403 `ACCOUNT_DISABLED`. Keycloak down: 503.
+- **Never logged:** the password, the tokens (`LoginRequest` and `KeycloakTokens` hide them in `toString`).
+- **Session life:** 15 idle minutes (Tomcat, and Keycloak's SSO idle). While it lives, the API renews the
+  5-minute access token; if Keycloak refuses (account disabled, signed out, password reset) the session
+  ends with 401 `SESSION_EXPIRED`.
+- **Logout:** `POST /api/auth/logout` ends Keycloak's session (refresh token, server to server) and ours,
+  and expires the cookie: 204.
+- **Staff code (MLink-62/63):** for practitioners and staff, the password alone answers
+  `{ "mfaRequired": true, "mfaSetupRequired": … }` and opens no session; the accepted login (tokens included)
+  waits 5 minutes in the server session (`MfaPending`). The first time, the API mails a 30-minute link to the
+  account's own address (`MfaEnrolmentLinks`), and `POST /api/auth/mfa/setup` with its token gives a QR
+  code for an authenticator app (TOTP, RFC 6238, our own code plus ZXing for the image); the secret is stored
+  AES-256-GCM encrypted (`user_mfa`, key `APP_MFA_ENCRYPTION_KEY`). `POST /api/auth/mfa/verify` checks the code
+  (each works once) and opens the session; 5 wrong codes lock the code step for 15 minutes across logins and
+  end the Keycloak session. Never logged: the secret, the codes. The forced password change and the password
+  history (MLink-87/88/91) use the same kind of pending step (`PendingStep`).
+
+Why the password grant, its costs and the plan should it be revisited:
+[decision record 0001](decisions/0001-login-password-grant.md).
+
+### Access model: groups → roles → rules
 
 ```mermaid
 flowchart LR
   subgraph KC[Keycloak realm medlink]
-    UA[admin.dev] --> GA[/admins/]
-    UD[doctor.dev] --> GD[/doctors/]
+    UA[staff.dev] --> GA[/administrative-staff/]
+    UD[practitioner.dev] --> GD[/practitioners/]
     UP[patient.dev] --> GP[/patients/]
-    NEW[any new user] -. default group .-> GP
-    GA --> RA[ADMIN]
-    GD --> RD[DOCTOR]
+    NEW[a new sign-up] -. default group .-> GP
+    GA --> RA[ADMINISTRATIVE_STAFF]
+    GD --> RD[PRACTITIONER]
     GP --> RP[PATIENT]
-    RA --> RM["realm-management: view, manage and query users, query groups, view realm"]
   end
-  RA & RD & RP --> C[claim roles in the ID token]
-  C --> M[KeycloakRolesMapper] --> S[ROLE_ADMIN / ROLE_DOCTOR / ROLE_PATIENT]
+  RA & RD & RP --> C[roles claim in the token]
+  C --> F["LoginService keeps only<br/>security/Roles.ALL"] --> S[ROLE_ADMINISTRATIVE_STAFF / ROLE_PRACTITIONER / ROLE_PATIENT]
 ```
 
-- **Roles are given through groups, never to users directly.** Moving someone from `/patients` to `/doctors` is one change in the console, and every holder of a role can be listed from its group.
-- **`ADMIN` is a realm admin, not a Keycloak super-admin.** It can manage users and groups in `medlink` only; the bootstrap `admin` account in the master realm stays separate.
-- **Role changes apply at the next login,** because the roles are read from the ID token issued at login.
+The API checks access in four layers:
 
-### How to add a role (no backend change needed)
+| Layer | Where | What it does |
+|---|---|---|
+| Deny by default | `config/SecurityConfig` | every route needs a session, except the public auth endpoints, health/info, API docs and metrics |
+| Role | `@PreAuthorize("hasRole(...)")` with `security/Roles` | e.g. only staff list or delete users |
+| Ownership | `security/OwnershipGuard` | a user reads only their own record; checked before the lookup, so the same 403 whether the id exists or not |
+| Proof | `functional/AccessMatrixFunctionalTest` | one line per `/api` route × anonymous, patient, practitioner, staff; a route without a line fails the build (MLink-60, #77) |
 
-1. In the Keycloak console (or `keycloak/realm-medlink.json` for new environments), create the realm role, e.g. `NURSE`.
-2. Create a group `/nurses` and map the role to it.
-3. Add users to the group. They get `ROLE_NURSE` at their next login.
-4. Protect endpoints with it: `.requestMatchers("/api/care/**").hasRole("NURSE")` in `SecurityConfig`, or `@PreAuthorize("hasRole('NURSE')")` once `@EnableMethodSecurity` is added (not enabled yet).
+Every 403 is written to the audit trail (`audit_entries`, append-only).
 
-The realm file is imported **only when the realm does not exist yet**. After the first start, the console is the source of truth; export the realm if you want the file updated.
+- **Roles are given through groups, never to users directly.** Moving someone from `/patients` to
+  `/practitioners` is one change, and every holder of a role can be listed from its group.
+- **One role per person:** `Patient extends User` (JPA `JOINED`); a practitioner is another subclass.
+- **Role changes apply at the next login,** because the roles are read from the token issued at login.
+- **Staff hold no Keycloak admin rights:** `ADMINISTRATIVE_STAFF` is a plain realm role, so staff manage
+  accounts only through the API, under its rules and audit trail. Only the API's service account `medlink-admin`
+  holds `realm-management` rights (threat model E3, GitHub #80, fixed in #81).
+
+### How to add a role
+
+A new role now needs code, on purpose: the API ignores any role it does not know.
+
+1. Realm (`keycloak/realm-medlink.json`, in a PR): the realm role, e.g. `NURSE`, and a group `/nurses` holding it.
+2. `security/Roles`: the constant, and add it to `ALL` so the login keeps it.
+3. Rules: `@PreAuthorize("hasRole('" + Roles.NURSE + "')")` on the endpoints it may call.
+4. Tests: a column in the access matrix, plus a test for the right and the wrong role.
+
+The realm file is imported **only when the realm does not exist yet**. In staging and prod the console is the
+source of truth after the first start; export the realm to update the file. In local dev the file is the
+source of truth: the setup script re-imports it whenever it changed.
 
 ## The why behind each setup
 
-Every choice below trades a little simplicity for less attack surface or less custom security code. When you want to change one, check its reason first.
+Every choice below trades a little simplicity for less attack surface or less custom security code. Check its
+reason before changing one; the dated decisions are in the
+[sprint report's decisions log](sprints/sprint-2/report.md#decisions-log).
 
 | Decision | Why | Rejected alternative / trade-off |
 | --- | --- | --- |
-| Keycloak as identity provider | Proven OIDC server with password policy, brute-force lockout, MFA and an admin UI. No auth code of ours to maintain | Custom JWT (removed): hand-rolled token code, no revocation, password hashes in our DB |
-| Auth BFF: tokens kept server-side | A health app must not expose tokens to browser JavaScript; an XSS bug cannot steal what the browser never holds | Tokens in the SPA (public client) is simpler, but exposes them. Cost: server sessions, so scaling out will need shared sessions (e.g. Spring Session) |
-| Confidential client + PKCE S256 | A stolen authorization code is useless without the verifier and the client secret | Implicit flow and password grant are disabled in the realm |
-| Separate `keycloak-db` container + volume | Identity data is isolated from business data: separate credentials, backups and upgrades; the volume keeps realm and users across restarts | One shared Postgres: fewer containers, but one breach or bad migration hits both |
-| `--import-realm` from `keycloak/realm-medlink.json` | Any new environment boots with the same realm, roles and client; existing realms are never overwritten | Re-importing on every start would wipe changes made in the console |
-| Roles via groups + one generic mapper | New roles need no code; `ADMIN` is limited to user management in its own realm | A hard-coded `role` column (dropped in V2) |
-| No password or role in the API database | Data minimisation and a single source of truth for identity | Kept columns would drift from Keycloak and widen the breach impact |
-| Explicit OIDC endpoints, not `issuer-uri` | The API starts even when Keycloak is down (tests, CI, DAST); browser and backend use different Keycloak URLs inside Docker | Discovery needs less config but makes Keycloak a hard startup dependency |
-| CSRF on, SPA cookie mode | Session cookies are sent automatically, so CSRF tokens are required | The old stateless JWT setup had CSRF disabled |
-| 401 on `/api/**`, redirect elsewhere | An SPA needs a status code, not an HTML login page | |
-| Flyway owns the schema, `ddl-auto: validate` | Schema changes are reviewed as code; Hibernate never alters the database | `ddl-auto: update` silently changes production tables |
-| Profiles `dev` / `staging` / `prod`, secrets from env only | The same image runs everywhere; staging/prod fail at startup if a secret is missing | Defaults baked into config would ship to prod |
-| Pinned versions (Keycloak 26.7.5, Postgres 16, Java 17) | Reproducible builds; Dependabot proposes bumps as reviewable PRs | `latest` tags change under your feet |
-| Non-root container user + healthcheck | Least privilege at runtime; orchestrators can restart an unhealthy app | |
-| Testcontainers for tests | Tests hit a real Postgres, so migrations and SQL behave as in prod | H2 in-memory differs from Postgres |
+| Keycloak as identity provider | Proven server for password policy, brute-force lockout, events and an admin UI; no password code of ours | Custom JWT (removed): hand-rolled tokens, no revocation, password hashes in our DB |
+| The frontend never talks to Keycloak | Users never see Keycloak; one place to secure, test and audit every identity flow | Skinned Keycloak pages (decided 2026-10-11, superseded 2026-10-14) |
+| Login by password grant, server to server, confidential client | The only standard way to log in without a Keycloak page; tokens never leave the API | Authorization Code + PKCE (the standard, but a Keycloak page): see decision 0001. Cost: the API sees passwords, and second factors are ours to build |
+| Auth BFF: tokens kept server-side | A script in the browser (XSS) cannot steal what the browser never holds | Tokens in the SPA. Cost: server sessions, so more instances need shared sessions |
+| Session cookie HttpOnly, `SameSite=Strict`, `Secure` in staging/prod; CSRF token on writes | The cookie is the browser's only credential | `Lax` (needed only for a redirect login, which no longer exists) |
+| Same answer for any email on public endpoints | Nobody can test which emails have an account; the real owner gets a mail instead | 409 `EMAIL_TAKEN`, 423 `ACCOUNT_LOCKED` |
+| Per-IP rate limits counted in Postgres | Shared by every instance and race-free with the database we already run | Redis; an in-memory map (one instance, racy) |
+| Separate `keycloak-db` container + volume | Identity data isolated from business data: separate credentials, backups, upgrades | One shared Postgres |
+| `users.id` = Keycloak id; one role per person | One id per person, no mapping table; a person is a patient or a practitioner or staff | Our own id + `keycloak_id`; several profiles per login |
+| Audit trail append-only in the database | "Not changed or deleted from the application" must hold for raw SQL too | A save-and-read-only repository only (the owner role limit is GitHub #57) |
+| Explicit OIDC endpoints, not `issuer-uri` | The API starts even when Keycloak is down (tests, CI, DAST) | Discovery makes Keycloak a hard startup dependency |
+| 401 and 403 as JSON, never a redirect | React needs a code, not an HTML login page | Spring's redirect or empty 401 |
+| Flyway owns the schema, `ddl-auto: validate` | Schema changes are reviewed as code | `ddl-auto: update` silently changes production tables |
+| Profiles `dev` / `staging` / `prod`, secrets from env only | The same image runs everywhere; a missing Keycloak secret stops startup outside dev | Defaults baked into config (the datasource still has some: GitHub #64) |
+| Pinned versions (Java 17, image tags) | Reproducible builds; Dependabot proposes bumps as reviewable PRs | `latest` tags change under your feet |
+| Functional tests against real Keycloak, Postgres, Mailpit (Testcontainers) | Prove behaviour end to end over HTTP, like a browser | Mocked Keycloak; H2 in-memory |
+| Non-root container user + healthcheck | Least privilege at runtime; orchestrators restart an unhealthy app | |
 
 ## Codebase map
 
-Code lives under `src/main/java/com/example/apimedlink/`; everything security-related sits in `config/`, `security/` and the files listed in `.github/CODEOWNERS`.
+Code lives under `src/main/java/com/example/apimedlink/`. `.github/CODEOWNERS` gives every path to the code
+owner, and names the security-sensitive ones explicitly: the `config/` and `security/` packages, `.github/`,
+`docker/`, `terraform/` and the root `security/` folder.
 
 | Path | What it holds | Touch it when |
 | --- | --- | --- |
-| `controller/` | REST endpoints, thin, validation only. `AuthBffController` is an empty skeleton | Adding an endpoint |
-| `service/` | Business logic (`UserService`) | Adding behaviour |
-| `repository/`, `model/` | Spring Data JPA interfaces and entities (`User` has `keycloakId`, no password) | Adding a table |
-| `dto/` | Records for API input/output | Changing what the API exposes |
-| `config/` | `SecurityConfig` (oauth2Login, CSRF, public paths), `CorsConfig` | Changing who can call what (code owner review) |
-| `security/` | `KeycloakRolesMapper` (Keycloak roles → `ROLE_*`) | Rarely; roles are added in Keycloak |
-| `exception/` | `GlobalExceptionHandler` (404 / 409 / 400 JSON errors) | Adding an error type |
-| `resources/application.properties` | Base config + Keycloak client registration | Changing Keycloak URLs or client |
-| `resources/application-{dev,staging,prod}.yml` | Per-environment DB, CORS, actuator, logging, client secret | Environment-specific settings |
-| `resources/db/migration/` | Flyway: `V1__init.sql`, `V2__keycloak_users.sql` | Any schema change: add `V3__...`, never edit an old file |
-| `keycloak/realm-medlink.json` | Realm, roles, groups, `medlink-bff` client, dev users | Bootstrapping new environments |
-| `compose.yaml` / `docker-compose.yml` | Dev dependencies / full stack | Adding a service |
-| `docker/` | Multi-stage `Dockerfile` (non-root), `Dockerfile.dev` (debug port 5005) | Changing the image |
-| `.github/workflows/` | CI, SAST, SCA, secrets, container scan, DAST, CD | Changing the pipeline |
+| `controller/` | REST endpoints, thin: validation, then entity ↔ DTO through a mapper. `AuthBffController` (csrf, register, verify), `LoginController`, `LogoutController`, `UserController` | Adding an endpoint (+ a matrix line) |
+| `mapper/` | Entity ↔ DTO conversion, called by controllers only | Changing what the API exposes |
+| `service/` | Business logic on entities, never a DTO. `KeycloakLoginClient` (password grant, logout) and `KeycloakAdminService` are the only Keycloak callers | Adding behaviour |
+| `repository/`, `model/` | Spring Data JPA and entities (`User`, `Patient extends User`, `AuditEntry`...) | Adding a table |
+| `dto/` | Records for API input/output; never a password hash or a token | Changing what the API exposes |
+| `config/` | `SecurityConfig` (rules, CSRF, 401/403 handlers), CORS, OpenAPI, Keycloak clients, rate limits | Changing who can call what (code owner review) |
+| `security/` | `Roles`, `CurrentUser`, `OwnershipGuard`, `LoginSessions`, `SessionValidityFilter`, `RateLimitFilter`, JSON 401/403 handlers, `RouteWords` | Changing sessions or access checks |
+| `exception/` | `GlobalExceptionHandler`, `ErrorBody` (the one error shape) | Adding an error type |
+| `resources/application*.properties/yml` | Base config; per-profile DB, cookies, CORS, actuator, logging | Environment-specific settings |
+| `resources/db/migration/` | Flyway `V1`–`V8` on `master` | Any schema change: the next free `V<N>__...`, never edit a merged file |
+| `keycloak/realm-medlink.json` | Realm, roles, groups, clients, lockout, events, dev users | Changing identity settings (in a PR) |
+| `compose.yaml` / `docker-compose.yml` | Dev dependencies (plus the API under the `full` profile) / full stack with secrets (kept alike by `ComposeFilesTest`) | Adding a service |
+| `docker/` | Multi-stage `Dockerfile` (non-root), `Dockerfile.dev` | Changing the image |
+| `.github/workflows/` | CI, AI disclosure, SAST, SCA, secrets, container scan, DAST, CD | Changing the pipeline |
 | `security/` (repo root) | gitleaks, checkov, trivy, ZAP rules, OWASP suppressions, threat model | Tuning a scanner (with a reason) |
-| `monitoring/` | Prometheus config, 4 alert rules, Grafana dashboard JSON | Adding metrics or alerts |
-| `terraform/` | Docker-provider IaC for the app container | Changing deployment |
+| `monitoring/` | Prometheus config, 4 alert rules, Grafana dashboard | Adding metrics or alerts |
+| `terraform/` | Docker-provider IaC for the app container, aligned with the Keycloak BFF and the production profile (GitHub #53) | Changing deployment |
 
-Tests mirror the packages under `src/test/java/` (`controller/`, `service/`, `security/`, `integration/`) and most use Testcontainers, so Docker must be running.
+Tests: `src/test/java/.../functional/` drives the real API over HTTP against Keycloak, Postgres and Mailpit
+(`FunctionalTestBase`); `integration/`, MockMvc and unit tests mirror the packages. Docker must be running.
 
 ## DevSecOps in the SDLC
 
-Security is checked at eight stages, from a local commit hook to production alerts. Three checks currently only report, and do not block (marked *report-only* below).
-
 ```mermaid
 flowchart LR
-  PLAN["Plan<br/>STRIDE threat model<br/>PR checklist<br/>CODEOWNERS review"]
-  CODE["Code<br/>Keycloak, no own auth<br/>secrets only via env<br/>Bean Validation DTOs<br/>Flyway migrations"]
-  COMMIT["Commit · local<br/>gitleaks protect<br/>checkov IaC scan<br/>YAML + merge markers<br/>large-file check"]
-  BUILD["Build and test · CI<br/>./mvnw verify<br/>unit + integration<br/>Testcontainers DB<br/>JaCoCo coverage"]
-  SCAN["Scan · CI<br/>CodeQL SAST<br/>Dependency-Check SCA<br/>gitleaks full history<br/>Trivy config + image"]
-  REL["Release<br/>image pushed to GHCR<br/>tags: sha, branch, v*<br/>Dependabot weekly PRs"]
-  DEP["Deploy<br/>GitHub Environments<br/>terraform validate<br/>ZAP DAST on staging"]
-  OPS["Operate<br/>Prometheus + 4 alerts<br/>actuator health<br/>SECURITY.md reporting"]
-  PLAN --> CODE --> COMMIT --> BUILD --> SCAN --> REL --> DEP --> OPS
-  OPS -. "alerts, scan findings and incidents feed the next plan" .-> PLAN
+  PLAN["Plan<br/>threat model<br/>decision records<br/>YouTrack tasks"]
+  CODE["Code<br/>Keycloak owns passwords<br/>secrets only via env<br/>Bean Validation DTOs<br/>Flyway migrations"]
+  COMMIT["Commit · local<br/>gitleaks, checkov<br/>YAML, merge markers"]
+  BUILD["Build and test · CI<br/>./mvnw verify<br/>functional tests on real Keycloak<br/>access matrix, JaCoCo"]
+  SCAN["Scan · CI<br/>CodeQL, Dependency-Check<br/>gitleaks history, Trivy<br/>ZAP baseline"]
+  REVIEW["Review<br/>code owner + CodeQL required<br/>AI disclosure check"]
+  REL["Release · CD<br/>image digest to GHCR<br/>compose rollout + health check<br/>staging, prod, v*"]
+  OPS["Operate<br/>Prometheus + 4 alerts<br/>audit trail, Keycloak events<br/>SECURITY.md"]
+  PLAN --> CODE --> COMMIT --> BUILD --> SCAN --> REVIEW --> REL --> OPS
+  OPS -. "findings and incidents feed the next plan" .-> PLAN
 ```
 
 | Control | Tool and file | Runs | Effect today |
 | --- | --- | --- | --- |
-| Threat model | STRIDE table, `security/threat-model.md` | At design time | Guides reviews |
-| Review gate | `.github/pull_request_template.md`, `.github/CODEOWNERS` | Every PR | Owner review on `config/`, `security/`, `docker/`, `terraform/`, `.github/` |
-| Local hooks | `.pre-commit-config.yaml`: whitespace, YAML, large files, merge markers, gitleaks, checkov | Every `git commit` once `pre-commit install` was run | Blocks the commit |
-| Build + tests | `ci.yml`: `./mvnw -B verify`, JaCoCo | Push/PR on `master`, `staging`, `prod`, `main`, `develop` | Fails the run |
-| SAST | `sast-codeql.yml`: CodeQL `security-extended` + `security-and-quality` | Push, PR, Mondays 03:00 UTC | Findings in the GitHub Security tab |
-| Secrets | `secrets-scan.yml`: gitleaks on full history | Every push and PR, daily 05:00 UTC | Fails the run |
-| SCA | `sca-dependency-check.yml`: OWASP Dependency-Check | Push, PR, Mondays 04:00 UTC | *Report-only* (`\|\| true`), SARIF + HTML report |
-| Container + IaC | `container-scan.yml`: Trivy config scan + image scan, HIGH/CRITICAL | Push/PR | *Report-only* (no exit code set), SARIF uploaded |
-| DAST | `dast-zap.yml`: ZAP baseline against the running app | Push to `master`/`staging`, Mondays 02:00 UTC, manual | Fails on FAIL rules; current rules are WARN/INFO |
-| Dependency updates | `dependabot.yml`: Maven, Actions, Docker, grouped, 7-day cooldown | Mondays 06:00 | Opens PRs; Java 17 pinned |
-| Release | `cd.yml`: image to GHCR, tagged sha / branch / semver | Push to `master`, `staging`, `prod`, tags `v*` | Image published |
-| Deploy | `cd.yml`: GitHub Environments `staging` / `production`, `terraform fmt` + `validate` | After release | Validation only, no `terraform apply` yet |
-| Monitoring | `monitoring/`: Prometheus, alerts AppDown, 5xx > 5 %, p95 > 1 s, heap > 90 % | Continuous | *Report-only*: Alertmanager has no targets, so alerts reach no one |
+| Threat model | STRIDE with controls mapped to code, `security/threat-model.md` | At design time, updated with the code | Guides reviews |
+| Decisions | `docs/decisions/`, the report's decisions log | Per decision | Reasons kept with the code |
+| Review gate | existing ruleset on `master`, `.github/CODEOWNERS`, PR template; staged branch rules are part of migration | PRs | `master` currently requires code-owner approval and CodeQL; configure `staging`/`prod` to require checks and PRs, while allowing automatic merge without human approval on bot promotion/release PRs |
+| AI disclosure | `ai-disclosure.yml`, `.github/scripts/validate-ai-disclosure.mjs` | Every PR | Fails unless exactly one usage choice is checked; AI use also requires the human review acknowledgment |
+| Local hooks | `.pre-commit-config.yaml`: whitespace, YAML, large files, merge markers, gitleaks, checkov | Every commit once `pre-commit install` ran | Blocks the commit |
+| Build + tests | `ci.yml`: `./mvnw -B verify`, JaCoCo | Push/PR on `master`, `staging`, `prod` | Fails the run |
+| SAST | `sast-codeql.yml`: CodeQL `security-extended` + `security-and-quality` | Push, PR, Mondays | Required on `master` |
+| SCA | `sca-dependency-check.yml`: OWASP Dependency-Check (NVD); Trivy fallback when `NVD_API_KEY` is absent, reported in the log, summary and artifact | Push, PR, Mondays | Fails on CVSS ≥ 7; release branches fail on the fallback unless `ALLOW_TRIVY_FALLBACK=true` |
+| Secrets | `secrets-scan.yml`: gitleaks on the full history | Every push and PR, daily | Fails the run |
+| Container + IaC | `container-scan.yml`: Trivy config and image | Push/PR | Fails on HIGH/CRITICAL |
+| DAST | `dast-zap.yml`: ZAP baseline against the running app | PRs, pushes to `master`/`staging`, Mondays | Fails on FAIL rules; unauthenticated only |
+| Dependency updates | `dependabot.yml`: Maven, Actions, Dockerfile and compose images, 7-day cooldown | Mondays | Opens grouped PRs, reviewed like any PR |
+| Release + deploy | `cd.yml` + `release-please.yml`: image digest, SBOM/provenance, Cosign, Compose over SSH, staging smoke tests, SemVer release | PR to `staging`, push to `staging`, lowercase tags `v*` | Stage deployment is smoke-tested; checked promotion/release PRs; only release tags deploy production |
+| Monitoring | `monitoring/`: alerts AppDown, 5xx > 5 %, p95 > 1 s, heap > 90 % | Continuous | Alerts reach no one: Alertmanager has no target |
+| Audit | `audit_entries` (every 403), Keycloak events (logins, lockouts) | Continuous | Stored; reading the trail: MLink-115 |
 | Vulnerability intake | `SECURITY.md` | On report | Private disclosure path |
 
-SonarQube settings exist (`sonar-project.properties`), but no workflow runs Sonar yet. Making the *report-only* rows blocking is listed in *Known gaps*.
+SonarQube settings exist (`sonar-project.properties`), but no workflow runs Sonar.
 
 ## Environments & branching
 
-Code moves one way, `feature/*` → `master` → `staging` → `prod`, and each environment gets the same image with its own profile and secrets.
+After the release-pipeline migration, product changes flow from a topic branch into `staging`. The merge deploys
+the candidate, and only a successful post-deployment smoke gate can trigger a checked PR from `staging` to `prod`.
+Release Please calculates the SemVer version from Conventional Commits and opens a version/changelog PR; the
+resulting lowercase `vX.Y.Z` tag triggers the production image build, scan, signature verification, and deploy.
 
 ```mermaid
 flowchart LR
-  F[feat/*, fix/*, security/*] -- PR + all CI checks + owner review --> M[master]
-  M -- merge, no fast-forward --> S[staging]
-  S -- validated: app, ZAP, Prometheus --> P[prod]
-  P -. tag v* .-> T[release v1.x.y]
-  M -. CD .-> E1[(production env job)]
-  S -. CD .-> E2[(staging env)]
-  P -. CD .-> E1
-  T -. CD .-> E1
+  F[feat/*, fix/*, core/*, docs/*] -->|PR + CI/security checks| S[staging]
+  S -->|deploy immutable digest| SE[staging environment]
+  SE -->|smoke tests pass| PR[PR staging -> prod]
+  PR -->|checks pass, auto-merge| P[prod]
+  P -->|Release Please PR + version bump| R[release commit]
+  R -->|tag vX.Y.Z| T[GHCR image + attestations + signature]
+  T -->|verify signature, deploy by digest| PE[production environment]
 ```
 
-| Environment | Branch | Spring profile | Env file | Keycloak mode | Where secrets live |
-| --- | --- | --- | --- | --- | --- |
-| Local dev | any | `dev` | `.env` from `.env.example` | `start-dev` | Your `.env` (git-ignored) |
-| Staging | `staging` | `staging` (port 8081) | `.env.staging` | `start` behind HTTPS proxy | GitHub Environment `staging` |
-| Production | `prod`, tags `v*` | `prod` | `.env.prod` | `start` behind HTTPS proxy | GitHub Environment `production` |
+| Environment/ref | Role | Spring profile | Env file | Keycloak mode | Where secrets live |
+|---|---|---|---|---|---|
+| Local dev | Any topic branch | `dev` | `.env` (made by setup script) | `start-dev` | `.env` (git-ignored) |
+| `staging` branch | Integration and candidate release | `staging` | `.env.staging` | `start` behind HTTPS proxy | GitHub Environment `staging` |
+| `prod` branch | Release history and versioned release PRs; **does not deploy directly** | `prod` | `.env.prod` | `start` behind HTTPS proxy | GitHub Environment `production` |
+| `vX.Y.Z` tag | Production build/deploy trigger | `prod` | `.env.prod` | `start` behind HTTPS proxy | GitHub Environment `production` |
+| `master` | Repository default and one-time workflow bootstrap during migration | existing | — | — | — |
 
-- **Never push directly** to `master`, `staging` or `prod`. One PR = one topic.
-- **Secrets never enter git.** `.env*` files are ignored except the `*.example` templates; gitleaks checks every commit and the full history daily.
-- **Staging and prod fail fast:** `KEYCLOAK_CLIENT_SECRET` has no default there, so a missing secret stops startup instead of running insecurely.
-- **Watch out:** `cd.yml` also runs the `production` job on pushes to `master`, before staging has validated the change. Confirm this is intended; today that job only validates Terraform.
+- **Never push directly** to `master`, `staging`, or `prod`.
+- Keep PR/check-required protections on `staging` and `prod`. In this PAT-based full-automation design, don't require reviewers on those branches or on the production environment: that would block the bot's `staging -> prod` promotion and `prod -> staging` version-sync PRs. All configured CI/security checks must still pass before merge. If review requirements must stay enforced, use a dedicated GitHub App with narrowly scoped ruleset bypass for automation PRs.
+- **One-time migration warning:** the current `master`, `staging`, and `prod` branches have different/diverged history. This design is not active on staging/prod until workflows and release configuration are carried over by deliberately reviewed PRs and branch baselines are reconciled. Keep repository variable `ENABLE_AUTO_PROMOTION` false until then; do not merge the historical branch differences blindly.
+- **Secrets never enter git.** `.env*` files are ignored except `*.example` templates.
+- **Fail fast:** Keycloak client secrets have no default outside dev, so a missing secret stops startup. Datasource credentials still have defaults (GitHub #64).
 
 ## ISO/IEC 27001:2022 mapping
 
-The repository implements or evidences 25 Annex A controls: 10 covered, 12 partial, 3 gaps. That is technical evidence for an ISMS, not certification. Certification also needs the organisational clauses 4–10: ISMS scope, risk assessment and treatment, a Statement of Applicability (SoA), policies, awareness, internal audit and management review. Use this table as input to the SoA and update the Coverage column as gaps close.
+The repository implements or evidences 25 Annex A controls: 14 covered, 8 partial, 3 gaps. That is technical
+evidence for an ISMS, not certification, which also needs the organisational clauses 4–10 (scope, risk
+treatment, Statement of Applicability, policies, awareness, internal audit, management review).
 
 | Annex A control | How api-MedLink implements it | Evidence in the repo | Coverage | Gap / next action |
 | --- | --- | --- | --- | --- |
-| 5.8 Information security in project management | STRIDE threat model; security checklist on every PR | `security/threat-model.md`, `.github/pull_request_template.md` | Covered | Review the threat model each release |
-| 5.15 Access control | Deny by default: every request needs a session except health, info, API docs and metrics | `config/SecurityConfig.java` | Covered | |
-| 5.16 Identity management | One identity store (Keycloak); the API keeps only a `keycloak_id` link | `keycloak/realm-medlink.json`, `V2__keycloak_users.sql` | Covered | |
-| 5.17 Authentication information | Passwords live only in Keycloak; policy: 12+ chars, upper, lower, digit, special, not username/email | realm `passwordPolicy`, V2 drops `users.password` | Covered | |
-| 5.18 Access rights | Roles granted through groups; new users default to `/patients`; no role accepted from requests | realm `groups`, `defaultGroups` | Partial | Define a periodic access review of group membership |
-| 8.2 Privileged access rights | `ADMIN` limited to user management in its realm; bootstrap admin separate; Actuator limited to health/info/prometheus | realm `roles`, `application-*.yml` | Partial | Enforce MFA (OTP) for `ADMIN` and the bootstrap admin |
-| 8.4 Access to source code | CODEOWNERS on security-sensitive paths; PR-only flow | `.github/CODEOWNERS`, README | Partial | Verify branch protection on `master`/`staging`/`prod` in GitHub settings |
-| 8.5 Secure authentication | OIDC code + PKCE S256, confidential client, brute-force lockout after 5 failures, 30 min idle / 10 h max session | realm settings, `application.properties` | Partial | MFA not enforced; TLS terminates at a proxy that is not in the repo |
-| 8.8 Management of technical vulnerabilities | Dependabot weekly; OWASP Dependency-Check, Trivy, CodeQL; private disclosure | `.github/dependabot.yml`, workflows, `SECURITY.md` | Partial | Make SCA and Trivy fail on HIGH/CRITICAL |
-| 8.9 Configuration management | Infrastructure and config as code; pinned versions; checkov and Trivy config scans | `docker/`, compose files, `terraform/`, `security/checkov.yaml` | Covered | |
-| 8.12 Data leakage prevention | gitleaks before commit, in CI and daily on full history; `.env` git-ignored; DTOs expose no secrets | `security/.gitleaks.toml`, `secrets-scan.yml`, `.gitignore` | Covered | |
-| 8.13 Information backup | Named volumes `pgdata` and `keycloak-db-data` | compose files | Gap | Write and test a backup + restore procedure for both databases |
-| 8.15 Logging | Per-profile application logging | `application-*.yml` | Partial | Central log store; enable Keycloak login and admin events |
-| 8.16 Monitoring activities | Prometheus metrics; alerts AppDown, 5xx > 5 %, p95 > 1 s, heap > 90 % | `monitoring/` | Gap | Route alerts: Alertmanager has no target |
-| 8.24 Use of cryptography | Tokens signed by Keycloak and verified via JWKS; PKCE | realm, `application.properties` | Partial | Document TLS and encryption at rest for both databases |
-| 8.25 Secure development life cycle | Controls at every SDLC stage (see *DevSecOps in the SDLC*) | `.github/workflows/`, `.pre-commit-config.yaml` | Covered | |
-| 8.26 Application security requirements | Threat model lists PII/PHI assets and STRIDE mitigations | `security/threat-model.md` | Partial | Turn mitigations into tested requirements per feature |
-| 8.27 Secure architecture and engineering | BFF (no tokens in browser), least privilege, isolated identity DB, deny by default | this doc, `SecurityConfig`, compose files | Covered | |
-| 8.28 Secure coding | CodeQL `security-extended`; Bean Validation; JPA parameterised queries; code review | `sast-codeql.yml`, `dto/`, `repository/` | Covered | |
-| 8.29 Security testing in development and acceptance | Unit and integration tests, SAST, SCA, ZAP DAST on staging | `ci.yml`, `dast-zap.yml`, `security/zap-rules.tsv` | Partial | Move ZAP rules from WARN to FAIL; add negative authorization tests |
-| 8.31 Separation of development, test and production | Profiles, branches, GitHub Environments, separate secrets; Testcontainers for tests | README, `cd.yml`, `application-*.yml` | Partial | `master` pushes also trigger the production job |
-| 8.32 Change management | PR-only changes, owner review, versioned Flyway migrations, tagged releases | CODEOWNERS, `db/migration/`, `cd.yml` | Covered | |
+| 5.8 Information security in project management | Threat model mapped to code; decision records; security checklist on every PR | `security/threat-model.md`, `docs/decisions/`, PR template | Covered | Review the threat model with each feature |
+| 5.15 Access control | Deny by default; roles; ownership checks; role × route matrix | `config/SecurityConfig.java`, `security/OwnershipGuard.java`, `AccessMatrixFunctionalTest` | Covered | API docs public in production (GitHub #65); metrics only on the private management port (#49) |
+| 5.16 Identity management | One identity store (Keycloak); `users.id` = Keycloak id; one role per person | realm, `V3__users_keycloak_id_as_pk.sql` | Covered | |
+| 5.17 Authentication information | Passwords only in Keycloak; policy 12+ characters, mixed, not the email; never logged by the API | realm `passwordPolicy`, `LoginRequest.toString` | Covered | Password history and forced change: MLink-87/88 |
+| 5.18 Access rights | Roles through groups; new users in `/patients`; no role accepted from requests | realm `groups`, `defaultGroups`, `security/Roles` | Partial | Periodic review of group membership; a practitioner or staff member made in the console also lands in `/patients` (`defaultGroups`) and must be taken out by hand |
+| 8.2 Privileged access rights | Admin calls only through a dedicated service account (staff hold no Keycloak admin rights, #81); actuator limited to health/info/prometheus | realm, `application-*.yml` | Partial | MFA for the bootstrap admin (GitHub #68); staff log in with a code (MLink-62/63) |
+| 8.4 Access to source code | CODEOWNERS on security paths; ruleset on `master` (owner review, CodeQL) | `.github/CODEOWNERS`, README | Covered | Same protection for `staging`/`prod` |
+| 8.5 Secure authentication | Password grant server to server (accepted exception, decision 0001); lockout after 5 failures for 15 min; per-IP limits; 15-minute idle session; HttpOnly, Strict, Secure cookies; new session id at login; second factor (TOTP) for practitioners and staff, 5 wrong codes → 15-minute lock | realm, `RateLimitFilter`, `LoginSessions`, `MfaService`, `application*.yml` | Partial | No second factor for patients (not planned); TLS ends at a proxy not in the repo |
+| 8.8 Management of technical vulnerabilities | Dependabot; Dependency-Check, Trivy and CodeQL blocking; private disclosure | `.github/dependabot.yml`, workflows, `SECURITY.md` | Covered | |
+| 8.9 Configuration management | Infrastructure and config as code; pinned versions; checkov and Trivy config scans; compose files kept alike by a test | `docker/`, compose files, `terraform/`, `ComposeFilesTest` | Covered | |
+| 8.12 Data leakage prevention | gitleaks before commit, in CI and daily; tokens never in the browser; no body or token in logs; audit paths redacted | `security/.gitleaks.toml`, `secrets-scan.yml`, `security/RouteWords.java` | Covered | |
+| 8.13 Information backup | Named volumes `pgdata` and `keycloak-db-data` | compose files | Gap | Backup and tested restore for both databases (GitHub #67) |
+| 8.15 Logging | Append-only audit trail of refusals; Keycloak login and admin events (30 days); per-profile application logs | `V7__audit_entries.sql`, `AuditService`, realm events | Partial | Logins and account operations in the trail (MLink-114, MLink-72); central log store |
+| 8.16 Monitoring activities | Prometheus metrics; 4 alert rules | `monitoring/` | Gap | Route alerts: Alertmanager has no target |
+| 8.24 Use of cryptography | Tokens signed by Keycloak, checked via JWKS with issuer and `azp`; email tokens stored as SHA-256 hashes | `KeycloakLoginClient`, `V5__email_tokens.sql` | Partial | Document TLS and encryption at rest for both databases |
+| 8.25 Secure development life cycle | Controls at every SDLC stage; functional tests first | `.github/workflows/`, `.pre-commit-config.yaml` | Covered | |
+| 8.26 Application security requirements | Threat model controls mapped to tests; endpoint contracts | `security/threat-model.md`, `docs/sprints/sprint-2/plan.md` | Covered | |
+| 8.27 Secure architecture and engineering | BFF (no tokens in the browser, no Keycloak in the browser), least privilege, isolated identity DB, deny by default | this document, `SecurityConfig`, compose files | Covered | |
+| 8.28 Secure coding | CodeQL `security-extended`; Bean Validation; JPA bound parameters; code review | `sast-codeql.yml`, `dto/`, `repository/` | Covered | |
+| 8.29 Security testing in development and acceptance | Functional tests on real Keycloak incl. refusals, access matrix, mutation checks; SAST, SCA; ZAP baseline | `functional/`, `ci.yml`, `dast-zap.yml` | Partial | ZAP is unauthenticated; move its rules from WARN to FAIL |
+| 8.31 Separation of development, test and production | Profiles, branches, GitHub Environments, separate secrets; throwaway test containers | README, `cd.yml`, `application-*.yml` | Covered | |
+| 8.32 Change management | PR-only changes, owner review, versioned migrations, decision records, tagged releases | CODEOWNERS, `db/migration/`, `docs/decisions/`, `cd.yml` | Covered | |
 | 8.33 Test information | Testcontainers creates throwaway databases; dev users are fictitious | `TestcontainersConfiguration.java`, realm users | Partial | Dev users are imported in every environment: delete them in staging/prod |
-| 5.24 / 6.8 Incident management and event reporting | Private vulnerability disclosure channel | `SECURITY.md` | Partial | Write an incident response runbook |
-| 5.34 Privacy and protection of PII | Data minimisation: no passwords or roles in the API; PII/PHI named in the threat model | V2 migration, threat model | Gap | Data classification, retention rules and a GDPR/health-data processing register |
+| 5.24 / 6.8 Incident management and event reporting | Private vulnerability disclosure; audit trail and Keycloak events as evidence | `SECURITY.md`, `audit_entries` | Partial | Write an incident response runbook |
+| 5.34 Privacy and protection of PII | Data minimisation: no passwords or roles in the API; PII kept out of logs and the audit trail; no account enumeration | V2 migration, `RouteWords`, threat model | Gap | Data classification, retention rules, a GDPR/health-data processing register |
 
 ## Known gaps & next steps
 
-The first group blocks a working staging/prod deployment; the rest closes the *Partial* and *Gap* rows above.
+The prioritised list, with the threat behind each item, is in
+[the threat model, §6](../security/threat-model.md#6-open-work-by-priority). In short:
 
-### Before staging or prod can run the Keycloak version
+- [x] Second factor for practitioners and staff (MLink-62/63)
+- [ ] MFA for admin identities (GitHub #68)
+- [ ] No default database credentials outside dev (GitHub #64)
+- [ ] API docs (Swagger, `/v3/api-docs`) not public in production (GitHub #65)
+- [ ] Separate database roles for the audit trail (GitHub #57)
+- [ ] Logins and account operations in the audit trail (MLink-114, MLink-72)
+- [ ] Backup and tested restore of both databases (GitHub #67)
+- [ ] CD rollout and Keycloak/`keycloak-db` in the deployment (GitHub #47); Terraform variables and container environment aligned with the production profile (GitHub #53)
+- [ ] Reverse proxy: TLS, HSTS, CSP, `TRUSTED_PROXIES`, Keycloak not public
+- [ ] Alert routing and a central log store; shared sessions before a second API instance
+- [ ] Delete the `*.dev` users in staging and prod after the first start
 
-- [ ] Replace `JWT_SECRET` with `KEYCLOAK_CLIENT_SECRET` and the `KEYCLOAK_*` URLs in `terraform/` (`main.tf`, `variables.tf`, `*.tfvars*.example`) and in `cd.yml`; the prod profile refuses to start without the secret
-- [ ] Add Keycloak and `keycloak-db` to the Terraform deployment
-- [ ] Remove the unused `JWT_SECRET` from `dast-zap.yml`
-- [ ] Run `docker compose -f compose.yaml up -d` and `./mvnw -B verify` locally: the realm import and Testcontainers tests have not been run yet (no Docker where the branch was built)
-- [ ] Delete the `*.dev` test users in staging and prod after the first start
-
-### Security hardening
-
-- [ ] Implement `AuthBffController` endpoints (current user, logout with OIDC end-session, CSRF bootstrap) and negative authorization tests
-- [ ] Enforce MFA (OTP) for `ADMIN` and the bootstrap admin; enable Keycloak login and admin events
-- [ ] Make OWASP Dependency-Check and Trivy fail on HIGH/CRITICAL; move ZAP rules from WARN to FAIL
-- [ ] Route Prometheus alerts (Alertmanager target) and add a central log store
-- [ ] Backup + tested restore for `pgdata` and `keycloak-db-data`
-- [ ] Turn on branch protection with required checks for `master`, `staging`, `prod`
-- [ ] Pin `postgres:latest` in `compose.yaml` and `TestcontainersConfiguration.java`
-- [ ] Rate limiting, HSTS and CSP at the reverse proxy
-- [ ] Shared sessions (e.g. Spring Session) before running more than one API instance
-- [ ] Add a Sonar workflow or remove `sonar-project.properties`
+Done since the first version of this guide: login, logout and session expiry through the API, negative
+authorization tests and the access matrix, per-IP rate limits, Keycloak events, the audit trail of refusals,
+blocking SCA and Trivy, cookie hardening, `postgres:latest` pinned, staff without Keycloak admin rights (#81).
 
 ## Rules of the road, FAQ & glossary
 
-Ten rules cover most review comments; the FAQ covers the errors new team members hit first.
-
 ### Rules
 
-1. Branch `feat/`, `fix/`, `chore/` or `security/`; PR to `master`; one topic per PR; fill the checklist.
-2. Never store or accept a password or a role in the API. Identity belongs to Keycloak.
-3. New endpoint = DTO + service method + controller method + test, including a test that an unauthorised user is refused.
-4. Schema change = new `V<N>__description.sql`. Never edit an applied migration.
-5. Secrets only through env. Never commit `.env`; run gitleaks if unsure.
-6. Never suppress a scanner finding without a comment, an expiry date and a ticket (`security/owasp-suppressions.xml`, `zap-rules.tsv`).
-7. Do not open more Actuator endpoints without a security review.
-8. Do not merge a Java version jump from Dependabot: `java.version=17` in `pom.xml` moves first, by hand.
-9. Merge order for Dependabot: minor/patch → Actions → major.
+1. One YouTrack task per change. After the staged-release migration, branch from `staging` (`feat/`, `fix/`, `core/`, `docs/`, `chore/`) and PR to `staging`; workflow/config bootstrap changes may first PR to `master`. Fill the template honestly, including AI disclosure.
+2. Never store or accept a password or a role in the API, and never take the caller's role or id from a request body.
+3. New endpoint = DTO + mapper + service + controller + a line in the access matrix + a test for the right role
+   and one for the wrong role. Services never return a DTO.
+4. Schema change = the next free `V<N>__description.sql`. Never edit a merged migration.
+5. Secrets only through env. Never log a password, token, code or secret.
+6. Functional tests first: commit red, make green, check once that the test fails when the rule breaks.
+7. Never suppress a scanner finding without a comment, an expiry date and a ticket.
+8. Do not open more Actuator endpoints without a security review.
+9. Do not merge a Java version jump from Dependabot; review compose image bumps by running the stack.
 10. Report vulnerabilities privately per `SECURITY.md`, never in a public issue.
 
 ### FAQ & troubleshooting
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
-| `... must be set` when starting `docker-compose.yml` | A required secret is missing | Fill `.env` from `.env.example` |
-| Realm changes in the JSON are ignored | The realm already exists; import runs only once | Change it in the console, or `docker compose down -v` to reset Keycloak data (deletes users) |
-| `/api/...` returns 401 | No session | Log in at `/oauth2/authorization/keycloak` first |
-| POST/PUT/DELETE returns 403 | Missing CSRF token | Send the `XSRF-TOKEN` cookie value as the `X-XSRF-TOKEN` header |
-| A new role does not show up | Roles are read at login | Log out and in again |
+| `/api/...` returns 401 `UNAUTHENTICATED` | No session, or it expired (15 idle minutes) | Log in with `POST /api/auth/login` |
+| 401 `SESSION_EXPIRED` in the middle of work | Keycloak refused to renew the token (disabled, signed out, password reset) | Log in again |
+| POST/PUT/DELETE returns 403 | Missing CSRF header | `GET /api/auth/csrf`, then send the `XSRF-TOKEN` cookie value as `X-XSRF-TOKEN` |
+| 429 `TOO_MANY_REQUESTS` | Per-IP limit on login, register or resend | Wait for `Retry-After`; dev has high limits |
+| 401 with the right password | 5 failures locked the account for 15 minutes (answered like a wrong password) | Wait, or unlock the user in the Keycloak console |
+| A new role does not show up | Unknown to `security/Roles`, or roles are read at login | Add it to `Roles.ALL`; log out and in again |
+| Realm changes in the JSON are ignored | The realm already exists; import runs only once | Local dev: re-run the setup script. Elsewhere: change it in the console |
 | Tests fail to start | Docker is not running (Testcontainers) | Start Docker Desktop |
-| `missing table [users]` at startup | Flyway did not run | Make sure `spring-boot-starter-flyway` is in `pom.xml` |
-| `mvnw.cmd` shows as fully modified | Line endings | Normalised by `.gitattributes`; a `chore: normalize` commit is fine |
-| Test class imports fail after a Boot upgrade | Spring Boot 4 moved test packages | Use `org.springframework.boot.webmvc.test.autoconfigure` and `org.springframework.boot.resttestclient`; never downgrade Boot |
+| The build fails on `everyApiRouteHasALineInTheMatrix` | A route without an access rule | Add its line to `MATRIX` in `AccessMatrixFunctionalTest` |
 
 ### Glossary
 
 | Term | Meaning |
 | --- | --- |
 | BFF | Backend For Frontend: the backend runs the login and keeps the tokens; the browser holds only a session cookie |
-| OIDC | OpenID Connect, the login protocol on top of OAuth 2.0 that Keycloak speaks |
-| PKCE | Proof Key for Code Exchange: a one-time secret that makes a stolen authorization code useless |
+| OIDC | OpenID Connect, the identity protocol on top of OAuth 2.0 that Keycloak speaks |
+| Password grant (ROPC) | Resource Owner Password Credentials: the client sends the user's password to the token endpoint. Deprecated by OAuth 2.1; used here server to server as an accepted exception (decision 0001) |
+| PKCE | Proof Key for Code Exchange, part of the Authorization Code flow; not used by our login (see decision 0001) |
 | Realm | An isolated Keycloak space with its own users, roles, groups and clients (`medlink`) |
-| Client | An application registered in Keycloak (`medlink-bff`) |
+| Client | An application registered in Keycloak: `medlink-bff` (login), `medlink-admin` (service account) |
 | JWKS | The public keys Keycloak publishes so the API can verify token signatures |
+| IDOR | Insecure Direct Object Reference: reading someone else's data by changing an id; stopped by `OwnershipGuard` |
 | SAST / SCA / DAST | Static code analysis / dependency CVE scanning / attacks against the running app |
 | SoA | Statement of Applicability: the ISO 27001 list of chosen Annex A controls and why |

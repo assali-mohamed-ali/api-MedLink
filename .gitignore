@@ -32,6 +32,9 @@ build/
 ### VS Code ###
 .vscode/
 
+### Dev setup scripts (local state) ###
+.dev/
+
 ### DevSecOps ###
 .env
 .env.*
@@ -43,6 +46,8 @@ terraform/*.tfstate.*
 terraform/*.tfvars
 !terraform/*.tfvars.example
 !terraform/*.tfvars.*.example
+terraform/backend.tf
+terraform/*.tfplan
 dependency-check-report.*
 trivy-*.sarif
 app.log

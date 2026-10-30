@@ -20,10 +20,25 @@ spring:
 keycloak:
   # Client secret of the medlink-bff client (keycloak/realm-medlink.json)
   client-secret: ${KEYCLOAK_CLIENT_SECRET:dev-only-medlink-bff-secret}
+  admin:
+    # Service account medlink-admin (same dev value as compose.yaml)
+    client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET:dev-only-medlink-admin-secret}
 
 app:
+  mfa:
+    # Staff code key (application.properties), dev only: 32 bytes in base64 that read as words
+    encryption-key: ${APP_MFA_ENCRYPTION_KEY:devOnlyMfaKeyNotForProductionUseLocalOnlyMA=} # gitleaks:allow
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:4200}
+  # One developer, every call from localhost (React, setup scripts, Newman reruns): the per-IP limits of
+  # application.properties would trip after one Postman run. The tests check the real values.
+  rate-limit:
+    login:
+      max: 1000
+    register:
+      max: 1000
+    resend:
+      max: 1000
 
 management:
   endpoints:
@@ -40,5 +55,3 @@ management:
 springdoc:
   api-docs:
     path: /v3/api-docs
-  swagger-ui:
-    path: /swagger-ui.html

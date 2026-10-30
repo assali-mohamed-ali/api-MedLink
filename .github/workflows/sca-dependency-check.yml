@@ -7,6 +7,7 @@ on:
     branches: [main, master, staging, prod]
   schedule:
     - cron: '0 4 * * 1'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -15,6 +16,13 @@ permissions:
 jobs:
   dependency-check:
     runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      # Free key: https://nvd.nist.gov/developers/request-an-api-key
+      # The first NVD database sync can be large. The refreshed database is
+      # explicitly saved below even if the CVSS gate finds vulnerabilities.
+      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+      DC_DATA: ${{ github.workspace }}/.dependency-check-data
     steps:
       - uses: actions/checkout@v7
 
@@ -25,37 +33,170 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # BLOCKING GATE: fails on CVSS >= 7. No `|| true` — see
-      # security/owasp-suppressions.xml for the only allowed exceptions
-      # (each needs expiry + ticket reference). Without NVD_API_KEY the
-      # scan still runs with the local mirror (-Dautoupdate=false).
-      - name: OWASP Dependency-Check
-        run: |
-          if [ -n "${NVD_API_KEY:-}" ]; then
-            NVD_ARG="-DnvdApiKey=${NVD_API_KEY}"
-          else
-            NVD_ARG="-Dautoupdate=false"
-          fi
-          ./mvnw -B org.owasp:dependency-check-maven:check \
-            ${NVD_ARG} \
-            -DsuppressionFile=security/owasp-suppressions.xml \
-            -DfailBuildOnCVSS=7 \
-            -Dformat=SARIF
-        env:
-          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+      # Both paths (key configured / key missing) are covered by unit tests.
+      - name: Test the SCA scanner policy
+        run: bash scripts/ci/sca-policy.test.sh
 
+      # The selected scanner and the reason are written to the log, the step
+      # summary and target/sca-scanner.txt (uploaded with the reports).
+      - name: Select the SCA scanner
+        id: scanner
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          REF: ${{ github.ref }}
+          HAS_NVD_KEY: ${{ secrets.NVD_API_KEY != '' }}
+          ALLOW_FALLBACK: ${{ vars.ALLOW_TRIVY_FALLBACK }}
+        run: |
+          policy_file="$RUNNER_TEMP/sca-policy.txt"
+          scripts/ci/sca-policy.sh "$EVENT_NAME" "$REF" "$HAS_NVD_KEY" "$ALLOW_FALLBACK" > "$policy_file"
+          cat "$policy_file" >> "$GITHUB_OUTPUT"
+
+          scanner="$(sed -n 's/^scanner=//p' "$policy_file")"
+          allowed="$(sed -n 's/^fallback_allowed=//p' "$policy_file")"
+          reason="$(sed -n 's/^reason=//p' "$policy_file")"
+
+          echo "::notice title=SCA scanner::${reason}"
+          {
+            echo "### SCA scanner"
+            echo ""
+            echo "- Scanner: **${scanner}**"
+            echo "- Fallback allowed: **${allowed}**"
+            echo "- Reason: ${reason}"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          mkdir -p target
+          {
+            echo "scanner=${scanner}"
+            echo "fallback_allowed=${allowed}"
+            echo "reason=${reason}"
+            echo "event=${EVENT_NAME}"
+            echo "ref=${REF}"
+          } > target/sca-scanner.txt
+
+      - name: Today
+        id: today
+        run: echo "date=$(date -u +%F)" >> "$GITHUB_OUTPUT"
+
+      # NVD database: full download once, then one cache per day with the delta.
+      - name: Restore NVD database
+        id: nvd-cache
+        if: steps.scanner.outputs.scanner == 'dependency-check'
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ env.DC_DATA }}
+          key: dependency-check-data-${{ steps.today.outputs.date }}
+          restore-keys: dependency-check-data-
+
+      # PRIMARY SCANNER: fails on CVSS >= 7. No `|| true` — see
+      # security/owasp-suppressions.xml for the only allowed exceptions
+      # (each needs expiry + ticket reference). OSS Index needs Sonatype
+      # credentials this repo does not have, so it is off; NVD stays the source.
+      - name: OWASP Dependency-Check (primary)
+        if: steps.scanner.outputs.scanner == 'dependency-check'
+        run: |
+          ./mvnw -B org.owasp:dependency-check-maven:check \
+            -DnvdApiKeyEnvironmentVariable=NVD_API_KEY \
+            -DdataDirectory="$DC_DATA" \
+            -DossIndexAnalyzerEnabled=false \
+            -DsuppressionFile=security/owasp-suppressions.xml \
+            -DfailBuildOnCVSS=7
+
+      # Save separately because the cache action's automatic post-save is skipped
+      # when Dependency-Check exits non-zero on real findings. This makes the
+      # expensive initial NVD sync reusable on the next run.
+      - name: Save updated NVD database
+        if: always() && steps.scanner.outputs.scanner == 'dependency-check' && steps.nvd-cache.outputs.cache-hit != 'true' && hashFiles('.dependency-check-data/**') != ''
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.DC_DATA }}
+          key: dependency-check-data-${{ steps.today.outputs.date }}
+
+      # FALLBACK SCANNER: fails on CRITICAL/HIGH with a fix available, on every
+      # dependency packed in the jar. It is not the primary scan: see SECURITY.md.
+      - name: Package (fallback)
+        if: steps.scanner.outputs.scanner == 'trivy'
+        run: |
+          echo "::warning::NVD_API_KEY is not available for this run: Trivy is the documented fallback and is not equivalent to the NVD-backed scan."
+          ./mvnw -B -DskipTests package
+
+      - name: Trivy dependency scan (fallback)
+        if: steps.scanner.outputs.scanner == 'trivy'
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: 'rootfs'
+          scan-ref: 'target'
+          scanners: 'vuln'
+          format: 'sarif'
+          output: 'target/trivy-sca.sarif'
+          severity: 'CRITICAL,HIGH'
+          exit-code: '1'
+          ignore-unfixed: true
+
+      - name: Show fallback findings
+        if: always() && hashFiles('target/trivy-sca.sarif') != ''
+        run: scripts/ci/sarif-gate.sh 11 target/trivy-sca.sarif
+
+      # A missing report means the selected scanner never ran: fail instead of
+      # reporting success on an empty artifact.
+      - name: Verify the selected scanner produced a report
+        if: always()
+        env:
+          SCANNER: ${{ steps.scanner.outputs.scanner }}
+        run: |
+          case "$SCANNER" in
+            dependency-check) report="target/dependency-check-report.sarif" ;;
+            trivy) report="target/trivy-sca.sarif" ;;
+            *)
+              echo "::error::No SCA scanner was selected; the scan did not run."
+              exit 1
+              ;;
+          esac
+          if [ ! -s "$report" ]; then
+            echo "::error::The selected scanner (${SCANNER}) did not produce ${report}; the run must not pass silently."
+            exit 1
+          fi
+          echo "Selected scanner report present: ${report}"
+
+      # Release branches must use the primary scanner unless the repository
+      # variable ALLOW_TRIVY_FALLBACK explicitly accepts the documented fallback.
+      - name: Enforce the SCA release policy
+        if: always()
+        env:
+          SCANNER: ${{ steps.scanner.outputs.scanner }}
+          FALLBACK_ALLOWED: ${{ steps.scanner.outputs.fallback_allowed }}
+          REASON: ${{ steps.scanner.outputs.reason }}
+        run: |
+          if [ "$SCANNER" = "trivy" ] && [ "$FALLBACK_ALLOWED" != "true" ]; then
+            echo "::error title=SCA policy::${REASON}"
+            exit 1
+          fi
+          echo "SCA policy satisfied: scanner=${SCANNER}, fallback allowed=${FALLBACK_ALLOWED}"
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: sca-reports
+          path: |
+            target/sca-scanner.txt
+            target/dependency-check-report.html
+            target/dependency-check-report.sarif
+            target/trivy-sca.sarif
+          if-no-files-found: warn
+          retention-days: 14
+
+      # Code scanning needs a public repo or GitHub Advanced Security:
+      # set the repo variable CODE_SCANNING_ENABLED=true once it is on.
       - name: Upload SARIF
-        if: always() && hashFiles('target/dependency-check-report.sarif') != ''
+        if: always() && vars.CODE_SCANNING_ENABLED == 'true' && hashFiles('target/dependency-check-report.sarif') != ''
         uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: target/dependency-check-report.sarif
           category: owasp-dependency-check
 
-      - name: Upload HTML report
-        if: always()
-        uses: actions/upload-artifact@v6
+      - name: Upload fallback SARIF
+        if: always() && vars.CODE_SCANNING_ENABLED == 'true' && hashFiles('target/trivy-sca.sarif') != ''
+        uses: github/codeql-action/upload-sarif@v4
         with:
-          name: dependency-check-report
-          path: target/dependency-check-report.html
-          if-no-files-found: error
-          retention-days: 14
+          sarif_file: target/trivy-sca.sarif
+          category: trivy-sca
