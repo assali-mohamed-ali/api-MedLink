@@ -102,16 +102,14 @@ jobs:
 
           PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base staging --head prod --state open --json number --jq '.[0].number // empty')"
           if [ -z "$PR_NUMBER" ]; then
-            SYNC_BODY="$(cat <<'EOF'
-Automated sync of the released Maven version and changelog from prod back to staging.
-
-## Utilisation de l'IA
-
-- [x] Cette PR n'utilise pas d'outils d'IA générative.
-- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR.
-- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.
-EOF
-)"
+            SYNC_BODY="$(printf '%s\n' \
+              "Automated sync of the released Maven version and changelog from prod back to staging." \
+              "" \
+              "## Utilisation de l'IA" \
+              "" \
+              "- [x] Cette PR n'utilise pas d'outils d'IA générative." \
+              "- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR." \
+              "- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.")"
             gh pr create --repo "$GITHUB_REPOSITORY" --base staging --head prod \
               --title "chore: sync released version to staging" --body "$SYNC_BODY"
             PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base staging --head prod --state open --json number --jq '.[0].number // empty')"
