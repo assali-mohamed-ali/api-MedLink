@@ -295,7 +295,7 @@ treatment, Statement of Applicability, policies, awareness, internal audit, mana
 | Annex A control | How api-MedLink implements it | Evidence in the repo | Coverage | Gap / next action |
 | --- | --- | --- | --- | --- |
 | 5.8 Information security in project management | Threat model mapped to code; decision records; security checklist on every PR | `security/threat-model.md`, `docs/decisions/`, PR template | Covered | Review the threat model with each feature |
-| 5.15 Access control | Deny by default; roles; ownership checks; role × route matrix | `config/SecurityConfig.java`, `security/OwnershipGuard.java`, `AccessMatrixFunctionalTest` | Covered | API docs (Swagger, `/v3/api-docs`) dev only (#65); metrics only on the private management port (#49) |
+| 5.15 Access control | Deny by default; roles; ownership checks; role × route matrix | `config/SecurityConfig.java`, `security/OwnershipGuard.java`, `AccessMatrixFunctionalTest` | Covered | API docs (Scalar `/scalar`, `/v3/api-docs`) dev only (#65); metrics only on the private management port (#49) |
 | 5.16 Identity management | One identity store (Keycloak); `users.id` = Keycloak id; one role per person | realm, `V3__users_keycloak_id_as_pk.sql` | Covered | |
 | 5.17 Authentication information | Passwords only in Keycloak; policy 12+ characters, mixed, not the email; never logged by the API | realm `passwordPolicy`, `LoginRequest.toString` | Covered | Password history and forced change: MLink-87/88 |
 | 5.18 Access rights | Roles through groups; new users in `/patients`; no role accepted from requests | realm `groups`, `defaultGroups`, `security/Roles` | Partial | Periodic review of group membership; a practitioner or staff member made in the console also lands in `/patients` (`defaultGroups`) and must be taken out by hand |
@@ -328,7 +328,7 @@ The prioritised list, with the threat behind each item, is in
 - [x] Second factor for practitioners and staff (MLink-62/63)
 - [ ] MFA for admin identities (GitHub #68)
 - [ ] No default database credentials outside dev (GitHub #64)
-- [x] API docs (Swagger, `/v3/api-docs`) not public in production (GitHub #65)
+- [x] API docs (Scalar `/scalar`, `/v3/api-docs`) not public in production (GitHub #65)
 - [ ] Separate database roles for the audit trail (GitHub #57)
 - [ ] Logins and account operations in the audit trail (MLink-114, MLink-72)
 - [ ] Backup and tested restore of both databases (GitHub #67)

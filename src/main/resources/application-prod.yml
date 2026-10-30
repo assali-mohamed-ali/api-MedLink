@@ -41,12 +41,15 @@ app:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://medlink.example.com}
 
 springdoc:
-  # No Swagger UI and no OpenAPI description outside dev: they would tell anyone every route and schema of a
-  # health-data API (GitHub #65). Dev keeps both, for the developers and for DAST.
+  # No API reference UI and no OpenAPI description outside dev: they would tell anyone every route and schema
+  # of a health-data API (GitHub #65). Dev keeps both, for the developers and for DAST.
   api-docs:
     enabled: false
   swagger-ui:
     enabled: false
+# Scalar's UI at /scalar (since #100), switched off on its own: it must not depend on api-docs being off
+scalar:
+  enabled: false
 
 management:
   # Actuator (metrics included) only on this port, never published outside Docker: Prometheus scrapes it over
