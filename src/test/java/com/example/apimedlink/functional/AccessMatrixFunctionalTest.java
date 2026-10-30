@@ -42,6 +42,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("POST",   "/api/auth/verify-email",        O, O, O, O),
             new Rule("POST",   "/api/auth/verify-email/resend", O, O, O, O),
             new Rule("POST",   "/api/auth/login",               O, O, O, O),
+            new Rule("GET",    "/api/auth/me",                  L, O, O, O),
             new Rule("POST",   "/api/auth/logout",              L, O, O, O),
             new Rule("POST",   "/api/auth/password",            L, O, O, O),
             // Only a pending code step (staff login, password accepted) gets past these; a full session does not

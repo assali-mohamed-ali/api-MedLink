@@ -102,6 +102,7 @@ sequenceDiagram
 | `POST /api/auth/login` | anyone | 200 (`user`, or `mfaRequired` for practitioners and staff) · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
 | `POST /api/auth/mfa/setup` | at the code step, `{token}` from the mailed link | 200 QR code, otpauth URL, secret · 401 · 409 `MFA_ALREADY_ENROLLED` · 400 `VALIDATION_FAILED` / `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
 | `POST /api/auth/mfa/verify` | at the code step | 200 `user` + session · 400 · 401 `INVALID_CODE` · 423 `MFA_LOCKED` |
+| `GET /api/auth/me` | logged in | 200 `user` (the login's user object, from the session) · 401 `UNAUTHENTICATED` |
 | `POST /api/auth/logout` | logged in | 204 |
 | `GET /api/users` | staff | 200 |
 | `GET /api/users/{id}` | the user themself, or staff | 200 · 403 for anyone else, whether the id exists or not |

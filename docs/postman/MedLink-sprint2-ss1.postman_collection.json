@@ -1938,6 +1938,28 @@
           ]
         },
         {
+          "name": "200 · GET /me returns the logged-in patient (what React reads after a refresh)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const user = pm.response.json().user;",
+                  "pm.test(\"the login's user\", () => pm.expect(user.id).to.eql(pm.collectionVariables.get(\"targetUserId\")));",
+                  "pm.test(\"role PATIENT only\", () => pm.expect(user.roles).to.eql([\"PATIENT\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "400 · current password missing",
           "request": {
             "method": "POST",
@@ -3215,6 +3237,26 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · GET /me returns the practitioner after the code",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"role PRACTITIONER only\", () => pm.expect(pm.response.json().user.roles).to.eql([\"PRACTITIONER\"]));"
                 ]
               }
             }
