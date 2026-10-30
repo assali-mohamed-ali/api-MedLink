@@ -18,6 +18,11 @@ proves the lockout on the running dev stack: 5 wrong passwords 1.2 s apart (Keyc
 after 2 otherwise), then the right password is refused (401, like a wrong password: a 423 would reveal that the
 account exists) and Keycloak's brute-force status says locked; `patient.dev` is unlocked at the end. `PASS` on the dev
 stack, `FAIL` with `failureFactor` raised to 50 through the admin API. No migration, no endpoint.
+Review of #103 (2026-10-30): the script refuses a non-local `APP_URL` or `KEYCLOAK_URL` before any request (exit 2),
+so a mistaken staging/prod URL cannot lock or unlock a real account; a remote dev stack needs
+`ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack`. `scripts/check-lockout.test.sh` (offline, fake `curl`, run by CI's
+`build-test`) covers 14 cases, lookalikes included (`localhost.evil.com`, `localhost:8180@evil.com`); two mutants of the
+guard turn it red. The cookie jar is removed in the `EXIT` trap.
 
 **2026-10-29:** #97 (MLink-62/63) was merged before its review round 1 reached it, so `master` still has the
 first-enrolment takeover and the `/patients` default group. `fix/ss3-review-round-1` (one PR based on `master`)

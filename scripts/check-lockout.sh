@@ -8,10 +8,45 @@
 # accounts exist: the 401 to the right password is the proof, and Keycloak's brute-force status (admin API)
 # confirms it is a lock. The script unlocks patient.dev at the end, even when the check fails.
 # Prints PASS or FAIL, exits 0 or 1. Dev only: it uses the bootstrap admin of the dev Keycloak.
+#
+# It refuses (exit 2, before any request) a non-local APP_URL or KEYCLOAK_URL: pointed at staging or prod by
+# mistake, it would lock or unlock a real account. For a dev stack on another machine, opt in explicitly:
+#   ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack APP_URL=http://dev-box:8080 KEYCLOAK_URL=http://dev-box:8180 \
+#       scripts/check-lockout.sh
+# Tests of this guard (offline): scripts/check-lockout.test.sh.
 set -uo pipefail
 
 APP_URL="${APP_URL:-http://localhost:8080}"
 KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8180}"
+
+# The host of a URL, lower case: no scheme, path, user info or port ("http://a@B:1/x" -> "b", "[::1]" kept)
+url_host() {
+    local rest="${1#*://}"
+    rest="${rest%%/*}"
+    rest="${rest##*@}"
+    case "$rest" in
+        \[*) rest="${rest%%]*}]" ;;
+        *) rest="${rest%%:*}" ;;
+    esac
+    printf '%s' "$rest" | tr '[:upper:]' '[:lower:]'
+}
+is_local_host() {
+    case "$1" in
+        localhost | 127.0.0.1 | '[::1]' | *.localhost) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+if [ "${ALLOW_REMOTE_DEV_STACK:-}" = yes-this-is-a-dev-stack ]; then
+    echo "WARNING: ALLOW_REMOTE_DEV_STACK is set: running against $APP_URL and $KEYCLOAK_URL"
+else
+    for url in "$APP_URL" "$KEYCLOAK_URL"; do
+        if ! is_local_host "$(url_host "$url")"; then
+            echo "REFUSED: $url is not a local dev stack. This script locks and unlocks an account; for a remote" \
+                "dev stack set ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack." >&2
+            exit 2
+        fi
+    done
+fi
 EMAIL='patient.dev@medlink.local'
 WRONG='Not-The-Password-1!'
 FAILURES=5   # realm failureFactor
@@ -37,10 +72,11 @@ BRUTE_FORCE="$KEYCLOAK_URL/admin/realms/medlink/attack-detection/brute-force/use
 unlock() { # a fresh token: the first one may have expired during the run
     curl -s -o /dev/null --max-time 15 -X DELETE -H "Authorization: Bearer $(admin_token)" "$BRUTE_FORCE"
 }
-trap unlock EXIT
+COOKIES="$(mktemp)"
+# On any exit, even an interrupted or failed run: unlock patient.dev and remove the cookie jar
+trap 'unlock; rm -f "$COOKIES"' EXIT
 unlock   # start from zero failures, whatever an earlier run left
 
-COOKIES="$(mktemp)"
 curl -s -o /dev/null --max-time 10 -c "$COOKIES" -b "$COOKIES" "$APP_URL/api/auth/csrf"
 XSRF="$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$COOKIES" | head -n 1)"
 login() { # $1 = password -> HTTP status of POST /api/auth/login
@@ -71,6 +107,5 @@ LOCKED="$(curl -s --max-time 15 -H "Authorization: Bearer $(admin_token)" "$BRUT
 echo "  Keycloak brute-force status: disabled=${LOCKED:-?} (expected true)"
 [ "$LOCKED" = true ] || RESULT=FAIL
 
-rm -f "$COOKIES"
 echo "$RESULT"
 [ "$RESULT" = PASS ]

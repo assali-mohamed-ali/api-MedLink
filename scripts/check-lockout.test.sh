@@ -57,6 +57,7 @@ run 'remote Keycloak' 2 KEYCLOAK_URL=https://keycloak.staging.medlink.example.co
 run 'remote API' 2 APP_URL=https://staging.medlink.example.com
 run 'lookalike localhost.evil.com' 2 KEYCLOAK_URL=http://localhost.evil.com:8180
 run 'userinfo localhost@evil.com' 2 KEYCLOAK_URL=http://localhost@evil.com
+run 'userinfo with a port, localhost:8180@evil.com' 2 KEYCLOAK_URL=http://localhost:8180@evil.com
 run 'lookalike 127.0.0.1.nip.io' 2 KEYCLOAK_URL=http://127.0.0.1.nip.io:8180
 run 'private address' 2 KEYCLOAK_URL=http://10.0.0.5:8180
 run 'opt-in with another value' 2 KEYCLOAK_URL=http://dev-box.lan:8180 ALLOW_REMOTE_DEV_STACK=1
