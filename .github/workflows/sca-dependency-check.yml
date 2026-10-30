@@ -19,8 +19,8 @@ jobs:
     timeout-minutes: 60
     env:
       # Free key: https://nvd.nist.gov/developers/request-an-api-key
-      # Without it the NVD download fails on a fresh runner (empty database),
-      # so OWASP Dependency-Check cannot run and Trivy scans instead.
+      # The first NVD database sync can be large. The refreshed database is
+      # explicitly saved below even if the CVSS gate finds vulnerabilities.
       NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
       DC_DATA: ${{ github.workspace }}/.dependency-check-data
     steps:
@@ -79,8 +79,9 @@ jobs:
 
       # NVD database: full download once, then one cache per day with the delta.
       - name: Restore NVD database
+        id: nvd-cache
         if: steps.scanner.outputs.scanner == 'dependency-check'
-        uses: actions/cache@v6
+        uses: actions/cache/restore@v6
         with:
           path: ${{ env.DC_DATA }}
           key: dependency-check-data-${{ steps.today.outputs.date }}
@@ -100,12 +101,22 @@ jobs:
             -DsuppressionFile=security/owasp-suppressions.xml \
             -DfailBuildOnCVSS=7
 
+      # Save separately because the cache action's automatic post-save is skipped
+      # when Dependency-Check exits non-zero on real findings. This makes the
+      # expensive initial NVD sync reusable on the next run.
+      - name: Save updated NVD database
+        if: always() && steps.scanner.outputs.scanner == 'dependency-check' && steps.nvd-cache.outputs.cache-hit != 'true' && hashFiles('.dependency-check-data/**') != ''
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ env.DC_DATA }}
+          key: dependency-check-data-${{ steps.today.outputs.date }}
+
       # FALLBACK SCANNER: fails on CRITICAL/HIGH with a fix available, on every
       # dependency packed in the jar. It is not the primary scan: see SECURITY.md.
       - name: Package (fallback)
         if: steps.scanner.outputs.scanner == 'trivy'
         run: |
-          echo "::warning::NVD_API_KEY secret is not set: Trivy replaces OWASP Dependency-Check for this run."
+          echo "::warning::NVD_API_KEY is not available for this run: Trivy is the documented fallback and is not equivalent to the NVD-backed scan."
           ./mvnw -B -DskipTests package
 
       - name: Trivy dependency scan (fallback)
