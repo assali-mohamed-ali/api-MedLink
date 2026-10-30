@@ -52,7 +52,7 @@ jobs:
           test -n "$PR_NUMBER" || { echo "::error::Release Please returned a PR payload without a number"; exit 1; }
           BODY="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')"
           if ! grep -Fq "Cette PR n'utilise pas d'outils d'IA générative." <<< "$BODY"; then
-            DISCLOSURE="$(printf '%s\\n' \
+            DISCLOSURE="$(printf '%s\n' \
               "## Utilisation de l'IA" \
               "" \
               "- [x] Cette PR n'utilise pas d'outils d'IA générative." \
