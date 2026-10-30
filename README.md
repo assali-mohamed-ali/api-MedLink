@@ -48,7 +48,7 @@ team's realm file. All options: [§8](#8-dev-setup-in-detail).
 | Service | URL |
 |---|---|
 | API | http://localhost:8080 |
-| Swagger UI | http://localhost:8080/swagger-ui.html |
+| Scalar API Reference | http://localhost:8080/scalar |
 | Health | http://localhost:8080/actuator/health |
 | Mailpit (every mail the API sends in dev) | http://localhost:8025 |
 | Keycloak admin console (`admin` / `admin`) | http://localhost:8180 |
@@ -169,30 +169,35 @@ Tasks live in YouTrack, project `MLink` (https://medlink.youtrack.cloud).
 
 1. **Start:** move the task to *In Progress*. Shared file (`SecurityConfig`, `AuthBffController`,
    `FunctionalTestBase`, the realm file, the setup scripts)? Say on the teammates' tickets what you change.
-2. **Branch from `master`:**
-   ```bash
-   git checkout master && git pull
-   git checkout -b feat/short-description        # or fix/, docs/, chore/
+2. **Branch for a change:** use `feat/<short-description>`, `fix/<short-description>`, `core/<short-description>`,
+   `docs/<short-description>`, or `chore/<short-description>`. The branch name is for organization; it does not
+   control the version number.
+3. **Use Conventional Commit titles/messages** so release automation can determine the version:
+   ```text
+   feat: add appointment booking       # minor version
+   fix(auth): reject expired sessions  # patch version
+   feat!: replace the public API       # major version
+   chore: update dependencies          # no release by itself
    ```
-   Work on an epic shares one branch, `epic/MLink-<n>`: `git pull` before you start and before you push,
-   never force-push.
-3. **Commit**, one per task, with the YouTrack id:
-   ```bash
-   git commit -m "feat: what changed" -m "MLink-79"   # feat: fix: docs: chore: refactor: test:
-   ```
+   A `BREAKING CHANGE:` footer also causes a major version bump. A branch called `core/*` does not automatically
+   mean major; choose the commit type based on what changed.
 4. **Check before the PR:**
    ```bash
    ./mvnw -B verify                                           # needs Docker
-   ./mvnw -B test -Dsurefire.runOrder=reversealphabetical     # CI does not run your class order
+   ./mvnw -B test -Dsurefire.runOrder=reversealphabetical
    ```
    Changed an endpoint? Run the Postman collection in `docs/postman/` with `npx newman@6.2.1 run <file>`.
-5. **Open the PR against `master`**, never on another branch (a stacked PR may never reach `master`).
-   Fill the template honestly, update `docs/sprints/sprint-2/report.md`, and move the task to *To Verify*
-   with the PR link.
-6. **AI disclosure:** if an AI tool helped, tick *"J'ai utilisé des outils d'IA générative…"*; tick
-   *"Je confirme avoir relu…"* yourself once you have reviewed the changes. Both must be in the same state.
-7. **Review:** `master` needs the code owner's approval (@assali-mohamed-ali) and CodeQL. You cannot merge
-   your own PR. Merged → the task goes to *Done*.
+5. **Open the product PR against `staging`** (after the release-pipeline migration described in
+   [Deployment](docs/DEPLOYMENT.md)). Use a Conventional Commit title such as `feat: add appointment booking`.
+   The pipeline tests and scans the PR, deploys merged `staging` commits, then runs post-deployment smoke tests.
+6. **Promotion:** when staging smoke tests pass, automation opens a `staging -> prod` PR, runs its checks, and
+   merges it automatically. Release Please then opens a Maven release PR, bumps `pom.xml` and `CHANGELOG.md`,
+   and merges it after checks pass. The resulting `vX.Y.Z` tag builds/scans/signs the release image and deploys it
+   to production. A failed gate blocks the next step.
+7. **AI disclosure and review:** if an AI tool helped, tick *"J'ai utilisé des outils d'IA générative…"* and
+   tick *"Je confirme avoir relu…"* yourself only after reviewing the changes. Both must be in the same state.
+   Keep code-owner review and CodeQL on the setup/configuration PRs; fully automatic product promotion requires
+   that `prod` does not mandate a human review.
 
 ## 6. CI checks
 
@@ -215,18 +220,26 @@ them like any PR: compose images are not what the tests use, so a green CI prove
 **Never merge a Java jump** (`pom.xml` `java.version=17` moves first), and keep the Maven wrapper on 3.9.x
 (IntelliJ cannot import the project with 3.10, MLink-118).
 
-## 7. Environments
+## 7. Environments and release flow
 
-| Branch | Environment | Profile | Env file |
-|---|---|---|---|
-| `master` | integration | `dev` locally | `.env` (made by the setup script) |
-| `staging` | pre-prod | `staging` | `.env.staging` |
-| `prod` (or a `v*` tag) | production | `prod` | `.env.prod` |
+| Ref / event | Result |
+|---|---|
+| PR to `staging` | CI, PR-title validation, and CD build/image security scan run; nothing is deployed from the PR |
+| Push to `staging` | Verify, build, scan, publish by commit SHA, attest/sign, deploy by immutable digest, smoke-test |
+| Staging smoke-test success | Open `staging -> prod` PR; wait for checks; merge automatically |
+| Push to `prod` | Release Please determines the next SemVer version from Conventional Commits and opens/updates a release PR |
+| Release PR merged | Create `vX.Y.Z` tag and GitHub Release; sync release metadata back to staging |
+| Push of `vX.Y.Z` | Build/test/scan the release, publish SBOM/provenance, sign image digest, deploy production by immutable digest |
 
-Maintainers promote `master` → `staging` → `prod` with `--no-ff` merges. Production secrets live in GitHub
-Environments, never in git. CD builds one image per run and deploys its immutable digest to the target
-host with Docker Compose over SSH; setup, secrets, rollback and recovery are in
-[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Production secrets live in GitHub Environments, never in git. Configure the `staging` and `production` environments,
+the repository secret `PROMOTION_TOKEN`, and branch/ruleset checks as described in
+[Deployment](docs/DEPLOYMENT.md). Production deploys only from lowercase `v*` tags; the legacy uppercase
+`V1.0.0` / `V1.0.1` tags are historical and are not used for new automated releases.
+
+**One-time migration warning:** the current `master`, `staging`, and `prod` branches have diverged. Keep repository variable `ENABLE_AUTO_PROMOTION` unset/false until the workflow files are carried across and branch baselines are deliberately reconciled in reviewed PRs. This PR adds
+the workflow/configuration on `master` only. Do not expect automation to run on `staging` or `prod` until these
+files are carried there and the branch baselines are reconciled in reviewed PRs. Do not blindly auto-merge the full
+legacy branch difference into production. See the migration checklist in [Deployment](docs/DEPLOYMENT.md).
 
 ## 8. Dev setup in detail
 
@@ -335,7 +348,7 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 **Report a vulnerability privately**, never in a public issue: see [SECURITY.md](SECURITY.md)
 (`security@medlink.example.com`, or a DM to @assali-mohamed-ali starting with `[SECURITY]`).
 
-Known open item: Swagger and `/v3/api-docs` are public in production (GitHub #65). In staging and prod the
+Known open item: Scalar and `/v3/api-docs` are public in production (GitHub #65). In staging and prod the
 actuator (metrics, `/actuator/health`) is only on the private management port 9000, never published; the public
 port keeps `/livez` and `/readyz` (GitHub #49). The
 actuator exposes only `health,info,prometheus`: don't open more without a security review.
