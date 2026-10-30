@@ -51,6 +51,8 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      mailpit:
+        condition: service_started
 
   # Keycloak has its own database (separate container + volume), never the app's one.
   keycloak-db:
