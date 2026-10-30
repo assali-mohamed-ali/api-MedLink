@@ -247,9 +247,7 @@ jobs:
 
           HEADERS="$(mktemp)"
           trap 'rm -f "$HEADERS"' EXIT
-          STATUS="$(curl --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \\
-            --dump-header "$HEADERS" --output /dev/null --write-out '%{http_code}' \\
-            http://localhost:8080/api/auth/csrf)"
+          STATUS="$(curl --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --dump-header "$HEADERS" --output /dev/null --write-out '%{http_code}' http://localhost:8080/api/auth/csrf)"
           test "$STATUS" = "204" || { echo "::error::Expected /api/auth/csrf to return 204, got $STATUS"; exit 1; }
           grep -qi '^set-cookie: XSRF-TOKEN=' "$HEADERS" || {
             echo "::error::The CSRF bootstrap endpoint did not set XSRF-TOKEN"; exit 1;
