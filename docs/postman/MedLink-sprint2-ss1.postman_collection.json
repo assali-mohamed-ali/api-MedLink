@@ -2,7 +2,7 @@
   "info": {
     "name": "MedLink API · Sprint 2 (registration, email verification, password changes, staff code)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases, then folder 6 for endpoints 10–11 (sub-sprint 4) and folder 8 for the staff code, endpoints 8–9 (sub-sprint 3). Practitioners and staff log in with a code: the collection's pre-request script computes it from `{{totpSecret}}` like an authenticator app.\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token; folder 6 reuses the account verified in folder 4). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created, the per-IP limits (429 `TOO_MANY_REQUESTS` with `Retry-After`, GitHub #51: the dev profile raises them to 1000 so this collection can be rerun; `RateLimitFunctionalTest` checks the real values).\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them."
+    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases, then folder 6 for endpoints 10–11 (sub-sprint 4) and folder 8 for the staff code, endpoints 8–9 (sub-sprint 3). Practitioners and staff log in with a code: the collection's pre-request script computes it from `{{totpSecret}}` like an authenticator app.\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token; folder 6 reuses the account verified in folder 4). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created, the per-IP limits (429 `TOO_MANY_REQUESTS` with `Retry-After`, GitHub #51: the dev profile raises them to 1000 so this collection can be rerun; `RateLimitFunctionalTest` checks the real values).\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them.\n\nFolder 7 (slot search, MLink-98) logs in as patient.dev and reads the dev seed: run the setup script first."
   },
   "event": [
     {
@@ -2537,6 +2537,350 @@
       ]
     },
     {
+      "name": "7 · Slot search (endpoint 25.2, MLink-98)",
+      "description": "GET /api/slots as patient.dev, on the dev seed (three practitioners, free slots over the next two weeks). Starts by ending any session left by the folders before it. Needs the dev stack started by scripts/setup-dev.",
+      "item": [
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The search window: from now, for the next 14 days (the dev seed's slots)",
+                  "const now = new Date();",
+                  "pm.collectionVariables.set(\"slotFrom\", now.toISOString());",
+                  "pm.collectionVariables.set(\"slotTo\", new Date(now.getTime() + 14 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /logout → no session left from the folders before (204, or 401 when none)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"logged out or already anonymous\", () => pm.expect(pm.response.code).to.be.oneOf([204, 401]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots without a session → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf before logging in → 204",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /login as patient.dev → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient.dev@medlink.local\",\n  \"password\": \"{{devPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"logged in as a patient\", () => pm.expect(pm.response.json().user.roles).to.include(\"PATIENT\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots (next 14 days) → 200, free slots earliest first",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"the dev seed's slots come back\", () => pm.expect(body.items).to.be.an(\"array\").that.is.not.empty);",
+                  "pm.test(\"total counts every match\", () => pm.expect(body.total).to.be.at.least(body.items.length));",
+                  "pm.test(\"each slot: times, clinic, practitioner, specialty\", () => body.items.forEach(s => {",
+                  "    pm.expect(s).to.have.all.keys(\"slotId\", \"startsAt\", \"endsAt\", \"clinic\", \"practitioner\", \"specialty\");",
+                  "    pm.expect(s.clinic).to.have.all.keys(\"id\", \"name\");",
+                  "    pm.expect(s.practitioner).to.have.all.keys(\"id\", \"firstName\", \"lastName\");",
+                  "}));",
+                  "pm.test(\"earliest first, never in the past\", () => {",
+                  "    const starts = body.items.map(s => Date.parse(s.startsAt));",
+                  "    pm.expect(starts).to.eql([...starts].sort((a, b) => a - b));",
+                  "    starts.forEach(t => pm.expect(t).to.be.above(Date.now() - 60000));",
+                  "});",
+                  "pm.test(\"no email or username of the practitioner\", () => pm.expect(pm.response.text()).to.not.include(\"@\"));",
+                  "pm.collectionVariables.set(\"practitionerId\", body.items[0].practitioner.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots?practitionerId=… → only that practitioner",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&practitionerId={{practitionerId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"some slots\", () => pm.expect(body.items).to.not.be.empty);",
+                  "pm.test(\"all of the chosen practitioner\", () => body.items.forEach(s =>",
+                  "    pm.expect(s.practitioner.id).to.eql(pm.collectionVariables.get(\"practitionerId\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots without from → 400 VALIDATION_FAILED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?to={{slotTo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the missing field is named\", () => pm.expect(pm.response.json().details).to.have.property(\"from\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots with the end before the start → 400 (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotTo}}&to={{slotFrom}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"to\": \"La date de fin doit être après la date de début.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots over more than 31 days → 400 (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTooFar}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const from = Date.parse(pm.collectionVariables.get(\"slotFrom\"));",
+                  "pm.collectionVariables.set(\"slotTooFar\", new Date(from + 32 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"to\": \"La période ne peut pas dépasser 31 jours.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots?clinicId=abc → 400, the field is named (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&clinicId=abc"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"clinicId\": \"Identifiant invalide.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots?size=51 → 400 (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&size=51"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"size\": \"La taille de page doit être comprise entre 1 et 50.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots next year (nothing seeded) → 200, a message suggests widening (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotNextYear}}&to={{slotNextYearEnd}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const start = Date.now() + 365 * 86400000;",
+                  "pm.collectionVariables.set(\"slotNextYear\", new Date(start).toISOString());",
+                  "pm.collectionVariables.set(\"slotNextYearEnd\", new Date(start + 7 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"no slot\", () => { pm.expect(body.items).to.eql([]); pm.expect(body.total).to.eql(0); });",
+                  "pm.test(\"the message suggests widening the search\", () => pm.expect(body.message).to.eql(\"Aucun créneau disponible. Élargissez la recherche (dates, clinique ou spécialité).\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
       "name": "8 · Staff code (endpoints 8–9)",
       "description": "Sub-sprint 3 (MLink-62/63): a practitioner made in the Keycloak console logs in with the password, enrols a code with the QR code, then logs in with codes from an authenticator app (computed by the collection's pre-request script). 5 wrong codes lock the code step for 15 minutes, across logins. The 15-minute end of the lock and the 5-minute end of the step are covered by MfaFunctionalTest.",
       "item": [
@@ -3787,6 +4131,34 @@
     },
     {
       "key": "usedTotpCode",
+      "value": ""
+    },
+    {
+      "key": "devPassword",
+      "value": "MedLink-Dev-2026!"
+    },
+    {
+      "key": "slotFrom",
+      "value": ""
+    },
+    {
+      "key": "slotTo",
+      "value": ""
+    },
+    {
+      "key": "practitionerId",
+      "value": ""
+    },
+    {
+      "key": "slotTooFar",
+      "value": ""
+    },
+    {
+      "key": "slotNextYear",
+      "value": ""
+    },
+    {
+      "key": "slotNextYearEnd",
       "value": ""
     }
   ]

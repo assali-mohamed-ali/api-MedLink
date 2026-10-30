@@ -77,6 +77,26 @@ services:
       retries: 30
       start_period: 30s
 
+  # Dev only, never in docker-compose.yml: once Keycloak is ready, adds the dev practitioners of
+  # keycloak/dev/dev-practitioners.json (fixed ids, used by the dev seed) to the realm, then exits.
+  # Existing users are skipped, so it runs at every start. Logs: docker compose logs keycloak-dev-users.
+  keycloak-dev-users:
+    image: 'quay.io/keycloak/keycloak:26.8.1'
+    entrypoint: ['bash', '/opt/keycloak/dev/import-dev-users.sh']
+    restart: 'no'
+    labels:
+      org.springframework.boot.ignore: 'true'
+    environment:
+      - 'KEYCLOAK_URL=http://keycloak:8080'
+      - 'DEV_ADMIN_USERNAME=admin'
+      - 'DEV_ADMIN_PASSWORD=admin'
+      - 'KC_DEV_USERS_PASSWORD=MedLink-Dev-2026!'
+    volumes:
+      - './keycloak/dev:/opt/keycloak/dev:ro'
+    depends_on:
+      keycloak:
+        condition: service_healthy
+
   # Catches every mail the API sends in dev: inbox at http://localhost:8025, SMTP on 1025.
   mailpit:
     image: 'axllent/mailpit:v1.31.6'
