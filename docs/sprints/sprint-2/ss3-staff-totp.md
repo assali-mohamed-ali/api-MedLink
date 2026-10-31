@@ -30,10 +30,10 @@ Branch `feat/ss3-staff-totp`, based on `master`. One PR to `master` at the end (
 | B6 | Postman folders 6 and 8 | MLink-62 | Done: newman 106 requests, 252 assertions, 0 failures, twice | 1696d0a |
 | B7 | Docs and drafts | MLink-62/63 | Done (drafts in "Review round 1 drafts") | 2ec9fe9 |
 | B8 | Manual check on the dev stack (`-Reset` done 2026-10-28, OK'd by Mohamed) | MLink-62 | Done 2026-10-29: Mohamed's phone check passed | |
-| B9 | #97 was merged first: new PR from `fix/ss3-review-round-1` (merge of `master`, checks, push) | MLink-62/63 | In progress | |
+| B9 | #97 was merged first: new PR from `fix/ss3-review-round-1` (merge of `master`, checks, push) | MLink-62/63 | Done: #99 merged 2026-10-29 (its migration stays V12; #87 takes V13) | 2d7c56d |
 
-**Next step (new session):** B9: the new PR's review (link it on #97 and on MLink-62/63). Then the MLink-127
-follow-up (DOMPurify 3.4.16, CVE-2026-116803/116804) in its own PR, and the teammate drafts below.
+**Sub-sprint 3 is done** (MLink-62/63 Done, 2026-10-29; teammate comments posted on MLink-64, MLink-65, #87, #90).
+Left on its side: the staff `LOGIN` audit after `/verify`, once #90 (MLink-114) merges.
 
 ## Review round 1 (2026-10-28): plan agreed with Mohamed
 
