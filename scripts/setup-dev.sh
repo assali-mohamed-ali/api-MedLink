@@ -14,7 +14,8 @@
 #      Before any wipe, the current realm is saved to .dev/realm-backups/ (no users, no secrets).
 #   5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
 #   6. Runs ./mvnw verify (unless --skip-tests).
-#   7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login.
+#   7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login,
+#      and a practitioner.dev login that stops at the staff code step (no session without the code).
 #
 # Usage: ./scripts/setup-dev.sh [--skip-tests] [--full-stack] [--reset] [--keep-data] [--stop]
 #
@@ -552,6 +553,28 @@ else
     bad "login as patient.dev: POST /api/auth/login returned $STATUS (expected 200), then /api/users/_health $API_STATUS (expected 200)"
 fi
 rm -f "$COOKIES"
+
+# Staff code (MLink-65): a practitioner's right password alone opens no session. The login answers 200
+# {"mfaRequired":true} and the code step comes next; until then no API call works. /api/auth/me is not built
+# yet (MLink-53), so "no session" is checked on /api/users/_health, which needs one.
+STAFF_COOKIES="$LOG_DIR/staff-cookies.txt"
+STAFF_ANSWER="$LOG_DIR/staff-login-answer.json"
+rm -f "$STAFF_COOKIES" "$STAFF_ANSWER"
+curl -s -o /dev/null --max-time 10 -c "$STAFF_COOKIES" -b "$STAFF_COOKIES" "$APP_URL/api/auth/csrf"
+STAFF_XSRF="$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$STAFF_COOKIES" | head -n 1)"
+STATUS="$(curl -s -o "$STAFF_ANSWER" -w '%{http_code}' --max-time 30 -c "$STAFF_COOKIES" -b "$STAFF_COOKIES" \
+    -H "X-XSRF-TOKEN: $STAFF_XSRF" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"practitioner.dev@medlink.local\",\"password\":\"$USERS_PASSWORD\"}" \
+    "$APP_URL/api/auth/login")"
+MFA_REQUIRED=false
+grep -q '"mfaRequired" *: *true' "$STAFF_ANSWER" 2>/dev/null && MFA_REQUIRED=true
+API_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$STAFF_COOKIES" "$APP_URL/api/users/_health")"
+if [ "$STATUS" = 200 ] && [ "$MFA_REQUIRED" = true ] && [ "$API_STATUS" = 401 ]; then
+    ok 'staff code asked: practitioner.dev login 200 with mfaRequired, and no session before the code (/api/users/_health 401)'
+else
+    bad "login as practitioner.dev: POST /api/auth/login returned $STATUS (expected 200 with mfaRequired: $MFA_REQUIRED), then /api/users/_health $API_STATUS (expected 401, no session)"
+fi
+rm -f "$STAFF_COOKIES" "$STAFF_ANSWER"
 
 # Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
 # The smoke account is deleted afterwards (Keycloak user, then our rows).

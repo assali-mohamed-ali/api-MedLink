@@ -15,7 +15,8 @@
        Before any wipe, the current realm is saved to .dev\realm-backups\ (no users, no secrets).
     5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
     6. Runs ./mvnw verify (unless -SkipTests).
-    7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login.
+    7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login,
+       and a practitioner.dev login that stops at the staff code step (no session without the code).
 
     Run from PowerShell (5.1 or 7):
         powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1
@@ -527,7 +528,23 @@ $status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $cookies
 $apiStatus = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -b $cookies "$AppUrl/api/users/_health")
 if ($status -eq 200 -and $apiStatus -eq 200) { Write-Ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/users/_health 200 with the session' }
 else { Write-Bad "login as patient.dev: POST /api/auth/login returned $status (expected 200), then /api/users/_health $apiStatus (expected 200)" }
-Remove-Item $cookies, $loginFile -Force -ErrorAction SilentlyContinue
+
+# Staff code (MLink-65): a practitioner's right password alone opens no session. The login answers 200
+# {"mfaRequired":true} and the code step comes next; until then no API call works. /api/auth/me is not built
+# yet (MLink-53), so "no session" is checked on /api/users/_health, which needs one.
+$staffCookies = Join-Path $LogDir 'staff-cookies.txt'
+$staffAnswer = Join-Path $LogDir 'staff-login-answer.json'
+Remove-Item $staffCookies, $staffAnswer -Force -ErrorAction SilentlyContinue
+& curl.exe -s -o NUL --max-time 10 -c $staffCookies -b $staffCookies "$AppUrl/api/auth/csrf"
+$staffXsrf = Get-Content $staffCookies | Where-Object { $_ -match "`tXSRF-TOKEN`t" } | ForEach-Object { ($_ -split "`t")[6] } | Select-Object -First 1
+[System.IO.File]::WriteAllText($loginFile, (@{ email = 'practitioner.dev@medlink.local'; password = $usersPassword } | ConvertTo-Json -Compress), $utf8)
+$status = [int](& curl.exe -s -o $staffAnswer -w '%{http_code}' --max-time 30 -c $staffCookies -b $staffCookies -H "X-XSRF-TOKEN: $staffXsrf" `
+    -H 'Content-Type: application/json' --data-binary "@$loginFile" "$AppUrl/api/auth/login")
+$mfaRequired = (Test-Path $staffAnswer) -and ((Get-Content $staffAnswer -Raw) -match '"mfaRequired"\s*:\s*true')
+$apiStatus = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -b $staffCookies "$AppUrl/api/users/_health")
+if ($status -eq 200 -and $mfaRequired -and $apiStatus -eq 401) { Write-Ok 'staff code asked: practitioner.dev login 200 with mfaRequired, and no session before the code (/api/users/_health 401)' }
+else { Write-Bad "login as practitioner.dev: POST /api/auth/login returned $status (expected 200 with mfaRequired: $mfaRequired), then /api/users/_health $apiStatus (expected 401, no session)" }
+Remove-Item $cookies, $loginFile, $staffCookies, $staffAnswer -Force -ErrorAction SilentlyContinue
 
 # Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
 # The smoke account is deleted afterwards (Keycloak user, then our rows). JSON bodies go through
