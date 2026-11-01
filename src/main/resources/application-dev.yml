@@ -28,6 +28,19 @@ app:
   mfa:
     # Staff code key (application.properties), dev only: 32 bytes in base64 that read as words
     encryption-key: ${APP_MFA_ENCRYPTION_KEY:devOnlyMfaKeyNotForProductionUseLocalOnlyMA=} # gitleaks:allow
+  documents:
+    # The MinIO of compose.yaml, dev only. The bucket is created on the first upload.
+    storage:
+      endpoint: ${APP_DOCUMENTS_STORAGE_ENDPOINT:http://localhost:9100}
+      access-key: ${APP_DOCUMENTS_STORAGE_ACCESS_KEY:minioadmin}
+      secret-key: ${APP_DOCUMENTS_STORAGE_SECRET_KEY:minioadmin}
+      bucket: ${APP_DOCUMENTS_STORAGE_BUCKET:medlink-documents}
+      create-bucket: ${APP_DOCUMENTS_STORAGE_CREATE_BUCKET:true}
+      require-tls: ${APP_DOCUMENTS_STORAGE_REQUIRE_TLS:false}
+    encryption:
+      # Dev only: 32 bytes in base64 that read as words. Never a production key.
+      keys:
+        1: ${APP_DOCUMENTS_ENCRYPTION_KEY:ZGV2RG9jdW1lbnRzS2V5Q2hhbmdlTWUzMkJ5dGVzISE=} # gitleaks:allow
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:4200}
   # One developer, every call from localhost (React, setup scripts, Newman reruns): the per-IP limits of

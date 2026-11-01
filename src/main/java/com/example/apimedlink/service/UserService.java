@@ -1,11 +1,14 @@
 package com.example.apimedlink.service;
 
+import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.UserRepository;
 import jakarta.persistence.EntityExistsException;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -51,10 +54,37 @@ public class UserService {
                 .build());
     }
 
+    /**
+     * MLink-123/125: a patient that still has documents cannot be deleted. The foreign key refuses
+     * it; the flush is where that refusal surfaces, and the whole delete rolls back. The Keycloak
+     * account is not touched here.
+     */
     public void delete(UUID id) {
         if (!users.existsById(id)) {
             throw new EntityNotFoundException("User " + id + " not found");
         }
-        users.deleteById(id);
+        try {
+            users.deleteById(id);
+            users.flush();
+        } catch (DataIntegrityViolationException failure) {
+            if (heldByDocuments(failure)) {
+                throw new ApiException(HttpStatus.CONFLICT, "DOCUMENTS_PRESENT",
+                        "Ce patient a des documents : supprimez-les avant de supprimer le compte.");
+            }
+            throw failure;
+        }
+    }
+
+    private static boolean heldByDocuments(DataIntegrityViolationException failure) {
+        for (Throwable current = failure; current != null; current = current.getCause()) {
+            String message = current.getMessage();
+            if (message != null && message.contains("patient_documents_patient_id_fkey")) {
+                return true;
+            }
+            if (current.getCause() == current) {
+                break;
+            }
+        }
+        return false;
     }
 }

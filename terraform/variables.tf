@@ -84,6 +84,40 @@ variable "mfa_encryption_key" {
   sensitive   = true
 }
 
+variable "documents_storage_endpoint" {
+  description = "URL du stockage S3/MinIO externe des documents, obligatoirement en HTTPS (ex: https://minio.example.com)"
+  type        = string
+}
+
+variable "documents_storage_access_key" {
+  description = "Clé d'accès au stockage S3/MinIO des documents"
+  type        = string
+  sensitive   = true
+}
+
+variable "documents_storage_secret_key" {
+  description = "Clé secrète du stockage S3/MinIO des documents"
+  type        = string
+  sensitive   = true
+}
+
+variable "documents_storage_bucket" {
+  description = "Bucket S3/MinIO des documents patients (créé hors Terraform)"
+  type        = string
+}
+
+variable "documents_storage_create_bucket" {
+  description = "Créer le bucket au démarrage de l'API (false en production : le provisioning le gère)"
+  type        = bool
+  default     = false
+}
+
+variable "documents_encryption_key" {
+  description = "Clé AES-256 des documents patients (MLink-9) : 32 octets en base64 (openssl rand -base64 32)"
+  type        = string
+  sensitive   = true
+}
+
 variable "mail_host" {
   description = "Serveur SMTP de production"
   type        = string

@@ -281,6 +281,7 @@ if (Test-Path '.env') {
 } else {
     $content = Get-Content '.env.example' -Raw
     $content = $content -replace "`r`n", "`n"
+    $minioPassword = New-Secret
     $generated = @{
         POSTGRES_PASSWORD       = New-Secret
         KEYCLOAK_DB_PASSWORD    = New-Secret
@@ -289,6 +290,9 @@ if (Test-Path '.env') {
         KC_ADMIN_CLIENT_SECRET  = New-Secret
         APP_MFA_ENCRYPTION_KEY  = New-Key
         KC_DEV_USERS_PASSWORD   = $DevUsersPassword
+        MINIO_ROOT_PASSWORD     = $minioPassword
+        APP_DOCUMENTS_STORAGE_SECRET_KEY = $minioPassword
+        APP_DOCUMENTS_ENCRYPTION_KEY     = New-Key
     }
     foreach ($key in $generated.Keys) {
         $content = [regex]::Replace($content, "(?m)^$key=.*$", "$key=$($generated[$key])")
@@ -303,14 +307,15 @@ $added = @()
 foreach ($key in (Read-DotEnv '.env.example').Keys) {
     if ($envValues.ContainsKey($key)) { continue }
     $value = (Read-DotEnv '.env.example')[$key]
-    if ($key -eq 'APP_MFA_ENCRYPTION_KEY') { $value = New-Key }
+    if ($key -in @('APP_MFA_ENCRYPTION_KEY', 'APP_DOCUMENTS_ENCRYPTION_KEY')) { $value = New-Key }
     elseif ($key -like '*SECRET*' -or $key -like '*PASSWORD*') { $value = New-Secret }
     [System.IO.File]::AppendAllText((Join-Path $Repo '.env'), "`n$key=$value", (New-Object System.Text.UTF8Encoding($false)))
     $added += $key
 }
 if ($added) { Write-Ok "added to .env: $($added -join ', ')" }
 $envValues = Read-DotEnv '.env'
-foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KC_ADMIN_CLIENT_SECRET', 'APP_MFA_ENCRYPTION_KEY', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD') {
+foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KC_ADMIN_CLIENT_SECRET', 'APP_MFA_ENCRYPTION_KEY', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD',
+    'MINIO_ROOT_USER', 'MINIO_ROOT_PASSWORD', 'APP_DOCUMENTS_ENCRYPTION_KEY') {
     if (-not $envValues[$key] -or $envValues[$key] -like 'change-me*') {
         if ($FullStack) { Stop-Setup "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." }
     }
@@ -338,7 +343,7 @@ Stop-Containers -Volumes:$Reset
 if ($Reset) { Write-Ok 'volumes deleted: Keycloak will import the realm from scratch' }
 
 $busy = @()
-$ports = @(8080, 8180, 1025, 8025)   # API, Keycloak, Mailpit SMTP and inbox
+$ports = @(8080, 8180, 1025, 8025, 9100)   # API, Keycloak, Mailpit SMTP and inbox, MinIO S3 API
 if ($FullStack) {
     # Host side only: inside the compose network the API still reaches postgres:5432.
     $pgPort = 5432

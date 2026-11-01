@@ -278,7 +278,8 @@ if [ -f .env ]; then
 else
     tr -d '\r' < .env.example | awk \
         -v pg="$(new_secret)" -v kcdb="$(new_secret)" -v kcadmin="$(new_secret)" \
-        -v bff="$(new_secret)" -v kcapi="$(new_secret)" -v mfa="$(new_key)" -v users="$DEV_USERS_PASSWORD" '
+        -v bff="$(new_secret)" -v kcapi="$(new_secret)" -v mfa="$(new_key)" -v users="$DEV_USERS_PASSWORD" \
+        -v minio="$(new_secret)" -v documents="$(new_key)" '
         /^POSTGRES_PASSWORD=/       { print "POSTGRES_PASSWORD=" pg; next }
         /^KEYCLOAK_DB_PASSWORD=/    { print "KEYCLOAK_DB_PASSWORD=" kcdb; next }
         /^KEYCLOAK_ADMIN_PASSWORD=/ { print "KEYCLOAK_ADMIN_PASSWORD=" kcadmin; next }
@@ -286,6 +287,9 @@ else
         /^KC_ADMIN_CLIENT_SECRET=/  { print "KC_ADMIN_CLIENT_SECRET=" kcapi; next }
         /^APP_MFA_ENCRYPTION_KEY=/  { print "APP_MFA_ENCRYPTION_KEY=" mfa; next }
         /^KC_DEV_USERS_PASSWORD=/   { print "KC_DEV_USERS_PASSWORD=" users; next }
+        /^MINIO_ROOT_PASSWORD=/     { print "MINIO_ROOT_PASSWORD=" minio; next }
+        /^APP_DOCUMENTS_STORAGE_SECRET_KEY=/ { print "APP_DOCUMENTS_STORAGE_SECRET_KEY=" minio; next }
+        /^APP_DOCUMENTS_ENCRYPTION_KEY=/ { print "APP_DOCUMENTS_ENCRYPTION_KEY=" documents; next }
         { print }' > .env
     chmod 600 .env
     ok '.env created with random secrets (git-ignored, never commit it)'
@@ -295,7 +299,7 @@ ADDED=''
 for key in $(tr -d '\r' < .env.example | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do
     grep -q "^$key=" .env && continue
     case "$key" in
-        APP_MFA_ENCRYPTION_KEY) value="$(new_key)" ;;
+        APP_MFA_ENCRYPTION_KEY | APP_DOCUMENTS_ENCRYPTION_KEY) value="$(new_key)" ;;
         *SECRET* | *PASSWORD*) value="$(new_secret)" ;;
         *) value="$(tr -d '\r' < .env.example | sed -n "s/^$key=//p" | head -n 1)" ;;
     esac
@@ -304,7 +308,8 @@ for key in $(tr -d '\r' < .env.example | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.
 done
 [ -n "$ADDED" ] && ok "added to .env:$ADDED"
 if [ "$FULL_STACK" -eq 1 ]; then
-    for key in KC_BFF_CLIENT_SECRET KC_ADMIN_CLIENT_SECRET APP_MFA_ENCRYPTION_KEY KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD; do
+    for key in KC_BFF_CLIENT_SECRET KC_ADMIN_CLIENT_SECRET APP_MFA_ENCRYPTION_KEY KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD \
+        MINIO_ROOT_USER MINIO_ROOT_PASSWORD APP_DOCUMENTS_ENCRYPTION_KEY; do
         value="$(read_env "$key")"
         case "$value" in
             '' | change-me*) abort "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." ;;
@@ -341,7 +346,7 @@ else
     stop_containers
 fi
 
-PORTS='8080 8180 1025 8025'   # API, Keycloak, Mailpit SMTP and inbox
+PORTS='8080 8180 1025 8025 9100'   # API, Keycloak, Mailpit SMTP and inbox, MinIO S3 API
 if [ "$FULL_STACK" -eq 1 ]; then
     # Host side only: inside the compose network the API still reaches postgres:5432.
     PG_PORT=5432

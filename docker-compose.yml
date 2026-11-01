@@ -36,6 +36,17 @@ services:
       KEYCLOAK_CLIENT_SECRET: ${KC_BFF_CLIENT_SECRET:?KC_BFF_CLIENT_SECRET must be set}
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KC_ADMIN_CLIENT_SECRET:?KC_ADMIN_CLIENT_SECRET must be set}
       APP_MFA_ENCRYPTION_KEY: ${APP_MFA_ENCRYPTION_KEY:?APP_MFA_ENCRYPTION_KEY must be set}
+      # Patient documents (MLink-9): the local MinIO service below by default. A deployment with an
+      # external object store overrides the endpoint/bucket flags and keeps the same credentials
+      # (MINIO_ROOT_USER/PASSWORD) or the Terraform path (see terraform/variables.tf).
+      APP_DOCUMENTS_ENCRYPTION_KEY: ${APP_DOCUMENTS_ENCRYPTION_KEY:?APP_DOCUMENTS_ENCRYPTION_KEY must be set}
+      APP_DOCUMENTS_STORAGE_ENDPOINT: ${APP_DOCUMENTS_STORAGE_ENDPOINT:-http://minio:9100}
+      APP_DOCUMENTS_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set}
+      APP_DOCUMENTS_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}
+      APP_DOCUMENTS_STORAGE_BUCKET: ${APP_DOCUMENTS_STORAGE_BUCKET:-medlink-documents}
+      APP_DOCUMENTS_STORAGE_CREATE_BUCKET: ${APP_DOCUMENTS_STORAGE_CREATE_BUCKET:-true}
+      # Local MinIO speaks plain HTTP; staging/prod set this to true with an https:// endpoint.
+      APP_DOCUMENTS_STORAGE_REQUIRE_TLS: ${APP_DOCUMENTS_STORAGE_REQUIRE_TLS:-false}
       # Dev and local runs: Mailpit below. Staging/prod: the real SMTP server.
       MAIL_HOST: ${MAIL_HOST:-mailpit}
       MAIL_PORT: ${MAIL_PORT:-1025}
@@ -49,6 +60,8 @@ services:
       postgres:
         condition: service_healthy
       keycloak:
+        condition: service_healthy
+      minio:
         condition: service_healthy
 
   # Keycloak has its own database (separate container + volume), never the app's one.
@@ -112,6 +125,29 @@ services:
       - '1025:1025'
       - '8025:8025'
 
+  # Patient documents (MLink-9): local S3-compatible object store for the self-hosted/CD compose
+  # topology. Credentials are required, never generated defaults; only the S3 port is published,
+  # the console stays on the private network. Staging/prod can point the API at an external HTTPS
+  # MinIO instead (APP_DOCUMENTS_STORAGE_ENDPOINT), the Terraform path never creates MinIO.
+  minio:
+    image: ghcr.io/coollabsio/minio@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9
+    command: 'server --address :9100 --console-address :9101 /data'
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}
+      MINIO_BROWSER: 'off'
+    ports:
+      - '127.0.0.1:9100:9100'
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      # The image ships mc, not curl/wget: wait for the local alias to report the server ready.
+      test: ['CMD-SHELL', 'mc alias set local http://127.0.0.1:9100 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 && mc ready local']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   prometheus:
     image: prom/prometheus:v3.15.0
     volumes:
@@ -125,3 +161,4 @@ services:
 volumes:
   pgdata:
   keycloak-db-data:
+  minio-data:

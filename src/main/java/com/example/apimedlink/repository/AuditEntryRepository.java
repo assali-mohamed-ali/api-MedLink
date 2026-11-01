@@ -10,5 +10,7 @@ public interface AuditEntryRepository extends Repository<AuditEntry, UUID> {
 
     AuditEntry save(AuditEntry entry);
 
+    AuditEntry saveAndFlush(AuditEntry entry);
+
     List<AuditEntry> findByUserIdOrderByTimestampDesc(UUID userId);
 }

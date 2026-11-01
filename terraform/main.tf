@@ -52,6 +52,15 @@ resource "docker_container" "app" {
     "KEYCLOAK_ADMIN_CLIENT_ID=${var.keycloak_admin_client_id}",
     "KEYCLOAK_ADMIN_CLIENT_SECRET=${var.keycloak_admin_client_secret}",
     "APP_MFA_ENCRYPTION_KEY=${var.mfa_encryption_key}",
+    # Patient documents (MLink-9): external S3-compatible MinIO over HTTPS. Terraform does not
+    # create MinIO here: the bucket and credentials are managed outside this single-container stack.
+    "APP_DOCUMENTS_ENCRYPTION_KEY=${var.documents_encryption_key}",
+    "APP_DOCUMENTS_STORAGE_ENDPOINT=${var.documents_storage_endpoint}",
+    "APP_DOCUMENTS_STORAGE_ACCESS_KEY=${var.documents_storage_access_key}",
+    "APP_DOCUMENTS_STORAGE_SECRET_KEY=${var.documents_storage_secret_key}",
+    "APP_DOCUMENTS_STORAGE_BUCKET=${var.documents_storage_bucket}",
+    "APP_DOCUMENTS_STORAGE_CREATE_BUCKET=${var.documents_storage_create_bucket}",
+    "APP_DOCUMENTS_STORAGE_REQUIRE_TLS=true",
     "MAIL_HOST=${var.mail_host}",
     "MAIL_PORT=${var.mail_port}",
     "MAIL_USERNAME=${var.mail_username}",

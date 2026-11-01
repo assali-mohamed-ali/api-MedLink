@@ -2,6 +2,7 @@ package com.example.apimedlink.exception;
 
 import jakarta.persistence.EntityExistsException;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.validation.ConstraintViolationException;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import org.slf4j.Logger;
@@ -11,9 +12,16 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpMediaTypeNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.HandlerMethodValidationException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.MultipartException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
 /**
  * Error body: {@code {timestamp, status, error, code, message, details}}. React reacts to
@@ -58,6 +66,42 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, Object>> unreadable(HttpMessageNotReadableException ex) {
         return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "La requête est mal formée.", null);
+    }
+
+    /** MLink-123/125: a file over the configured multipart limit, before the controller runs. */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Map<String, Object>> tooLarge(MaxUploadSizeExceededException ex) {
+        return body(HttpStatus.CONTENT_TOO_LARGE, "FILE_TOO_LARGE",
+                "Le fichier dépasse la taille maximale de 10 Mo.", null);
+    }
+
+    /** A missing title/file part, a missing query parameter or a malformed multipart body. */
+    @ExceptionHandler({
+        MissingServletRequestPartException.class,
+        MissingServletRequestParameterException.class,
+        MultipartException.class
+    })
+    public ResponseEntity<Map<String, Object>> invalidRequest(Exception ex) {
+        return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "La requête est incomplète.", null);
+    }
+
+    /** A path/query value of the wrong type (e.g. size=abc, a document id that is not a UUID). */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, Object>> typeMismatch(MethodArgumentTypeMismatchException ex) {
+        return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "La requête est mal formée.", null);
+    }
+
+    /** A value rejected by a constraint declared on the controller itself (page, size...). */
+    @ExceptionHandler({ConstraintViolationException.class, HandlerMethodValidationException.class})
+    public ResponseEntity<Map<String, Object>> constraintViolation(Exception ex) {
+        return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Certains champs sont invalides.", null);
+    }
+
+    /** A body whose media type the endpoint does not accept (a document upload is multipart only). */
+    @ExceptionHandler(HttpMediaTypeNotSupportedException.class)
+    public ResponseEntity<Map<String, Object>> unsupportedMediaType(HttpMediaTypeNotSupportedException ex) {
+        return body(HttpStatus.UNSUPPORTED_MEDIA_TYPE, "UNSUPPORTED_MEDIA_TYPE",
+                "Ce type de contenu n'est pas accepté.", null);
     }
 
     /** Logged in full here; the client only learns that something went wrong (no SQL, no values). */

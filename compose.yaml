@@ -86,6 +86,28 @@ services:
       - '1025:1025'
       - '8025:8025'
 
+  # Patient documents (MLink-9): local S3-compatible object store. The API on the host uses
+  # http://localhost:9100; only the S3 port is published, the console stays on the private network.
+  # Fixed dev-only credentials, shared by the API values below; never used outside dev.
+  minio:
+    image: 'ghcr.io/coollabsio/minio@sha256:69b55a1c1c5dc285ce04db96689f5b2102317fc77a50680a1874ca6efd1c87f9'
+    command: 'server --address :9100 --console-address :9101 /data'
+    environment:
+      - 'MINIO_ROOT_USER=minioadmin' # gitleaks:allow
+      - 'MINIO_ROOT_PASSWORD=minioadmin' # gitleaks:allow
+      - 'MINIO_BROWSER=off'
+    ports:
+      - '127.0.0.1:9100:9100'
+    volumes:
+      - 'minio-data:/data'
+    healthcheck:
+      # The image ships mc, not curl/wget: wait for the local alias to report the server ready.
+      test: ['CMD-SHELL', 'mc alias set local http://127.0.0.1:9100 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD" >/dev/null 2>&1 && mc ready local']
+      interval: 5s
+      timeout: 5s
+      retries: 12
+      start_period: 10s
+
   # Optional full stack: docker compose --profile full up --build
   # The default profile stays A (API on the host), so spring-boot:run never starts this container.
   app:
@@ -106,6 +128,14 @@ services:
       - 'KEYCLOAK_CLIENT_SECRET=dev-only-medlink-bff-secret'
       - 'KEYCLOAK_ADMIN_CLIENT_SECRET=dev-only-medlink-admin-secret'
       - 'APP_MFA_ENCRYPTION_KEY=devOnlyMfaKeyNotForProductionUseLocalOnlyMA=' # gitleaks:allow
+      # Patient documents (MLink-9): local MinIO above, fixed dev-only values.
+      - 'APP_DOCUMENTS_ENCRYPTION_KEY=ZGV2T25seURvY3VtZW50c0tleU5vdEZvclByb2QhISE=' # gitleaks:allow
+      - 'APP_DOCUMENTS_STORAGE_ENDPOINT=http://minio:9100'
+      - 'APP_DOCUMENTS_STORAGE_ACCESS_KEY=minioadmin' # gitleaks:allow
+      - 'APP_DOCUMENTS_STORAGE_SECRET_KEY=minioadmin' # gitleaks:allow
+      - 'APP_DOCUMENTS_STORAGE_BUCKET=medlink-documents'
+      - 'APP_DOCUMENTS_STORAGE_CREATE_BUCKET=true'
+      - 'APP_DOCUMENTS_STORAGE_REQUIRE_TLS=false'
       - 'MAIL_HOST=mailpit'
       - 'MAIL_PORT=1025'
       - 'MAIL_USERNAME='
@@ -119,7 +149,10 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      minio:
+        condition: service_healthy
 
 volumes:
   pgdata:
   keycloak-db-data:
+  minio-data:

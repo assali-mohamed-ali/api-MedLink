@@ -51,7 +51,12 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/users",                    L, F, F, O),
             new Rule("GET",    "/api/users/{id}",               L, F, F, O),
             new Rule("DELETE", "/api/users/{id}",               L, F, F, O),
-            new Rule("GET",    "/api/users/_health",            L, O, O, O));
+            new Rule("GET",    "/api/users/_health",            L, O, O, O),
+            // MLink-123/125: upload is staff-only; list is owner-or-staff; a download by another
+            // patient is a 404 (OPEN), never a 403 that would confirm the document exists
+            new Rule("POST",   "/api/patients/{patientId}/documents",                  L, F, F, O),
+            new Rule("GET",    "/api/patients/{patientId}/documents",                  L, F, F, O),
+            new Rule("GET",    "/api/patients/{patientId}/documents/{documentId}",     L, O, F, O));
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")
@@ -119,13 +124,22 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
 
     /**
      * Calls a route as React would, always with the CSRF header: a 403 here is a role refusal, never a
-     * missing token. {id} is a random UUID (someone else's); writes send an empty JSON body.
+     * missing token. Every placeholder is a random UUID (someone else's); a document upload is a real
+     * multipart request (a staff caller must reach the controller and get 404, not 415), other writes
+     * send an empty JSON body.
      */
     private static HttpResponse<String> send(Browser browser, String method, String path) throws Exception {
         if (browser.cookies.value("XSRF-TOKEN") == null) {
             browser.call("/api/auth/csrf");
         }
-        HttpRequest request = HttpRequest.newBuilder(URI.create(appUrl(path.replace("{id}", UUID.randomUUID().toString()))))
+        String resolved = path.replace("{id}", UUID.randomUUID().toString())
+                .replace("{patientId}", UUID.randomUUID().toString())
+                .replace("{documentId}", UUID.randomUUID().toString());
+        if (method.equals("POST") && path.endsWith("/documents")) {
+            return browser.postMultipart(resolved, "Access matrix", "matrix.pdf",
+                    "application/pdf", DocumentTestFiles.PDF);
+        }
+        HttpRequest request = HttpRequest.newBuilder(URI.create(appUrl(resolved)))
                 .header("X-Forwarded-For", browser.forwardedFor)
                 .header("X-XSRF-TOKEN", browser.cookies.value("XSRF-TOKEN"))
                 .header("Content-Type", "application/json")

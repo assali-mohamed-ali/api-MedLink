@@ -1,7 +1,10 @@
 package com.example.apimedlink.functional;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import com.example.apimedlink.TestcontainersConfiguration;
 import com.example.apimedlink.service.Totp;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.net.CookieHandler;
 import java.net.HttpCookie;
@@ -293,6 +296,75 @@ public abstract class FunctionalTestBase {
             return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
         }
 
+        /**
+         * A multipart upload as React does: CSRF header, a {@code title} part and a {@code file} part.
+         *
+         * <p>A null title omits the title part; a null filename omits the file part (missing-field cases).
+         * An empty byte array still sends an empty file (empty-file case). The filename is escaped for the
+         * quoted multipart header, so a test can prove the server sanitizes path separators and quotes.
+         */
+        HttpResponse<String> postMultipart(
+                String path, String title, String filename, String contentType, byte[] bytes) throws Exception {
+            if (cookies.value("XSRF-TOKEN") == null) {
+                call("/api/auth/csrf");
+            }
+            String boundary = "----MedLinkBoundary" + UUID.randomUUID();
+            ByteArrayOutputStream body = new ByteArrayOutputStream();
+            if (title != null) {
+                body.writeBytes(("--" + boundary + "\r\n"
+                                + "Content-Disposition: form-data; name=\"title\"\r\n"
+                                + "Content-Type: text/plain; charset=UTF-8\r\n\r\n"
+                                + title + "\r\n")
+                        .getBytes(StandardCharsets.UTF_8));
+            }
+            if (filename != null) {
+                body.writeBytes(("--" + boundary + "\r\n"
+                                + "Content-Disposition: form-data; name=\"file\"; filename=\""
+                                + quoted(filename) + "\"\r\n"
+                                + "Content-Type: "
+                                + (contentType == null ? MediaType.APPLICATION_OCTET_STREAM_VALUE : contentType)
+                                + "\r\n\r\n")
+                        .getBytes(StandardCharsets.UTF_8));
+                body.writeBytes(bytes == null ? new byte[0] : bytes);
+                body.writeBytes("\r\n".getBytes(StandardCharsets.UTF_8));
+            }
+            body.writeBytes(("--" + boundary + "--\r\n").getBytes(StandardCharsets.UTF_8));
+
+            HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(appUrl(path)))
+                    .header("X-Forwarded-For", forwardedFor)
+                    .header(HttpHeaders.CONTENT_TYPE, "multipart/form-data; boundary=" + boundary)
+                    .POST(HttpRequest.BodyPublishers.ofByteArray(body.toByteArray()));
+            String csrf = cookies.value("XSRF-TOKEN");
+            if (csrf != null) {
+                request.header("X-XSRF-TOKEN", csrf);
+            }
+            return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        }
+
+        /** The raw bytes of a response (documents are binary). */
+        HttpResponse<byte[]> getBytes(String path) throws Exception {
+            return http.send(get(appUrl(path)), HttpResponse.BodyHandlers.ofByteArray());
+        }
+
+        /** A DELETE from React, with the CSRF header. */
+        HttpResponse<String> delete(String path) throws Exception {
+            if (cookies.value("XSRF-TOKEN") == null) {
+                call("/api/auth/csrf");
+            }
+            HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(appUrl(path)))
+                    .header("X-Forwarded-For", forwardedFor)
+                    .DELETE();
+            String csrf = cookies.value("XSRF-TOKEN");
+            if (csrf != null) {
+                request.header("X-XSRF-TOKEN", csrf);
+            }
+            return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        }
+
+        private static String quoted(String filename) {
+            return filename.replace("\\", "\\\\").replace("\"", "\\\"");
+        }
+
         HttpResponse<String> call(String path) throws Exception {
             return http.send(get(appUrl(path)), HttpResponse.BodyHandlers.ofString());
         }
@@ -547,5 +619,21 @@ public abstract class FunctionalTestBase {
 
     static String uniqueEmail(String prefix) {
         return prefix + "-" + UUID.randomUUID().toString().substring(0, 8) + "@example.com";
+    }
+
+    /**
+     * MLink-123: a document download is an attachment with an RFC 5987 filename, so a browser saves it
+     * under the original name and never renders it as a page.
+     */
+    static void assertAttachmentContentDisposition(HttpResponse<?> response, String filename) {
+        String disposition = response.headers().firstValue("Content-Disposition")
+                .orElseThrow(() -> new AssertionError("no Content-Disposition header"));
+        assertThat(disposition).startsWith("attachment");
+        assertThat(disposition).containsIgnoringCase("filename*=UTF-8''" + rfc5987(filename));
+    }
+
+    /** RFC 5987 percent-encoding (space is %20, not URLEncoder's +). */
+    private static String rfc5987(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8).replace("+", "%20");
     }
 }

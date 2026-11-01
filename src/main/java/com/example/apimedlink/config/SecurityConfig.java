@@ -3,6 +3,7 @@ package com.example.apimedlink.config;
 import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.security.JsonAccessDeniedHandler;
 import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
+import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.security.RouteWords;
 import com.example.apimedlink.security.SessionValidityFilter;
 import com.example.apimedlink.service.AuditService;
@@ -80,6 +81,12 @@ public class SecurityConfig {
                                 "/api/auth/mfa/setup",
                                 "/api/auth/mfa/verify")
                         .permitAll()
+                        // MLink-123/125: staff upload; staff or the owner patient list and download.
+                        // The controller repeats the rule with @PreAuthorize, and the service checks ownership.
+                        .requestMatchers(HttpMethod.POST, "/api/patients/*/documents")
+                        .hasRole(Roles.ADMINISTRATIVE_STAFF)
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/documents", "/api/patients/*/documents/*")
+                        .hasAnyRole(Roles.PATIENT, Roles.ADMINISTRATIVE_STAFF)
                         .anyRequest()
                         .authenticated())
                 // Every logged-in call checks Keycloak still accepts the account (GitHub #28)
