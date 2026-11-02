@@ -188,6 +188,12 @@ public class DocumentService {
      * @throws com.example.apimedlink.exception.AuditUnavailableException when the read cannot be audited
      */
     public DownloadedDocument download(UUID patientId, UUID documentId) {
+        // A patient may only read their own documents. A stranger gets the same 404 as an unknown
+        // document, before the lookup, so the response cannot confirm that the document exists.
+        if (!currentUser.hasRole(Roles.ADMINISTRATIVE_STAFF)
+                && !patientId.equals(currentUser.idOrNull())) {
+            throw new EntityNotFoundException("Document " + documentId + " not found");
+        }
         PatientDocument document = transactions.execute(status -> documents
                 .findByIdAndPatientId(documentId, patientId)
                 .orElseThrow(() -> new EntityNotFoundException("Document " + documentId + " not found")));

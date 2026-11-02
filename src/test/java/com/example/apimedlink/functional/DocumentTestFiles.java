@@ -20,17 +20,11 @@ public final class DocumentTestFiles {
             .decode("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=");
 
     /** Small JPEG (SOI … EOI). */
-    static final byte[] JPEG = Base64.getDecoder()
-            .decode("/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAP//////////////////////////////////////////"
-                    + "////////////////////////////////////////////////////2wBDAf//////////////////"
-                    + "//////////////////////////////////////////////////wAARCAABAAEDASIAAhEBAxEB/8QA"
-                    + "FQABAQAAAAAAAAAAAAAAAAAAAAX/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oADAMBAAIQAxAA"
-                    + "AAH/xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEBAAEFAqf/xAAUEQEAAAAAAAAAAAAAAAAA"
-                    + "AAAA/9oACAEDAQE/AX//xAAUEQEAAAAAAAAAAAAAAAAAAAAA/9oACAECAQE/AX//xAAUEAEA"
-                    + "AAAAAAAAAAAAAAAAAAA/9oACAEBAAY/AX//xAAUEAEAAAAAAAAAAAAAAAAAAAAA/9oACAEB"
-                    + "AAE/IV//2gAMAwEAAgADAAAAEP/EABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQMBAT8QH//E"
-                    + "ABQRAQAAAAAAAAAAAAAAAAAAABD/2gAIAQIBAT8QH//EABQQAQAAAAAAAAAAAAAAAAAAABD/"
-                    + "2gAIAQEAAT8QH//Z");
+    /** Minimal JPEG stream header: the API only needs the first three magic bytes. */
+    static final byte[] JPEG = {
+        (byte) 0xff, (byte) 0xd8, (byte) 0xff, (byte) 0xe0,
+        0x00, 0x10, 'J', 'F', 'I', 'F', 0x00
+    };
 
     static final byte[] UNSUPPORTED = "GIF89a\nnot a document".getBytes(StandardCharsets.US_ASCII);
 

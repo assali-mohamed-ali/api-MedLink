@@ -47,6 +47,7 @@ import org.springframework.test.context.DynamicPropertySource;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
+import org.springframework.transaction.support.TransactionTemplate;
 import org.testcontainers.containers.GenericContainer;
 
 /**
@@ -93,6 +94,9 @@ class PatientDocumentFailureIntegrationTest {
     @Autowired
     MockMvc mvc;
 
+    @Autowired
+    TransactionTemplate transactions;
+
     @MockitoSpyBean
     DocumentStorage storage;
 
@@ -128,8 +132,10 @@ class PatientDocumentFailureIntegrationTest {
 
     @Test
     void anAuditFailureOnUploadRollsBackTheMetadataDeletesTheObjectAndRethrows() {
-        doThrow(new AuditUnavailableException("audit down"))
-                .when(audit).recordInCurrentTransaction(any(), anyString(), anyString(), any());
+        // recordInCurrentTransaction is MANDATORY: stubbing it through the Spring proxy needs a
+        // transaction, otherwise the proxy's MANDATORY check fires before Mockito can record the stub.
+        transactions.executeWithoutResult(status -> doThrow(new AuditUnavailableException("audit down"))
+                .when(audit).recordInCurrentTransaction(any(), anyString(), anyString(), any()));
 
         assertThatThrownBy(() -> documents.upload(patientId, "Compte rendu", file()))
                 .isInstanceOfSatisfying(AuditUnavailableException.class, failure -> {

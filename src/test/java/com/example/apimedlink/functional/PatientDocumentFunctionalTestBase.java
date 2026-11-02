@@ -2,34 +2,19 @@ package com.example.apimedlink.functional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-import com.example.apimedlink.TestcontainersConfiguration;
 import java.sql.Date;
 import java.time.LocalDate;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.jdbc.core.JdbcTemplate;
-import org.springframework.test.context.DynamicPropertyRegistry;
-import org.springframework.test.context.DynamicPropertySource;
 
 /**
- * Functional tests for MLink-123/125 need a real object store. The shared MinIO starts lazily only
- * when this class (or one of its subclasses) is loaded, so a non-document functional test never starts
- * it. The endpoint, credentials and bucket are test values, never production ones.
+ * Functional tests for MLink-123/125. They share the one functional-test Spring context and its real
+ * database/Keycloak; {@link FunctionalTestBase.DocumentStorageConfig} supplies the real MinIO adapter,
+ * which starts the container only on the first document operation.
  */
-@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
 abstract class PatientDocumentFunctionalTestBase extends FunctionalTestBase {
-
-    @DynamicPropertySource
-    static void documentProperties(DynamicPropertyRegistry registry) {
-        registry.add("app.documents.storage.endpoint", TestcontainersConfiguration::minioEndpoint);
-        registry.add("app.documents.storage.access-key", () -> TestcontainersConfiguration.MINIO_ACCESS_KEY);
-        registry.add("app.documents.storage.secret-key", () -> TestcontainersConfiguration.MINIO_SECRET_KEY);
-        registry.add("app.documents.storage.bucket", () -> TestcontainersConfiguration.MINIO_BUCKET);
-        registry.add("app.documents.storage.create-bucket", () -> true);
-        registry.add("app.documents.storage.require-tls", () -> false);
-    }
 
     @Autowired
     protected JdbcTemplate db;

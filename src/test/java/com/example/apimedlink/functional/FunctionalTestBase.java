@@ -3,6 +3,9 @@ package com.example.apimedlink.functional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.apimedlink.TestcontainersConfiguration;
+import com.example.apimedlink.document.DocumentProperties;
+import com.example.apimedlink.document.DocumentStorage;
+import com.example.apimedlink.document.MinioDocumentStorage;
 import com.example.apimedlink.service.Totp;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -56,7 +59,11 @@ import tools.jackson.databind.ObjectMapper;
  * the next 30-second code (a code works once), and a test can let the 15-minute code lock run out.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
-@Import({TestcontainersConfiguration.class, FunctionalTestBase.ShiftedClockConfig.class})
+@Import({
+    TestcontainersConfiguration.class,
+    FunctionalTestBase.ShiftedClockConfig.class,
+    FunctionalTestBase.DocumentStorageConfig.class
+})
 public abstract class FunctionalTestBase {
 
     static final String BFF_SECRET = "functional-bff-secret";
@@ -148,6 +155,66 @@ public abstract class FunctionalTestBase {
         @Primary
         Clock shiftedClock() {
             return CLOCK;
+        }
+    }
+
+    /**
+     * The real MinIO adapter, started on the first document operation. Document tests share the one
+     * functional-test Spring context, so they cannot add a second @DynamicPropertySource context:
+     * that would create a second API on the same DEFINED_PORT. A non-document test never performs a
+     * storage operation, so it never starts the container.
+     */
+    @TestConfiguration(proxyBeanMethods = false)
+    static class DocumentStorageConfig {
+        @Bean
+        @Primary
+        DocumentStorage documentStorage() {
+            return new LazyMinioStorage();
+        }
+    }
+
+    static final class LazyMinioStorage implements DocumentStorage {
+
+        private volatile DocumentStorage delegate;
+
+        private DocumentStorage delegate() {
+            DocumentStorage current = delegate;
+            if (current == null) {
+                synchronized (this) {
+                    current = delegate;
+                    if (current == null) {
+                        current = new MinioDocumentStorage(new DocumentProperties.Storage(
+                                TestcontainersConfiguration.minioEndpoint(),
+                                TestcontainersConfiguration.MINIO_ACCESS_KEY,
+                                TestcontainersConfiguration.MINIO_SECRET_KEY,
+                                TestcontainersConfiguration.MINIO_BUCKET,
+                                true,
+                                false));
+                        delegate = current;
+                    }
+                }
+            }
+            return current;
+        }
+
+        @Override
+        public void store(String key, byte[] bytes) {
+            delegate().store(key, bytes);
+        }
+
+        @Override
+        public byte[] load(String key) {
+            return delegate().load(key);
+        }
+
+        @Override
+        public void delete(String key) {
+            delegate().delete(key);
+        }
+
+        @Override
+        public boolean exists(String key) {
+            return delegate().exists(key);
         }
     }
 
