@@ -9,9 +9,19 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
-| 3 | Staff code, TOTP (endpoints 8–9) | **Merged** (#97, MLink-62/63); review round 1 **in review** on `fix/ss3-review-round-1`: see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) | 2026-10-29 |
+| 3 | Staff code, TOTP (endpoints 8–9) | **Done** (MLink-62/63): #97, review round 1 in #99; see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), [#99](https://github.com/assali-mohamed-ali/api-MedLink/pull/99) | 2026-10-29 |
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
+
+**2026-10-29 (evening), updated 2026-10-30:** MLink-127 follow-up and GitHub #65 on `fix/65-swagger-off-in-prod`:
+staging and prod serve neither the API reference UI nor `/v3/api-docs` (404 over HTTP, `ApiDocsExposureIntegrationTest`),
+dev keeps both (DAST runs the dev profile). After #100 (Scalar replaces Swagger UI) the UI is Scalar at `/scalar`:
+`scalar.enabled: false` in staging and prod switches it off on its own (today `springdoc.api-docs.enabled: false` also
+hides it, as a side effect of Scalar's configuration depending on springdoc's; staging mutants: no switch exposes
+`/scalar`, `/scalar/scalar.js` and `/v3/api-docs`; `scalar.enabled: false` alone hides Scalar). The test lists
+`/scalar`, `/scalar/scalar.js` and the old Swagger UI paths, with soft assertions. The DOMPurify 3.4.16 suppression
+of the first version is dropped: Swagger UI is no longer a dependency and Scalar's bundle embeds no DOMPurify.
+No migration, no endpoint.
 
 **2026-10-29:** #97 (MLink-62/63) was merged before its review round 1 reached it, so `master` still has the
 first-enrolment takeover and the `/patients` default group. `fix/ss3-review-round-1` (one PR based on `master`)
