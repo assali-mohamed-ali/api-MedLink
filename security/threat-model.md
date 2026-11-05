@@ -96,7 +96,7 @@ flowchart LR
 | I1 | **The password passes through the API** (password grant) | sent to Keycloak at once and never stored; never logged (`LoginRequest.toString` hides it); TLS on B1 (assumption) | 🟡 accepted | the risk accepted in decision 0001; revisit if passkeys are wanted |
 | I2 | Tokens leak | kept in the server session; `KeycloakTokens.toString` hides them; ID tokens checked: signature (JWKS), issuer, `azp` (`service/KeycloakLoginClient`, `KeycloakLoginClientTest`) | ✅ | |
 | I3 | A user reads another user's data (IDOR) | `security/OwnershipGuard` checks before the lookup, the same 403 whether the id exists or not (`OwnershipFunctionalTest`) | ✅ | practitioner ↔ own patients only: with the appointment domain (MLink-97 onward) |
-| I4 | Metrics and API documentation public in production | actuator limited to `health,info,prometheus`; in staging and prod it is served only on the private management port 9000, which no compose file publishes, and the public port keeps `/livez` and `/readyz` (`{"status":"UP"}` only) (`ManagementPortIntegrationTest`, `ManagementPortConfigTest`, GitHub #49) | 🟡 | Swagger and `/v3/api-docs` still public: GitHub #65 |
+| I4 | Metrics and API documentation public in production | actuator limited to `health,info,prometheus`; in staging and prod it is served only on the private management port 9000, which no compose file publishes, and the public port keeps `/livez` and `/readyz` (`{"status":"UP"}` only) (`ManagementPortIntegrationTest`, `ManagementPortConfigTest`, GitHub #49); the Scalar UI (`/scalar`, `scalar.enabled: false`) and `/v3/api-docs` are off in staging and prod, dev only (`ApiDocsExposureIntegrationTest`, GitHub #65) | ✅ | |
 | I5 | Personal data in logs or the audit trail | no request body, query string, password or token is logged; the audit path keeps only route words and UUIDs (`security/RouteWords`) | ✅ | |
 | I6 | Internal errors leak details | one error shape, `500 INTERNAL_ERROR` without SQL or stack (`exception/GlobalExceptionHandler`, `ErrorBody`) | ✅ | |
 | I7 | Secrets in git or defaults in production | secrets from the environment only; gitleaks before commit and in CI (`secrets-scan.yml`); Keycloak client secrets have no default outside dev | 🟡 | the datasource still falls back to `myuser` / `secret` in staging and prod: GitHub #64 |
@@ -143,7 +143,6 @@ be triggered by someone else (D2).
 |---|---|---|
 | 1 | MFA for admin identities (E4); the staff and practitioner second factor (S2) is in place (MLink-62/63) | GitHub #68 |
 | 1 | No default database credentials outside dev (I7) | GitHub #64 |
-| 2 | API docs not public in production (I4) | GitHub #65 |
 | 2 | Separate database roles for the audit trail (T2) | GitHub #57 |
 | 2 | Logins and account operations in the audit trail (R2) | MLink-114, MLink-72 |
 | 2 | Backups with a tested restore (O3) | GitHub #67 |
