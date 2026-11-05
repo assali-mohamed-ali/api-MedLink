@@ -23,6 +23,11 @@ so a mistaken staging/prod URL cannot lock or unlock a real account; a remote de
 `ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack`. `scripts/check-lockout.test.sh` (offline, fake `curl`, run by CI's
 `build-test`) covers 14 cases, lookalikes included (`localhost.evil.com`, `localhost:8180@evil.com`); two mutants of the
 guard turn it red. The cookie jar is removed in the `EXIT` trap.
+Review of #103 (2026-11-02): the unlock is now checked. It needs an admin token and Keycloak's 204; otherwise it says
+why on stderr and the run fails (exit 1, never `PASS`), at the start (the count would prove nothing), at the end (the
+unlock runs before the result is printed) and in the `EXIT` trap (an interrupted run). The offline test plays a fake
+dev stack: final unlock answered 500 or 401, no admin token, first unlock refused (19 cases); mutants without the status
+check or the token check turn it red. `PAUSE_SECONDS` (default 1.2) lets the test skip the waits.
 
 **2026-10-29:** #97 (MLink-62/63) was merged before its review round 1 reached it, so `master` still has the
 first-enrolment takeover and the `/patients` default group. `fix/ss3-review-round-1` (one PR based on `master`)
