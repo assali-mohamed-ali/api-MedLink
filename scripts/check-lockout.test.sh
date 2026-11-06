@@ -61,6 +61,13 @@ run 'userinfo with a port, localhost:8180@evil.com' 2 KEYCLOAK_URL=http://localh
 run 'lookalike 127.0.0.1.nip.io' 2 KEYCLOAK_URL=http://127.0.0.1.nip.io:8180
 run 'private address' 2 KEYCLOAK_URL=http://10.0.0.5:8180
 run 'opt-in with another value' 2 KEYCLOAK_URL=http://dev-box.lan:8180 ALLOW_REMOTE_DEV_STACK=1
+# A fake "@localhost" after the authority (review of #103): the host ends at the first / ? # or \, so these all go to
+# prod.example.com and must be refused, or the admin and test passwords would be sent there
+run 'fragment #@localhost' 2 KEYCLOAK_URL='https://prod.example.com#@localhost'
+run 'query ?@localhost' 2 KEYCLOAK_URL='https://prod.example.com?@localhost'
+run 'backslash \@localhost' 2 KEYCLOAK_URL='https://prod.example.com\@localhost'
+run 'userinfo and fragment, user@prod#@localhost' 2 KEYCLOAK_URL='https://user@prod.example.com#@localhost'
+run 'API fragment #@localhost' 2 APP_URL='https://prod.example.com#@127.0.0.1'
 
 # The explicit opt-in lets a remote dev stack through
 run 'remote dev stack, opt-in' 1 KEYCLOAK_URL=http://dev-box.lan:8180 APP_URL=http://dev-box.lan:8080 \
