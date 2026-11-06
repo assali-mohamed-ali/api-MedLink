@@ -13,6 +13,12 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-29 (night):** MLink-53, `GET /api/auth/me` (endpoint 6, `feat/mlink-53-auth-me`): the user object of the
+login, read from the session the login opened (the id token and the granted roles), with no Keycloak or database
+call; 401 `UNAUTHENTICATED` without a session, after a logout, or with only a pending code step. React needs it to
+restore who is logged in after a page refresh (the front's MLink-128). Taken over from Ahlem with her agreement. No
+migration. The tests and setup scripts that check a session with `/api/users/_health` can now use it.
+
 **2026-10-29 (evening):** MLink-68 (story MLink-19) on `feat/mlink-68-lockout-check`: `scripts/check-lockout.sh`
 proves the lockout on the running dev stack: 5 wrong passwords 1.2 s apart (Keycloak's quick-login guard would lock
 after 2 otherwise), then the right password is refused (401, like a wrong password: a 423 would reveal that the
@@ -28,6 +34,10 @@ why on stderr and the run fails (exit 1, never `PASS`), at the start (the count 
 unlock runs before the result is printed) and in the `EXIT` trap (an interrupted run). The offline test plays a fake
 dev stack: final unlock answered 500 or 401, no admin token, first unlock refused (19 cases); mutants without the status
 check or the token check turn it red. `PAUSE_SECONDS` (default 1.2) lets the test skip the waits.
+Review of #103 (2026-11-06): the guard read `https://prod.example.com#@localhost` (or `?@`, `\@`) as localhost,
+because it dropped the user-info before the query and fragment: the admin and test passwords would have gone to
+prod. `url_host()` now cuts the host at the first `/`, `?`, `#` or `\` before dropping the user-info; 5 new cases
+(24 in all), red before the fix.
 
 **2026-10-29 (evening), updated 2026-10-30:** MLink-127 follow-up and GitHub #65 on `fix/65-swagger-off-in-prod`:
 staging and prod serve neither the API reference UI nor `/v3/api-docs` (404 over HTTP, `ApiDocsExposureIntegrationTest`),
