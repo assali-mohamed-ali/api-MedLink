@@ -23,7 +23,8 @@ KEYCLOAK_URL="${KEYCLOAK_URL:-http://localhost:8180}"
 # The host of a URL, lower case: no scheme, path, user info or port ("http://a@B:1/x" -> "b", "[::1]" kept)
 url_host() {
     local rest="${1#*://}"
-    rest="${rest%%/*}"
+    # The authority ends at the first / ? # or \ (curl and browsers): cut there first, then drop the user-info
+    rest="${rest%%[/?#\\]*}"
     rest="${rest##*@}"
     case "$rest" in
         \[*) rest="${rest%%]*}]" ;;
