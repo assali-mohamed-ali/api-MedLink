@@ -36,4 +36,13 @@ public interface KeycloakAdminService {
 
     /** Ends every open Keycloak session of this user. Idempotent. */
     void endSessions(UUID id);
+    
+    /**
+     * One page of users (page starts at 0). {@code search} is matched against email and names; empty means
+     * everyone. Each entry carries the path of the group the user is in.
+     */
+    KeycloakUserPage searchUsers(String search, int page, int size);
+
+    /** Puts the user in the given group and takes them out of any other group. Idempotent. */
+    void moveToGroup(UUID id, String groupPath);
 }
