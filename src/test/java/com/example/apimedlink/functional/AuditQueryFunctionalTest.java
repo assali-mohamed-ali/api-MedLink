@@ -68,6 +68,31 @@ class AuditQueryFunctionalTest extends FunctionalTestBase {
         assertThat(staff.call("/api/admin/audit-entries?page=-1").statusCode()).isEqualTo(400);
         assertThat(staff.call("/api/admin/audit-entries?action=UNKNOWN_ACTION").statusCode()).isEqualTo(400);
     }
+        @Test
+    void malformedPageIsRejectedWithValidationFailed() throws Exception {
+        assertValidationFailed("page=abc", "page");
+    }
+
+    @Test
+    void malformedUserIdIsRejectedWithValidationFailed() throws Exception {
+        assertValidationFailed("userId=not-a-uuid", "userId");
+    }
+
+    @Test
+    void malformedFromDateIsRejectedWithValidationFailed() throws Exception {
+        assertValidationFailed("from=not-a-date", "from");
+    }
+
+    private void assertValidationFailed(String query, String field) throws Exception {
+        Browser staff = new Browser().login("staff.dev@medlink.local", DEV_USERS_PASSWORD);
+
+        var response = staff.call("/api/admin/audit-entries?" + query);
+
+        assertThat(response.statusCode()).isEqualTo(400);
+        JsonNode body = json.readTree(response.body());
+        assertThat(body.path("code").asText()).isEqualTo("VALIDATION_FAILED");
+        assertThat(body.path("details").has(field)).isTrue();
+    }
 
     private void insertAudit(UUID userId, Instant timestamp, String resourceId) {
         db.update("""
