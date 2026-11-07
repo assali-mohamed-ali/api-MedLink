@@ -1,5 +1,6 @@
 package com.example.apimedlink.controller;
 
+import com.example.apimedlink.dto.SlotFiltersResponse;
 import com.example.apimedlink.dto.SlotSearchResponse;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.mapper.SlotMapper;
@@ -73,6 +74,13 @@ public class SlotController {
         }
         return SlotMapper.toSearchResponse(
                 service.searchFree(from, to, clinicId, practitionerId, specialtyId, page, size));
+    }
+
+    /** The lists of the search form (MLink-163): clinics, specialties, practitioners with their clinics. */
+    @GetMapping("/filters")
+    @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
+    public SlotFiltersResponse filters() {
+        return SlotMapper.toFiltersResponse(service.filters());
     }
 
     /** A required ISO-8601 instant ({@code 2026-10-27T09:00:00Z}); null and an error when missing or unreadable. */
