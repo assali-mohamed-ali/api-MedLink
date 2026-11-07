@@ -67,9 +67,18 @@ public class AdminUserService {
                 new KeycloakUser(id, normalized, firstName, lastName, true, false), groupPath);
     }
 
-    /** @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404) */
+    /**
+     * Moves the user to the role's Keycloak group, then ends their open sessions the way a forced password
+     * reset does: the API refuses the old sessions at once (session_revocations), then Keycloak signs them out.
+     * A session keeps the roles it was opened with, so without this a demoted admin would stay admin until the
+     * session ends. Every step is idempotent: after an error staff send the change again.
+     *
+     * @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404)
+     */
     public void changeRole(UUID id, String role) {
         keycloak.moveToGroup(id, staffGroupOf(role));
+        revocations.revoke(id);
+        keycloak.endSessions(id);
     }
 
     /**

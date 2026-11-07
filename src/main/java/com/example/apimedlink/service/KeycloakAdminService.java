@@ -36,7 +36,7 @@ public interface KeycloakAdminService {
 
     /** Ends every open Keycloak session of this user. Idempotent. */
     void endSessions(UUID id);
-    
+
     /**
      * One page of users (page starts at 0). {@code search} is matched against email and names; empty means
      * everyone. Each entry carries the path of the group the user is in.

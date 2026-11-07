@@ -23,6 +23,9 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import static org.mockito.Mockito.inOrder;
+import com.example.apimedlink.repository.SessionRevocationStore;
+import org.mockito.InOrder;
 
 /** MLink-69: account management by staff. Real database; Keycloak is a mock. */
 @SpringBootTest
@@ -34,6 +37,9 @@ class AdminUserServiceTest {
 
     @Autowired
     UserRepository users;
+
+    @Autowired
+    SessionRevocationStore revocations;
 
     @MockitoBean
     KeycloakAdminService keycloak;
@@ -130,5 +136,17 @@ class AdminUserServiceTest {
         assertThatThrownBy(() -> admin.changeRole(keycloakId, Roles.PATIENT)).isInstanceOf(ApiException.class);
 
         verify(keycloak, never()).moveToGroup(keycloakId, "/patients");
+    }
+
+    @Test
+    void aRoleChangeMovesTheUserThenRevokesAndEndsTheirSessions() {
+        users.save(User.builder().id(keycloakId).username(email).email(email).build());
+
+        admin.changeRole(keycloakId, Roles.PRACTITIONER);
+
+        InOrder order = inOrder(keycloak);
+        order.verify(keycloak).moveToGroup(keycloakId, "/practitioners");
+        order.verify(keycloak).endSessions(keycloakId);
+        assertThat(revocations.revokedAt(keycloakId)).as("the API's own mark").isPresent();
     }
 }
