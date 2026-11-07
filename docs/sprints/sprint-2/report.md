@@ -2,6 +2,37 @@
 
 Updated by every sub-sprint PR. Newest information first inside each section.
 
+## MLink-26 — Agenda multi-sites (back-end)
+
+**Tickets:** MLink-133, 134, 135, 136, 137, 138, 141. Front (MLink-139, 140) in `web-MedLink`.
+
+**Routes** (class-level `@PreAuthorize(PRACTITIONER)`; the practitioner is always the caller):
+
+| Route | Answer |
+|---|---|
+| `GET /api/practitioner/agenda?from=&to=` | `{clinics, items}`; period up to 31 days; past slots included; patient names only |
+| `POST /api/practitioner/slots` | 201 + the slot; 409 `SLOT_OVERLAP`; 400 `VALIDATION_FAILED` |
+| `PATCH /api/practitioner/slots/{id}` | `{"status":"OPEN"\|"CLOSED"}`; 409 `SLOT_BOOKED`, `SLOT_IN_PAST`; 403 if not the caller's slot |
+
+**Decisions**
+- V14 inserts the three reference clinics (no endpoint creates a clinic) and adds the `CLOSED` slot status.
+- The overlap is enforced by the database (`slots_no_overlap`); the application check only names the slot in the way, and a lost race is translated to the same 409 (never a 500).
+- A closed slot keeps its time range: reopening it frees the time (decision D4, to confirm).
+- Closing is one conditional `UPDATE` (free and no active appointment): a concurrent booking cannot end on a closed slot. The booking flow (MLink-8) needs the same guard.
+- Spring validates before `@PreAuthorize`, so nothing is `@Valid` or required: a patient gets 403, never 400.
+- The agenda is not audited per read (it is not the medical record); slot changes are (`SLOT_OPENED`, `SLOT_CLOSED`); refusals are (`ACCESS_DENIED`).
+- Duration 10 min to 8 h and horizon 180 days are assumptions (constants in `AgendaService`), not in the cahier des charges.
+
+**Proofs**
+- Repository queries: `SlotRepositoryAgendaTest` (9 tests) with `AppointmentSchemaTest`, `AppointmentDomainRepositoryTest` and `SlotSearchFunctionalTest` still green (39 tests).
+- Access matrix: 3 new lines, 73 cases green.
+- `AgendaFunctionalTest`: 20 tests green.
+- Full suite `./mvnw -B verify`: 476 tests, 0 failures; reverse class order (`-Dsurefire.runOrder=reversealphabetical`): 476 tests, 0 failures.
+- `pre-commit run --all-files`: all 14 hooks passed (gitleaks, checkov, detect-private-key included).
+- One isolated failure of `QrCodesTest` (MLink-62) was seen once in a full run; not reproduced in 10 separate runs nor in the next full runs; unrelated to this PR.
+
+**Follow-ups:** `AuditService.recordInCurrentTransaction` (MLink-114) to write the audit in the business transaction; `SlotRepository` is shared with MLink-98; the enum conflict with MLink-114 is to be resolved at rebase (keep all values).
+
 ## Status
 
 | Sub-sprint | Scope | State | PR | Date |
