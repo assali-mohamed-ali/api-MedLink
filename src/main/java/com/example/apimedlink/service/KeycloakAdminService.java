@@ -45,4 +45,7 @@ public interface KeycloakAdminService {
 
     /** Puts the user in the given group and takes them out of any other group. Idempotent. */
     void moveToGroup(UUID id, String groupPath);
+    
+    /** Enables or disables the account in Keycloak. A disabled user cannot log in. Idempotent. */
+    void setEnabled(UUID id, boolean enabled);
 }

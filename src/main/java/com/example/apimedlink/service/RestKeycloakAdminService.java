@@ -119,6 +119,19 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
                     return null;
                 }));
     }
+        @Override
+    public void setEnabled(UUID id, boolean enabled) {
+        UserRepresentation body = new UserRepresentation(null, null, null, null, null, enabled, null, null);
+        call("set enabled", bearer -> http.put().uri(users + "/{id}", id)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange((request, response) -> {
+                    expectFound(response.getStatusCode(), id);
+                    expectSuccess(response.getStatusCode(), "set enabled");
+                    return null;
+                }));
+    }
 
     @Override
     public KeycloakUser getUser(UUID id) {

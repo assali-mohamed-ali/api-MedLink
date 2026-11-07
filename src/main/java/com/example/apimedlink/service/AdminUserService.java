@@ -3,6 +3,7 @@ package com.example.apimedlink.service;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.EmailTakenException;
 import com.example.apimedlink.model.User;
+import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.repository.UserRepository;
 import com.example.apimedlink.security.Roles;
 import java.util.Locale;
@@ -14,9 +15,10 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Account management by staff (MLink-69): list, create a practitioner or staff account, change a role.
- * The Keycloak user and our users row are created in the same request; when ours fails, the Keycloak
- * user is deleted, so no account is left half made. Patients are never created here: they register.
+ * Account management by staff (MLink-69, MLink-70): list, create a practitioner or staff account, change a
+ * role, enable or disable an account. The Keycloak user and our users row are created in the same request;
+ * when ours fails, the Keycloak user is deleted, so no account is left half made. Patients are never created
+ * here: they register.
  */
 @Service
 public class AdminUserService {
@@ -25,11 +27,14 @@ public class AdminUserService {
 
     private final KeycloakAdminService keycloak;
     private final UserRepository users;
+    private final SessionRevocationStore revocations;
     private final TransactionTemplate tx;
 
-    public AdminUserService(KeycloakAdminService keycloak, UserRepository users, TransactionTemplate tx) {
+    public AdminUserService(KeycloakAdminService keycloak, UserRepository users,
+                            SessionRevocationStore revocations, TransactionTemplate tx) {
         this.keycloak = keycloak;
         this.users = users;
+        this.revocations = revocations;
         this.tx = tx;
     }
 
@@ -37,7 +42,7 @@ public class AdminUserService {
         return keycloak.searchUsers(search, page, size);
     }
 
-        /** @throws ApiException 409 {@code EMAIL_TAKEN} when the email already has an account */
+    /** @throws ApiException 409 {@code EMAIL_TAKEN} when the email already has an account */
     public KeycloakUserPage.Entry create(String email, String firstName, String lastName, String role) {
         String groupPath = staffGroupOf(role);
         String normalized = email.trim().toLowerCase(Locale.ROOT);
@@ -62,15 +67,29 @@ public class AdminUserService {
                 new KeycloakUser(id, normalized, firstName, lastName, true, false), groupPath);
     }
 
-        /** Staff may learn that an email is taken (unlike a visitor signing up). */
-    private static ApiException emailTaken() {
-        return new ApiException(HttpStatus.CONFLICT, "EMAIL_TAKEN",
-                "Un compte existe déjà avec cette adresse e-mail.");
-    }
-
     /** @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404) */
     public void changeRole(UUID id, String role) {
         keycloak.moveToGroup(id, staffGroupOf(role));
+    }
+
+    /**
+     * Enables or disables an account. Disabling: Keycloak first, so no new login gets past it; then the API
+     * refuses the user's open sessions at once (session_revocations, as for a forced password reset); then
+     * Keycloak signs them out. Every step is idempotent: after an error staff send it again.
+     *
+     * @throws ApiException 409 {@code CANNOT_DISABLE_SELF} when staff disable their own account
+     * @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404)
+     */
+    public void setEnabled(UUID id, boolean enabled, UUID actingUser) {
+        if (!enabled && id.equals(actingUser)) {
+            throw new ApiException(HttpStatus.CONFLICT, "CANNOT_DISABLE_SELF",
+                    "Vous ne pouvez pas désactiver votre propre compte.");
+        }
+        keycloak.setEnabled(id, enabled);
+        if (!enabled) {
+            revocations.revoke(id);
+            keycloak.endSessions(id);
+        }
     }
 
     /** The Keycloak group of a staff role; PATIENT and anything unknown are refused. */
@@ -81,6 +100,12 @@ public class AdminUserService {
                     "Le rôle doit être PRACTITIONER ou ADMINISTRATIVE_STAFF.");
         }
         return groupPath;
+    }
+
+    /** Staff may learn that an email is taken (unlike a visitor signing up). */
+    private static ApiException emailTaken() {
+        return new ApiException(HttpStatus.CONFLICT, "EMAIL_TAKEN",
+                "Un compte existe déjà avec cette adresse e-mail.");
     }
 
     private void deleteKeycloakUser(UUID id) {
