@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Tests the scanner policy for the configured (NVD key) and missing-key paths.
+# Tests that configured NVD credentials always select the primary SCA scanner.
 set -euo pipefail
 
 SCRIPT="$(cd "$(dirname "$0")" && pwd)/sca-policy.sh"
@@ -28,11 +28,15 @@ expect() {
     fi
 }
 
-# Primary scanner configured: no fallback, whatever the event or ref.
-expect 'NVD key on master' dependency-check true push refs/heads/master true false
-expect 'NVD key on PR' dependency-check true pull_request refs/pull/1/merge true false
+# If the key exists, the primary NVD-backed scanner must run on every supported event.
+expect 'NVD key on PR uses Dependency-Check' dependency-check true pull_request refs/pull/1/merge true false
+expect 'NVD key on master push uses Dependency-Check' dependency-check true push refs/heads/master true false
+expect 'NVD key on staging push uses Dependency-Check' dependency-check true push refs/heads/staging true false
+expect 'NVD key on feature push uses Dependency-Check' dependency-check true push refs/heads/fix/54-sca-fallback true false
+expect 'NVD key on schedule' dependency-check true schedule refs/heads/master true false
+expect 'NVD key on manual run' dependency-check true workflow_dispatch refs/heads/master true false
 
-# Missing key: PRs, schedules, manual runs and feature branches may fall back.
+# Missing key: Trivy is an explicit fallback for PRs, schedules, manual runs, and feature branches.
 expect 'missing key on PR' trivy true pull_request refs/pull/1/merge false false
 expect 'missing key on schedule' trivy true schedule refs/heads/master false false
 expect 'missing key on manual run' trivy true workflow_dispatch refs/heads/master false false
@@ -46,12 +50,13 @@ expect 'missing key on v* tag' trivy false push refs/tags/v1.0.0 false false
 expect 'missing key on master, fallback accepted' trivy true push refs/heads/master false true
 expect 'missing key on master, fallback accepted (TRUE)' trivy true push refs/heads/master false TRUE
 
-# Unknown events are denied rather than silently accepted.
+# Unknown events are denied, even if a key is configured.
 expect 'missing key on unknown event' trivy false workflow_run refs/heads/master false false
+expect 'NVD key on unknown event' trivy false workflow_run refs/heads/master true false
 
 if [ "$failures" -ne 0 ]; then
     echo "$failures SCA policy test(s) failed" >&2
     exit 1
 fi
 
-echo 'SCA policy tests passed'
+echo 'SCA policy tests passed (18 cases)'

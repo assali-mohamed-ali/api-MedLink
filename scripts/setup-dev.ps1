@@ -502,8 +502,8 @@ if ($health -match '"status":"UP"') { Write-Ok "health: $health" } else { Write-
 $status = Get-HttpStatus "$AppUrl/api/users"
 if ($status -eq 401) { Write-Ok '/api/users without a session returns 401' } else { Write-Bad "/api/users without a session returned $status, expected 401" }
 
-$swagger = Get-HttpStatus "$AppUrl/swagger-ui.html"
-if ($swagger -in 200, 302) { Write-Ok 'Swagger UI reachable' } else { Write-Warn "Swagger UI returned $swagger" }
+$scalar = Get-HttpStatus "$AppUrl/scalar"
+if ($scalar -in 200, 302) { Write-Ok 'Scalar API docs reachable' } else { Write-Warn "Scalar API docs returned $scalar" }
 
 # End-to-end: log in as patient.dev through our login endpoint, as React does (CSRF cookie, then
 # the JSON post), then call the API with the session. A wrong password first: a successful login
@@ -596,7 +596,7 @@ Write-Host @"
 
   API             $AppUrl
   Login           POST $AppUrl/api/auth/login   (JSON email + password, X-XSRF-TOKEN header)
-  Swagger UI      $AppUrl/swagger-ui.html
+  Scalar API docs $AppUrl/scalar
   Mail inbox      http://localhost:8025   (every mail the API sends, Mailpit)
   Keycloak admin  $KeycloakUrl   (user: $kcAdminUser, password: $(if ($FullStack) { 'KEYCLOAK_ADMIN_PASSWORD in .env' } else { 'admin' }))
   Test users      staff.dev / practitioner.dev / patient.dev   (password: $(if ($FullStack) { 'KC_DEV_USERS_PASSWORD in .env' } else { $DevUsersPassword }))

@@ -9,9 +9,45 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
-| 3 | Staff code, TOTP (endpoints 8–9) | **Merged** (#97, MLink-62/63); review round 1 **in review** on `fix/ss3-review-round-1`: see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) | 2026-10-29 |
+| 3 | Staff code, TOTP (endpoints 8–9) | **Done** (MLink-62/63): #97, review round 1 in #99; see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), [#99](https://github.com/assali-mohamed-ali/api-MedLink/pull/99) | 2026-10-29 |
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
+
+**2026-10-29 (night):** MLink-53, `GET /api/auth/me` (endpoint 6, `feat/mlink-53-auth-me`): the user object of the
+login, read from the session the login opened (the id token and the granted roles), with no Keycloak or database
+call; 401 `UNAUTHENTICATED` without a session, after a logout, or with only a pending code step. React needs it to
+restore who is logged in after a page refresh (the front's MLink-128). Taken over from Ahlem with her agreement. No
+migration. The tests and setup scripts that check a session with `/api/users/_health` can now use it.
+
+**2026-10-29 (evening):** MLink-68 (story MLink-19) on `feat/mlink-68-lockout-check`: `scripts/check-lockout.sh`
+proves the lockout on the running dev stack: 5 wrong passwords 1.2 s apart (Keycloak's quick-login guard would lock
+after 2 otherwise), then the right password is refused (401, like a wrong password: a 423 would reveal that the
+account exists) and Keycloak's brute-force status says locked; `patient.dev` is unlocked at the end. `PASS` on the dev
+stack, `FAIL` with `failureFactor` raised to 50 through the admin API. No migration, no endpoint.
+Review of #103 (2026-10-30): the script refuses a non-local `APP_URL` or `KEYCLOAK_URL` before any request (exit 2),
+so a mistaken staging/prod URL cannot lock or unlock a real account; a remote dev stack needs
+`ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack`. `scripts/check-lockout.test.sh` (offline, fake `curl`, run by CI's
+`build-test`) covers 14 cases, lookalikes included (`localhost.evil.com`, `localhost:8180@evil.com`); two mutants of the
+guard turn it red. The cookie jar is removed in the `EXIT` trap.
+Review of #103 (2026-11-02): the unlock is now checked. It needs an admin token and Keycloak's 204; otherwise it says
+why on stderr and the run fails (exit 1, never `PASS`), at the start (the count would prove nothing), at the end (the
+unlock runs before the result is printed) and in the `EXIT` trap (an interrupted run). The offline test plays a fake
+dev stack: final unlock answered 500 or 401, no admin token, first unlock refused (19 cases); mutants without the status
+check or the token check turn it red. `PAUSE_SECONDS` (default 1.2) lets the test skip the waits.
+Review of #103 (2026-11-06): the guard read `https://prod.example.com#@localhost` (or `?@`, `\@`) as localhost,
+because it dropped the user-info before the query and fragment: the admin and test passwords would have gone to
+prod. `url_host()` now cuts the host at the first `/`, `?`, `#` or `\` before dropping the user-info; 5 new cases
+(24 in all), red before the fix.
+
+**2026-10-29 (evening), updated 2026-10-30:** MLink-127 follow-up and GitHub #65 on `fix/65-swagger-off-in-prod`:
+staging and prod serve neither the API reference UI nor `/v3/api-docs` (404 over HTTP, `ApiDocsExposureIntegrationTest`),
+dev keeps both (DAST runs the dev profile). After #100 (Scalar replaces Swagger UI) the UI is Scalar at `/scalar`:
+`scalar.enabled: false` in staging and prod switches it off on its own (today `springdoc.api-docs.enabled: false` also
+hides it, as a side effect of Scalar's configuration depending on springdoc's; staging mutants: no switch exposes
+`/scalar`, `/scalar/scalar.js` and `/v3/api-docs`; `scalar.enabled: false` alone hides Scalar). The test lists
+`/scalar`, `/scalar/scalar.js` and the old Swagger UI paths, with soft assertions. The DOMPurify 3.4.16 suppression
+of the first version is dropped: Swagger UI is no longer a dependency and Scalar's bundle embeds no DOMPurify.
+No migration, no endpoint.
 
 **2026-10-29:** `epic/MLink-8` (PR #87, ready for review): `master` merged after #97 and #99, so the appointment
 migration is renumbered **V13** (`V13__appointment_domain.sql`); dev databases that ran an older number need the

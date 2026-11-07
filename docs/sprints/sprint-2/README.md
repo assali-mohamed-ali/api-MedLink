@@ -36,7 +36,7 @@ context than these files.
 5. **Test first.** Write the tests from the contract (status codes, bodies, the wrong-role
    case), watch them fail, then write the code.
 6. **Verify for real.** `./mvnw -B verify` (JDK 17, Docker running) and the setup script.
-   Try the endpoints by hand once (curl or Swagger UI at `http://localhost:8080/swagger-ui.html`).
+   Try the endpoints by hand once (curl or Scalar API docs at `http://localhost:8080/scalar`).
 7. **Commit per task** (YouTrack id in the message), push, open the PR to `master`.
 8. **Report.** In the same PR: update `report.md` (status, PR link, proof, decisions, limits,
    next step) and move the YouTrack tasks to *To Verify* with a link to the PR.
