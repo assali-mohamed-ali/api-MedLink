@@ -110,13 +110,13 @@ services:
 
   # Catches every mail in dev and local runs: inbox at http://localhost:8025.
   mailpit:
-    image: axllent/mailpit:v1.31.6
+    image: axllent/mailpit:v1.32.0
     ports:
       - '1025:1025'
       - '8025:8025'
 
   prometheus:
-    image: prom/prometheus:v3.15.0
+    image: prom/prometheus:v3.15.1
     volumes:
       - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
       - ./monitoring/alerts/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
