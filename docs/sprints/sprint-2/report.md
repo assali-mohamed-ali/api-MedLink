@@ -13,6 +13,9 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-07:** MLink-163 on `epic/MLink-8`, PR #87: **new route `GET /api/slots/filters`** (patients only, the
+lists of the search form); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-163 section.
+
 **2026-11-07:** MLink-99 (slot search index) on `epic/MLink-8`, PR #87: **migration V14**
 (`V14__slot_search_index.sql`, one partial index on the free slots); dev databases need the setup script once
 (V14 runs on start, no `--reset` needed). No new route. See the MLink-99 section.
@@ -348,6 +351,38 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-163 — the slot search form's lists, `GET /api/slots/filters` (2026-11-07, epic/MLink-8)
+
+Task 25.6 of MLink-25, added for the search page (MLink-101): the form offers lists (clinic, specialty,
+practitioner) instead of ids to type, and choosing a clinic shows only its practitioners.
+
+**Contract:** session required, PATIENT only. `GET /api/slots/filters` → 200
+`{ "clinics": [ { "id", "name", "city" } ], "specialties": [ { "id", "name" } ], "practitioners": [ { "id",
+"firstName", "lastName", "specialtyId", "clinicIds": [ ] } ] }`, each list in French order by name (practitioners by
+last name, then first name); 401 `UNAUTHENTICATED` without a session; 403 for a practitioner or staff. Of a
+practitioner, only what the form needs: never an email or a username.
+
+**Built:**
+- `SlotController.filters()` (`@GetMapping("/filters")`, `@PreAuthorize` PATIENT) → `SlotMapper.toFiltersResponse`
+  → `SlotFiltersResponse` (records `ClinicItem`, `SpecialtyItem`, `PractitionerItem`).
+- `SlotService.filters()` returns `SlotFilters` (entities, no DTO), sorted with a French `Collator` in Java: a few
+  dozen rows, and SQL ordering would depend on the database collation ("Pédiatrie" must come before
+  "Pneumologie", not after "Z").
+- `PractitionerRepository.findAllBy()` with `@EntityGraph({"specialty", "clinics"})`: every practitioner with
+  their specialty and clinics in one query, no N+1.
+- `AccessMatrixFunctionalTest`: one line, `GET /api/slots/filters` (anonymous 401, patient open, practitioner and
+  staff 403). Postman folder 7: one request on the dev seed (the three clinics and specialties, the cardiologist's
+  specialty and two clinics, no `@` in the body).
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (26a1a96, the tests alone): `SlotFiltersFunctionalTest` and the access matrix, 6 failures (404 instead
+  of 200 or 403, and a matrix line with no route).
+- Green (64ca169): both classes pass.
+- Mutation check: without the `@PreAuthorize` of `filters()`, `aPractitionerAndStaffAreRefused` turns red
+  (expected 403 but was 200).
+- `./mvnw -B clean verify` **458 tests, 0 failures**; reverse order 458, 0 failures.
+- `setup-dev` then newman (b8d75aa): **122 requests, 295 assertions, 0 failures**.
 
 ## MLink-99 — slot search index, an answer in less than 2 seconds (2026-11-07, epic/MLink-8)
 
