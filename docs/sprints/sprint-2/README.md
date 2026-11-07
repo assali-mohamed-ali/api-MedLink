@@ -28,8 +28,8 @@ context than these files.
      (merged or not, decide before deleting).
 
    Then go to the epic's shared branch (rule of 2026-11-06, `CLAUDE.md` "Epic branches"):
-   `git checkout epic/MLink-<epic id> && git pull --ff-only`. Only the first person on an epic
-   creates it: `git checkout master && git pull --ff-only && git checkout -b epic/MLink-<epic id>`.
+   `git checkout epic/MLink-<epic id> && git pull --no-rebase`. Only the first person on an epic
+   creates it: `git checkout master && git pull && git checkout -b epic/MLink-<epic id>`.
    Run the setup script once (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`); it must end
    with 0 failures.
 4. **Plan the work** in a few lines: files, migrations, realm changes, tests. Move **each**
@@ -39,9 +39,10 @@ context than these files.
    case), watch them fail, then write the code.
 6. **Verify for real.** `./mvnw -B verify` (JDK 17, Docker running) and the setup script.
    Try the endpoints by hand once (curl or Scalar API docs at `http://localhost:8080/scalar`).
-7. **Commit per task** (YouTrack id in the message). Before pushing: `git pull --ff-only`, then
-   `./mvnw -B verify` and the reversed class order green. Push only green commits (a red test
-   commit goes up together with its green one). Never rebase or force-push the epic branch.
+7. **Commit, check green, pull, push** (the loop in `CLAUDE.md` "Epic branches"): the red test
+   commit, then the green code commit (YouTrack id in both); `./mvnw -B verify` and the reversed
+   class order green; `git pull --no-rebase` (if it merged a teammate's commits, check green
+   again); then `git push` (refused: pull again). Never rebase or force-push the epic branch.
 8. **Report.** With the task's commit: update `report.md` (status, proof, decisions, limits, next
    step) and move the YouTrack task to *To Verify* with a link to the commit.
 9. **When the whole epic is done** (every task green, both test orders, Postman 0 failures,

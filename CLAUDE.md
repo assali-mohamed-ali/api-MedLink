@@ -84,10 +84,18 @@ These requirements are mandatory repository contribution rules, not optional rec
   created once from the latest `master`. Everyone working on the epic commits to it. No branch per
   ticket or task any more; a small fix, docs or chore outside any epic keeps its own `fix/`, `docs/`
   or `chore/` branch.
-- **Pull, work, push only when green:** `git pull --ff-only` before starting and before pushing. Push
-  only commits that are green, tested and understood: the red test commit stays local until the
-  green one goes with it, so nobody pulls a broken branch.
-- **Never rebase or force-push** an epic branch. When `master` moves, merge `master` into it.
+- **The loop, for every task:**
+  1. **Pull:** `git checkout epic/MLink-<n> && git pull --no-rebase`.
+  2. **Work and commit:** the red test commit, then the green code commit (`MLink-xx` in both).
+  3. **Check green:** `./mvnw -B verify`, then `./mvnw -B test -Dsurefire.runOrder=reversealphabetical`.
+  4. **Pull again:** `git pull --no-rebase`. If a teammate pushed in the meantime, this merges their
+     commits into yours: fix any conflict, commit the merge, and go back to step 3.
+  5. **Push:** `git push`. Refused because someone pushed first? Go back to step 4.
+
+  The red test commit is pushed together with its green commit, never alone: every push ends on a
+  green commit, so nobody pulls a broken branch.
+- **Never rebase or force-push** an epic branch: `--no-rebase` makes every pull a merge. When `master`
+  moves, `git fetch origin && git merge origin/master` on the epic branch, then steps 3 to 5.
 - **One PR per epic, at the end:** the PR to `master` opens only when every task of the epic is done:
   `./mvnw -B verify` and the reversed class order green, Postman 0 failures, `report.md` up to date,
   and the team has walked through the change. No draft or early PR.
@@ -128,7 +136,7 @@ classes (see README §7). Use only APIs of these versions.
   "Epic branches"). Outside an epic, after the release-pipeline migration, branch from `staging`: `fix/<slug>`,
   `core/<slug>`, `docs/<slug>`, or `chore/<slug>`. Workflow/bootstrap
   changes may first PR to `master`; keep repository variable `ENABLE_AUTO_PROMOTION` false until the branch-baseline migration is reviewed.
-- One commit per task, message prefixed `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`,
+- Per task: a red test commit, then its green code commit; message prefixed `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`,
   `test:`; mention the YouTrack id (`MLink-79`) in the body.
 - Product PRs target `staging` after migration; workflow/bootstrap changes may target `master`. Fill the template honestly
   and disclose AI use. Promotion from `staging` to `prod` and release-version PRs are automated but blocked by failing checks.
