@@ -13,6 +13,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-07:** MLink-103 on `epic/MLink-8`, PR #87: two patients booking one slot at once get one appointment and
+one 409 `SLOT_TAKEN`; a double booking only the unique index catches also answers 409, never 500. No migration (the
+index is in V13), no new route. See the MLink-103 section.
+
 **2026-11-07:** MLink-102 on `epic/MLink-8`, PR #87: **new route `POST /api/appointments`** (patients book a slot);
 one new line in `AccessMatrixFunctionalTest`. No migration. **New dev user `patient.demo@medlink.local`** (dev password):
 `patient.dev` has no patient profile, so it cannot book (403 `PATIENT_PROFILE_REQUIRED`); `setup-dev` imports the new
@@ -356,6 +360,31 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-103 — one booking per slot under concurrency, 409 `SLOT_TAKEN` (2026-11-07, epic/MLink-8)
+
+Task 27.2 of MLink-27, its acceptance criterion: "if two patients choose the same slot, one appointment is made and the
+other is told".
+
+**Built:**
+- No migration: the unique index the ticket asked for, `appointments_one_active_per_slot ON appointments (slot_id)
+  WHERE status = 'BOOKED'`, is already in V13 (code owner's review of MLink-97).
+- Two guards. First, the slot row lock of MLink-102 (`findForBookingById`, `SELECT … FOR UPDATE`) serves two bookings
+  one after the other, and the second sees the slot taken. Second, the unique index: `AppointmentService.book` saves
+  with `saveAndFlush`, and a violation of `appointments_one_active_per_slot` now answers the same 409 `SLOT_TAKEN`
+  ("Ce créneau n'est plus disponible. Choisissez-en un autre.") instead of a 500; any other integrity error still
+  fails as before (never hidden).
+- `AppointmentRaceFunctionalTest` (real API): two patients post the same slot at the same instant (two threads
+  released together), five rounds: each round one 201, one 409 `SLOT_TAKEN`, one BOOKED row. And the race lost after
+  the checks (the slot still FREE with an active appointment already in the table): 409, not 500, nothing added.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (9a9b7eb, the tests alone): 2 tests, 1 failure, the last-guard test (expected 409 but was 500). The
+  concurrent test was already green: the lock of MLink-102 holds; it proves the acceptance criterion.
+- Green (663b46d): both race tests and `AppointmentBookingFunctionalTest`, 12 tests, 0 failures.
+- Mutation check: when the translation no longer recognises the index, the last-guard test turns red again (500).
+- `./mvnw -B clean verify` **475 tests, 0 failures**; reverse order 475, 0 failures. No endpoint changed: Postman as
+  for MLink-102.
 
 ## MLink-102 — book an appointment, `POST /api/appointments` (2026-11-07, epic/MLink-8)
 
