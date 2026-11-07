@@ -13,6 +13,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-10-31:** MLink-65 (sub-sprint 3 part, `feat/ss3-setup-staff-code-check`): both setup scripts also check that
+`practitioner.dev`'s password alone opens no session (login 200 with `mfaRequired`, then 401). Scripts and README
+only: no migration, no endpoint. The check calls `/api/users/_health` until `GET /api/auth/me` (#107) is on `master`.
+
 **2026-10-29 (evening), updated 2026-10-30:** MLink-127 follow-up and GitHub #65 on `fix/65-swagger-off-in-prod`:
 staging and prod serve neither the API reference UI nor `/v3/api-docs` (404 over HTTP, `ApiDocsExposureIntegrationTest`),
 dev keeps both (DAST runs the dev profile). After #100 (Scalar replaces Swagger UI) the UI is Scalar at `/scalar`:
@@ -86,6 +90,21 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-65 — setup scripts check the staff code (2026-10-31, feat/ss3-setup-staff-code-check)
+
+- **Built:** `scripts/setup-dev.ps1` and `scripts/setup-dev.sh` (same behaviour, bash 3.2 safe), after the
+  `patient.dev` login check: a fresh browser logs in as `practitioner.dev` with the right password. `[OK]` only when
+  the login answers 200 with `"mfaRequired": true` **and** the same cookies get 401 on `/api/users/_health` (no
+  session before the code); anything else is a warning. The cookie and answer files are deleted afterwards; the
+  password is never printed. README and the scripts' header mention the check.
+- **Proof:** on a fresh realm, `setup-dev.ps1 -SkipTests -Reset` (Windows PowerShell) and `setup-dev.sh --skip-tests`
+  (Git Bash 5.2, volumes re-imported): **0 failures, 0 warnings**, both print `[OK] staff code asked`.
+- **Open:** the ticket asks for `GET /api/auth/me` (patient → 200 with `PATIENT`, practitioner → 401); that endpoint
+  comes with #107 (Mohamed, not merged). A follow-up switches both checks once it is on `master`.
+- **Found on the way:** `setup-dev.ps1 -Stop` and `setup-dev.sh --stop` stop the containers, but the API's Java
+  process (forked by `spring-boot:run`) keeps port 8080, so the next run stops at "Free these ports first". To report
+  as an issue; not fixed here.
 
 ## MLink-62, MLink-63 - staff code, TOTP (2026-10-25, feat/ss3-staff-totp)
 
