@@ -2753,6 +2753,37 @@
           ]
         },
         {
+          "name": "GET /slots/filters → 200, the lists of the search form (MLink-163)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots/filters"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"the three seeded clinics\", () => pm.expect(body.clinics.map(c => c.name)).to.include.members([\"Clinique MedLink Sfax\", \"Clinique MedLink Sousse\", \"Clinique MedLink Tunis\"]));",
+                  "pm.test(\"the three seeded specialties\", () => pm.expect(body.specialties.map(s => s.name)).to.include.members([\"Cardiologie\", \"Médecine générale\", \"Pédiatrie\"]));",
+                  "const cardiologist = body.practitioners.find(p => p.id === \"d0c70000-0000-4000-8000-000000000002\");",
+                  "pm.test(\"a practitioner with their specialty and clinics\", () => {",
+                  "    pm.expect(cardiologist.specialtyId).to.eql(\"5e000000-0000-4000-8000-000000000002\");",
+                  "    pm.expect(cardiologist.clinicIds).to.have.members([\"c1000000-0000-4000-8000-000000000002\", \"c1000000-0000-4000-8000-000000000003\"]);",
+                  "});",
+                  "pm.test(\"only what the form needs: no email or username\", () => {",
+                  "    pm.expect(Object.keys(cardiologist)).to.have.members([\"id\", \"firstName\", \"lastName\", \"specialtyId\", \"clinicIds\"]);",
+                  "    pm.expect(pm.response.text()).to.not.include(\"@\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "GET /slots without from → 400 VALIDATION_FAILED",
           "request": {
             "method": "GET",
