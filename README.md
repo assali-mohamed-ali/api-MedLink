@@ -103,6 +103,7 @@ sequenceDiagram
 | `POST /api/auth/login` | anyone | 200 (`user`, or `mfaRequired` for practitioners and staff) · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
 | `POST /api/auth/mfa/setup` | at the code step, `{token}` from the mailed link | 200 QR code, otpauth URL, secret · 401 · 409 `MFA_ALREADY_ENROLLED` · 400 `VALIDATION_FAILED` / `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
 | `POST /api/auth/mfa/verify` | at the code step | 200 `user` + session · 400 · 401 `INVALID_CODE` · 423 `MFA_LOCKED` |
+| `GET /api/auth/me` | logged in | 200 `user` (the login's user object, from the session) · 401 `UNAUTHENTICATED` |
 | `POST /api/auth/logout` | logged in | 204 |
 | `GET /api/users` | staff | 200 |
 | `GET /api/users/{id}` | the user themself, or staff | 200 · 403 for anyone else, whether the id exists or not |
@@ -337,6 +338,7 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 | `app.mfa.encryption-key must be base64` or `must be 32 bytes` at startup | `APP_MFA_ENCRYPTION_KEY` still holds the `.env.example` placeholder: replace it with `openssl rand -base64 32` (32 random bytes in base64), or run the setup script |
 | roles look wrong, or `staff.dev` cannot log in | your Keycloak holds an old realm: re-run the setup script, or `-Reset` |
 | 401 with the right password | 5 wrong passwords lock the account for 15 minutes, answered like a wrong password: wait, or unlock it in the console |
+| does the lockout work? | `scripts/check-lockout.sh` on the running dev stack: 5 wrong passwords, then the right one must be refused; prints `PASS`/`FAIL` and unlocks `patient.dev` at the end, failing (exit 1, never `PASS`) if Keycloak refuses the unlock (full stack: pass `KC_ADMIN_PASS` and `USERS_PASSWORD` from `.env`). Refuses any non-local `APP_URL`/`KEYCLOAK_URL` (exit 2) unless `ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack`; guard and unlock tested offline by `scripts/check-lockout.test.sh` (CI) |
 | `INVALID_CODE` with the code from the authenticator app | the phone's clock is off (a code lives 30 s, one step of tolerance): set the phone to automatic date and time. Also check you scanned the QR code of the last setup (a new setup replaces the secret) |
 | `MFA_LOCKED` | 5 wrong codes lock the code step for 15 minutes, even after a new login: wait |
 | a file shows fully modified after pull | line endings, normalized by `.gitattributes`; a `chore: normalize` commit is fine |

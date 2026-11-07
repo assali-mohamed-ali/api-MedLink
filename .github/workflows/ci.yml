@@ -25,6 +25,10 @@ jobs:
       - name: Check the production container configuration
         run: bash scripts/ci/check-prod-config.sh
 
+      # MLink-68: the lockout script refuses non-local targets (offline, no stack needed).
+      - name: Test the lockout script's target guard
+        run: bash scripts/check-lockout.test.sh
+
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.9.x
