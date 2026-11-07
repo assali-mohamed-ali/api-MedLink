@@ -10,4 +10,3 @@ public record ChangeRoleRequest(
         @Pattern(regexp = "^(" + Roles.PRACTITIONER + "|" + Roles.ADMINISTRATIVE_STAFF + ")$",
                 message = "Le rôle doit être PRACTITIONER ou ADMINISTRATIVE_STAFF.")
         String role) {}
-        

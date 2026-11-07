@@ -165,7 +165,7 @@ class AdminUserControllerTest {
                         .contentType(MediaType.APPLICATION_JSON).content(createBody(email, Roles.PRACTITIONER)))
                 .andExpect(status().isForbidden());
     }
-    
+
     @Test
     void aPractitionerIsRefusedEvenWithAValidBody() throws Exception {
         mvc.perform(post("/api/admin/users").with(user("practitioner").roles(Roles.PRACTITIONER)).with(csrf())

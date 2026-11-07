@@ -11,4 +11,3 @@ public record AdminUserDto(
         String role,
         boolean enabled,
         boolean emailVerified) {}
-        
