@@ -41,6 +41,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("POST",   "/api/auth/register",            O, O, O, O),
             new Rule("POST",   "/api/auth/verify-email",        O, O, O, O),
             new Rule("POST",   "/api/auth/verify-email/resend", O, O, O, O),
+            new Rule("POST",   "/api/auth/account/activate",    O, O, O, O),
             new Rule("POST",   "/api/auth/login",               O, O, O, O),
             new Rule("GET",    "/api/auth/me",                  L, O, O, O),
             new Rule("POST",   "/api/auth/logout",              L, O, O, O),

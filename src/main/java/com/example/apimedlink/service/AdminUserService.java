@@ -2,6 +2,7 @@ package com.example.apimedlink.service;
 
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.EmailTakenException;
+import com.example.apimedlink.model.EmailToken.Purpose;
 import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.repository.UserRepository;
@@ -11,14 +12,15 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.mail.MailException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Account management by staff (MLink-69, MLink-70): list, create a practitioner or staff account, change a
- * role, enable or disable an account. The Keycloak user and our users row are created in the same request;
- * when ours fails, the Keycloak user is deleted, so no account is left half made. Patients are never created
- * here: they register.
+ * Account management by staff (MLink-69, MLink-70, MLink-71): list, create a practitioner or staff account,
+ * change a role, enable or disable an account. The Keycloak user and our users row are created in the same
+ * request, then the activation mail goes out; when our row fails, the Keycloak user is deleted, so no account
+ * is left half made. Patients are never created here: they register.
  */
 @Service
 public class AdminUserService {
@@ -28,13 +30,18 @@ public class AdminUserService {
     private final KeycloakAdminService keycloak;
     private final UserRepository users;
     private final SessionRevocationStore revocations;
+    private final EmailTokenService tokens;
+    private final MailService mail;
     private final TransactionTemplate tx;
 
     public AdminUserService(KeycloakAdminService keycloak, UserRepository users,
-                            SessionRevocationStore revocations, TransactionTemplate tx) {
+                            SessionRevocationStore revocations, EmailTokenService tokens,
+                            MailService mail, TransactionTemplate tx) {
         this.keycloak = keycloak;
         this.users = users;
         this.revocations = revocations;
+        this.tokens = tokens;
+        this.mail = mail;
         this.tx = tx;
     }
 
@@ -56,13 +63,17 @@ public class AdminUserService {
         } catch (EmailTakenException knownToKeycloakOnly) {
             throw emailTaken();
         }
+        String token;
         try {
-            tx.executeWithoutResult(status ->
-                    users.save(User.builder().id(id).username(normalized).email(normalized).build()));
+            token = tx.execute(status -> {
+                users.save(User.builder().id(id).username(normalized).email(normalized).build());
+                return tokens.issue(id, Purpose.ACTIVATE_ACCOUNT);
+            });
         } catch (RuntimeException e) {
             deleteKeycloakUser(id);
             throw e;
         }
+        sendActivationMail(normalized, firstName, token);
         return new KeycloakUserPage.Entry(
                 new KeycloakUser(id, normalized, firstName, lastName, true, false), groupPath);
     }
@@ -115,6 +126,15 @@ public class AdminUserService {
     private static ApiException emailTaken() {
         return new ApiException(HttpStatus.CONFLICT, "EMAIL_TAKEN",
                 "Un compte existe déjà avec cette adresse e-mail.");
+    }
+
+    /** A mail failure is only logged: the account exists, and a new link can be sent later. */
+    private void sendActivationMail(String email, String firstName, String token) {
+        try {
+            mail.sendAccountActivation(email, firstName, token);
+        } catch (MailException e) {
+            log.warn("Activation mail could not be sent ({})", e.getClass().getSimpleName());
+        }
     }
 
     private void deleteKeycloakUser(UUID id) {

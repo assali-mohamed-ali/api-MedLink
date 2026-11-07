@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -12,22 +13,24 @@ import com.example.apimedlink.TestcontainersConfiguration;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.EmailTakenException;
 import com.example.apimedlink.model.User;
+import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.repository.UserRepository;
 import com.example.apimedlink.security.Roles;
+import jakarta.mail.Session;
+import jakarta.mail.internet.MimeMessage;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.HttpStatus;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
-import static org.mockito.Mockito.inOrder;
-import com.example.apimedlink.repository.SessionRevocationStore;
-import org.mockito.InOrder;
 
-/** MLink-69: account management by staff. Real database; Keycloak is a mock. */
+/** MLink-69, MLink-71: account management by staff. Real database; Keycloak and the mail sender are mocks. */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
 class AdminUserServiceTest {
@@ -44,6 +47,9 @@ class AdminUserServiceTest {
     @MockitoBean
     KeycloakAdminService keycloak;
 
+    @MockitoBean
+    JavaMailSender mailSender;
+
     UUID keycloakId;
     String email;
 
@@ -53,6 +59,7 @@ class AdminUserServiceTest {
         email = "salma-" + keycloakId + "@example.com";
         when(keycloak.createUser(anyString(), anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(keycloakId);
+        when(mailSender.createMimeMessage()).thenAnswer(i -> new MimeMessage((Session) null));
     }
 
     @Test
