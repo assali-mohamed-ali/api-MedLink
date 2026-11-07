@@ -13,6 +13,11 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-07:** MLink-102 on `epic/MLink-8`, PR #87: **new route `POST /api/appointments`** (patients book a slot);
+one new line in `AccessMatrixFunctionalTest`. No migration. **New dev user `patient.demo@medlink.local`** (dev password):
+`patient.dev` has no patient profile, so it cannot book (403 `PATIENT_PROFILE_REQUIRED`); `setup-dev` imports the new
+user at the next start. See the MLink-102 section.
+
 **2026-11-07:** MLink-163 on `epic/MLink-8`, PR #87: **new route `GET /api/slots/filters`** (patients only, the
 lists of the search form); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-163 section.
 
@@ -351,6 +356,47 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-102 — book an appointment, `POST /api/appointments` (2026-11-07, epic/MLink-8)
+
+Task 27.1 of MLink-27: a patient books a free slot online and sees the confirmation.
+
+**Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments { "slotId" }` → 201
+`{ "id", "status": "BOOKED", "clinic": { "id", "name" }, "practitioner": { "id", "firstName", "lastName" },
+"startsAt", "endsAt" }`. 400 `VALIDATION_FAILED` (`slotId` missing: "Le créneau est obligatoire.", not a UUID:
+"Identifiant invalide.") · 401 · 403 for a non-patient or without the CSRF header · **403 `PATIENT_PROFILE_REQUIRED`**
+"Complétez votre profil patient avant de réserver." · 404 `NOT_FOUND` unknown slot · 409 `SLOT_TAKEN` "Ce créneau
+n'est plus disponible. Choisissez-en un autre." (already booked, or started).
+
+**Built:**
+- `AppointmentController.book` (`@PreAuthorize` PATIENT): `slotId` arrives as text in `BookAppointmentRequest` and
+  is read after the role check, so a non-patient gets 403 even with `"abc"` or `{}` (same reason as the MLink-100
+  review). The patient is always the caller: `patient_id` = `booked_by` = `currentUser.id()`; any id in the body is
+  ignored. `AppointmentMapper` → `AppointmentDto` (the practitioner's names only).
+- `AppointmentService.book`, one transaction: the patient profile exists, then `SlotRepository.findForBookingById`
+  locks the slot row (`SELECT … FOR UPDATE`), the slot must be FREE and not started, it becomes BOOKED and the
+  appointment is saved. Two bookings of one slot run one after the other: the second sees it taken (MLink-103 proves
+  the race and translates the unique-index violation, the last guard).
+- **Gap found and closed:** `appointments.patient_id` references `patients`, a row only registration makes. A patient
+  made elsewhere (the Keycloak console, the realm's `patient.dev`) has none, and booking hit a 500. The service now
+  answers 403 `PATIENT_PROFILE_REQUIRED`. For the dev stack, `keycloak/dev/dev-practitioners.json` gets a demo patient,
+  **`patient.demo@medlink.local`** (fixed id `d0c70000-0000-4000-8000-000000000010`, group `/patients`, dev password),
+  and the dev seed its `users` and `patients` rows. Still dev only (`RealmImportSeparationTest`).
+- `AccessMatrixFunctionalTest`: one line, `POST /api/appointments` (anonymous 401, patient open, practitioner and staff
+  403). Postman folder 7: ten requests (earliest free slot; `patient.dev` → 403 `PATIENT_PROFILE_REQUIRED`; log in as
+  `patient.demo` → 201; the slot leaves the search; the same slot again → 409 `SLOT_TAKEN`).
+
+**Proof** (Ubuntu VM with Docker, then CI):
+- Red first (be498f4): `AppointmentBookingFunctionalTest` 10 tests, 8 failures (404, the route did not exist; the
+  anonymous 401 and the missing-CSRF 403 already held) and the access matrix.
+- Green (4bb50bc): the two classes, 83 tests, 0 failures.
+- Mutation check: without `slot.setStatus(SlotStatus.BOOKED)`, two tests turn red (`aPatientBooksAFreeSlotAndItLeavesTheSearch`:
+  the slot stays FREE; `aTakenSlotIsRefusedAndTheFirstBookingStays`: the unique index answers 500 instead of 409).
+- Demo patient: red first (34a3f36; its CI run was cancelled by the next push, so proved in the VM with the data of
+  4bb50bc: `RealmImportSeparationTest` and `DevSeedTest`, 2 failures, exactly the two new checks), green (6155802).
+- `./mvnw -B clean verify` **473 tests, 0 failures**; reverse order 473, 0 failures; CI on 6155802 green
+  (`build-test`, `dependency-check`).
+- `setup-dev --skip-tests` (0 warnings) then newman: **132 requests, 314 assertions, 0 failures**.
 
 ## MLink-163 — the slot search form's lists, `GET /api/slots/filters` (2026-11-07, epic/MLink-8)
 
