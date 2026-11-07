@@ -33,6 +33,17 @@
       "emailVerified": true,
       "groups": ["/practitioners"],
       "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
+    },
+    {
+      "id": "d0c70000-0000-4000-8000-000000000010",
+      "username": "patient.demo",
+      "email": "patient.demo@medlink.local",
+      "firstName": "Patient",
+      "lastName": "Démo",
+      "enabled": true,
+      "emailVerified": true,
+      "groups": ["/patients"],
+      "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
     }
   ]
 }

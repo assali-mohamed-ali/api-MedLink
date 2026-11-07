@@ -1,7 +1,7 @@
 -- Dev data for the appointment epic (MLink-97). Loaded by the dev profile only (application-dev.yml),
 -- never in tests, staging or prod. Safe to run again: every insert skips what is already there.
--- The three practitioners are the realm's dev practitioners (keycloak/realm-medlink.json): same ids and
--- emails, so they log in onto these rows. Slots cover the next two weeks from the day this runs;
+-- The three practitioners and the demo patient are the dev Keycloak users of keycloak/dev/dev-practitioners.json:
+-- same ids and emails, so they log in onto these rows. Slots cover the next two weeks from the day this runs;
 -- run scripts/setup-dev with --reset to get fresh ones.
 
 INSERT INTO clinics (id, name, city) VALUES
@@ -38,6 +38,16 @@ INSERT INTO practitioner_clinics (practitioner_id, clinic_id) VALUES
     ('d0c70000-0000-4000-8000-000000000003', 'c1000000-0000-4000-8000-000000000001'),
     ('d0c70000-0000-4000-8000-000000000003', 'c1000000-0000-4000-8000-000000000002')
 ON CONFLICT DO NOTHING;
+
+-- The demo patient (MLink-102): booking needs a patient profile, which registration makes. patient.dev has
+-- none (no fixed id in the shared realm), so the dev stack gets one patient that can book.
+INSERT INTO users (id, username, email) VALUES
+    ('d0c70000-0000-4000-8000-000000000010', 'patient.demo', 'patient.demo@medlink.local')
+ON CONFLICT DO NOTHING;
+
+INSERT INTO patients (id, first_name, last_name, birth_date) VALUES
+    ('d0c70000-0000-4000-8000-000000000010', 'Patient', 'Démo', DATE '1990-04-12')
+ON CONFLICT (id) DO NOTHING;
 
 -- Free 30-minute slots, Monday to Friday, 08:00-12:00 and 13:00-17:00 Tunis time, for the next 14 days.
 -- Each practitioner is in one of their two clinics per day (alternating by day of the month).
