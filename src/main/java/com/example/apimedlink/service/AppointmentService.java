@@ -10,6 +10,7 @@ import com.example.apimedlink.repository.SlotRepository;
 import java.time.Instant;
 import java.util.UUID;
 import org.hibernate.Hibernate;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -19,6 +20,9 @@ import org.springframework.transaction.annotation.Transactional;
 public class AppointmentService {
 
     static final String SLOT_TAKEN = "Ce créneau n'est plus disponible. Choisissez-en un autre.";
+
+    /** V13: one BOOKED appointment per slot at most. */
+    static final String ONE_ACTIVE_PER_SLOT = "appointments_one_active_per_slot";
 
     private final AppointmentRepository appointments;
     private final SlotRepository slots;
@@ -48,7 +52,17 @@ public class AppointmentService {
             throw new ApiException(HttpStatus.CONFLICT, "SLOT_TAKEN", SLOT_TAKEN);
         }
         slot.setStatus(SlotStatus.BOOKED);
-        Appointment appointment = appointments.save(new Appointment(slot, patientId, patientId));
+        Appointment appointment;
+        try {
+            appointment = appointments.saveAndFlush(new Appointment(slot, patientId, patientId));
+        } catch (DataIntegrityViolationException e) {
+            // MLink-103: the unique index on a slot's active appointment (V13) is the last guard against a double
+            // booking; losing to it is the same "taken" answer as above, never a server error
+            if (String.valueOf(e.getMostSpecificCause().getMessage()).contains(ONE_ACTIVE_PER_SLOT)) {
+                throw new ApiException(HttpStatus.CONFLICT, "SLOT_TAKEN", SLOT_TAKEN);
+            }
+            throw e;
+        }
         // Loaded here, inside the transaction: the controller maps them after it has ended
         Hibernate.initialize(slot.getPractitioner());
         Hibernate.initialize(slot.getClinic());
