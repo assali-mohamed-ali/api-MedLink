@@ -52,7 +52,13 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/users/{id}",               L, F, F, O),
             new Rule("DELETE", "/api/users/{id}",               L, F, F, O),
             new Rule("GET",    "/api/users/_health",            L, O, O, O),
-            new Rule("GET",    "/api/slots",                    L, O, F, F)); // MLink-98: patients search slots
+            new Rule("GET",    "/api/slots",                    L, O, F, F), // MLink-98: patients search slots
+            // MLink-26: the practitioner's agenda. The matrix practitioner (practitioner.dev) has no practitioner
+            // profile and sends no dates or an empty body: a 4xx that is not 403 is "open" here. {id} is a random
+            // UUID that is nobody's slot: refused (403) even for a practitioner, like /api/users/{id}.
+            new Rule("GET",    "/api/practitioner/agenda",      L, F, O, F),
+            new Rule("POST",   "/api/practitioner/slots",       L, F, O, F),
+            new Rule("PATCH",  "/api/practitioner/slots/{id}",  L, F, F, F));
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")
