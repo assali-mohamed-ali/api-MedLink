@@ -9,9 +9,95 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
-| 3 | Staff code, TOTP (endpoints 8–9) | To do | — | — |
-| 4 | Passwords (endpoints 10–11) | To do | — | — |
+| 3 | Staff code, TOTP (endpoints 8–9) | **Done** (MLink-62/63): #97, review round 1 in #99; see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), [#99](https://github.com/assali-mohamed-ali/api-MedLink/pull/99) | 2026-10-29 |
+| 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
+
+**2026-10-31, updated 2026-11-07:** MLink-65 (sub-sprint 3 part, `feat/ss3-setup-staff-code-check`): both setup
+scripts check the session with `GET /api/auth/me` (#107): `patient.dev` gets 200 with `PATIENT`, and
+`practitioner.dev`'s password alone opens no session (login 200 with `mfaRequired`, then 401). Scripts and README
+only: no migration, no endpoint.
+
+**2026-10-29 (night):** MLink-53, `GET /api/auth/me` (endpoint 6, `feat/mlink-53-auth-me`): the user object of the
+login, read from the session the login opened (the id token and the granted roles), with no Keycloak or database
+call; 401 `UNAUTHENTICATED` without a session, after a logout, or with only a pending code step. React needs it to
+restore who is logged in after a page refresh (the front's MLink-128). Taken over from Ahlem with her agreement. No
+migration. The tests and setup scripts that check a session with `/api/users/_health` can now use it.
+
+**2026-10-29 (evening):** MLink-68 (story MLink-19) on `feat/mlink-68-lockout-check`: `scripts/check-lockout.sh`
+proves the lockout on the running dev stack: 5 wrong passwords 1.2 s apart (Keycloak's quick-login guard would lock
+after 2 otherwise), then the right password is refused (401, like a wrong password: a 423 would reveal that the
+account exists) and Keycloak's brute-force status says locked; `patient.dev` is unlocked at the end. `PASS` on the dev
+stack, `FAIL` with `failureFactor` raised to 50 through the admin API. No migration, no endpoint.
+Review of #103 (2026-10-30): the script refuses a non-local `APP_URL` or `KEYCLOAK_URL` before any request (exit 2),
+so a mistaken staging/prod URL cannot lock or unlock a real account; a remote dev stack needs
+`ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack`. `scripts/check-lockout.test.sh` (offline, fake `curl`, run by CI's
+`build-test`) covers 14 cases, lookalikes included (`localhost.evil.com`, `localhost:8180@evil.com`); two mutants of the
+guard turn it red. The cookie jar is removed in the `EXIT` trap.
+Review of #103 (2026-11-02): the unlock is now checked. It needs an admin token and Keycloak's 204; otherwise it says
+why on stderr and the run fails (exit 1, never `PASS`), at the start (the count would prove nothing), at the end (the
+unlock runs before the result is printed) and in the `EXIT` trap (an interrupted run). The offline test plays a fake
+dev stack: final unlock answered 500 or 401, no admin token, first unlock refused (19 cases); mutants without the status
+check or the token check turn it red. `PAUSE_SECONDS` (default 1.2) lets the test skip the waits.
+Review of #103 (2026-11-06): the guard read `https://prod.example.com#@localhost` (or `?@`, `\@`) as localhost,
+because it dropped the user-info before the query and fragment: the admin and test passwords would have gone to
+prod. `url_host()` now cuts the host at the first `/`, `?`, `#` or `\` before dropping the user-info; 5 new cases
+(24 in all), red before the fix.
+
+**2026-10-29 (evening), updated 2026-10-30:** MLink-127 follow-up and GitHub #65 on `fix/65-swagger-off-in-prod`:
+staging and prod serve neither the API reference UI nor `/v3/api-docs` (404 over HTTP, `ApiDocsExposureIntegrationTest`),
+dev keeps both (DAST runs the dev profile). After #100 (Scalar replaces Swagger UI) the UI is Scalar at `/scalar`:
+`scalar.enabled: false` in staging and prod switches it off on its own (today `springdoc.api-docs.enabled: false` also
+hides it, as a side effect of Scalar's configuration depending on springdoc's; staging mutants: no switch exposes
+`/scalar`, `/scalar/scalar.js` and `/v3/api-docs`; `scalar.enabled: false` alone hides Scalar). The test lists
+`/scalar`, `/scalar/scalar.js` and the old Swagger UI paths, with soft assertions. The DOMPurify 3.4.16 suppression
+of the first version is dropped: Swagger UI is no longer a dependency and Scalar's bundle embeds no DOMPurify.
+No migration, no endpoint.
+
+**2026-10-29:** #97 (MLink-62/63) was merged before its review round 1 reached it, so `master` still has the
+first-enrolment takeover and the `/patients` default group. `fix/ss3-review-round-1` (one PR based on `master`)
+brings that round: the first setup needs a link mailed at login (**migration V12**), the realm adds no default group
+(staging and prod: a console step, see `docs/DEPLOYMENT.md`), and a login holding two MedLink roles is refused. Also
+the README tells manual-setup users to replace the `APP_MFA_ENCRYPTION_KEY` placeholder of `.env.example`. SCA on
+`master` is red again on a new finding, CVE-2026-116803/116804 (10.0) in DOMPurify 3.4.16 (Swagger UI 5.34.0): a
+separate MLink-127 follow-up, not this PR.
+
+**2026-10-28:** MLink-127 (SCA baseline, `chore/sca-baseline`): since the NVD key is set (2026-10-27), the
+SCA workflow runs OWASP Dependency-Check instead of the Trivy fallback, and it scans the whole project, so findings
+already on `master` turned **every PR red**. The only finding with CVSS ≥ 7, `spring-boot-devtools` vs
+CVE-2022-31691 (9.8), is a false positive: the CVE is about the Spring Tools IDE plugins (CPE mismatch), and devtools
+is `optional`, so the production jar leaves it out. It gets a narrow suppression in `security/owasp-suppressions.xml`
+(this package and this CVE only, until 2027-01-31). springdoc 3.1.1 → 3.2.0 brings Swagger UI 5.34.0, whose bundled
+DOMPurify 3.4.16 fixes CVE-2026-109344/109345 (6.1, XSS). No migration, no endpoint.
+
+**2026-10-25:** MLink-62 and MLink-63 (sub-sprint 3, staff code) on `feat/ss3-staff-totp`, one PR based on
+`master`. **Migration V11** (`user_mfa`). **New required secret `APP_MFA_ENCRYPTION_KEY`**: the API does not start
+without it; staging and prod need it in `DEPLOY_ENV_FILE` before the merge (see the section below).
+Practitioners and staff now log in with a code: tests that log in as them use `Browser.login()`, which does the
+code step.
+
+**2026-10-25:** MLink-122 (GitHub #49): in staging and prod, Actuator (metrics, `/actuator/health`) moves to the
+private management port 9000; the public port keeps `/livez` and `/readyz`. **Every health check now calls `/readyz`**
+(Dockerfile, Terraform, the deploy action's `DEPLOY_HEALTH_URL`): the code owner sets the GitHub variable
+`DEPLOY_HEALTH_URL` to `https://<api-host>/readyz` before the next deployment. Dev unchanged. No migration, no endpoint.
+
+**2026-10-24:** Presentation edition of this report for the team and the jury: `report-v2.md`
+(source) and `report-v2.html` (rendered), screenshots and diagrams in `assets/`; figures as of `master`
+`d7b0585` (2026-10-23). For a PDF, print the HTML (A4 is set in its CSS); the PDF is not committed (2.4 MB,
+over the 1 MB limit of the large-file hook in #91). This file stays the engineering log. No code change.
+
+**2026-10-23:** MLink-91, MLink-88 and MLink-90 on `feat/ss4-password-change`, one PR based on `master`.
+Endpoints 10 and 11 work end to end; see the section below for the proofs.
+
+**2026-10-20:** MLink-119 (GitHub #66, part 1) in review (#78): README rewritten to match `master` (password-grant
+login, auth flow diagram, endpoints, security rules, team workflow, CI). No code change. Part 2:
+`docs/ARCHITECTURE.md` and `security/threat-model.md`.
+
+**2026-10-20:** MLink-120 (GitHub #66, part 2): `docs/ARCHITECTURE.md` and `security/threat-model.md` match
+`master` (password-grant login, trust boundaries, STRIDE controls mapped to code and tests, ISO 27001 rows, open
+work by priority). No code change. **New gap found:** the realm role `ADMINISTRATIVE_STAFF` holds Keycloak's
+`manage-users` and `view-realm`, so staff could manage users in Keycloak's console outside the API (threat model
+E3), tracked in GitHub #80 and fixed in #81 (MLink-121); E3 is ✅ in the threat model.
 
 **2026-10-20:** MLink-60 (role × route matrix, the last task of MLink-16 RBAC) ready on `epic/MLink-6`: no
 migration, no endpoint. **From now on every new `/api` route needs a line in `AccessMatrixFunctionalTest`, or
@@ -31,6 +117,183 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-65 — setup scripts check the session and the staff code (2026-10-31, updated 2026-11-07, feat/ss3-setup-staff-code-check)
+
+- **Built:** `scripts/setup-dev.ps1` and `scripts/setup-dev.sh` (same behaviour, bash 3.2 safe). The `patient.dev`
+  login check now calls `GET /api/auth/me` (#107): `[OK]` only for 200 with `PATIENT` in the roles. Then a fresh
+  browser logs in as `practitioner.dev` with the right password: `[OK]` only when the login answers 200 with `"mfaRequired": true` **and** the same cookies get 401 on `/api/auth/me` (no
+  session before the code); anything else is a warning. The cookie and answer files are deleted afterwards; the
+  password is never printed. README and the scripts' header mention the check.
+- **Proof:** on a fresh realm, `setup-dev.ps1 -SkipTests -Reset` (Windows PowerShell) and `setup-dev.sh --skip-tests`
+  (Git Bash 5.2, volumes re-imported): **0 failures, 0 warnings**, both print `[OK] staff code asked`. Again after
+  the switch to `/api/auth/me` (2026-11-07, `master` with #107 and #103 merged in): `setup-dev.ps1 -SkipTests` and
+  `setup-dev.sh --skip-tests`, **0 warnings** each, both print the `PATIENT` role line and `[OK] staff code asked`.
+- **2026-11-07:** the first version checked the session on `/api/users/_health`, because `/api/auth/me` was not on
+  `master` yet; after #107 merged, both checks use it, as the ticket asks.
+- **Found on the way:** after an API run started by `setup-dev.sh` (Git Bash on Windows), both `setup-dev.ps1 -Stop`
+  and `setup-dev.sh --stop` stop the containers, but the API's Java process (forked by `spring-boot:run`) keeps port
+  8080, so the next run stops at "Free these ports first". A run started by `setup-dev.ps1` stops cleanly. To report
+  as an issue; not fixed here.
+
+## MLink-62, MLink-63 - staff code, TOTP (2026-10-25, feat/ss3-staff-totp)
+
+- **Contract** (plan.md §4, endpoints 5, 8, 9): for `PRACTITIONER` and `ADMINISTRATIVE_STAFF`, the password alone
+  answers `200 {"mfaRequired":true,"mfaSetupRequired":true|false}` and opens no session; the accepted login waits
+  5 minutes in the server session (`MfaPending`, Keycloak tokens included, never sent). `POST /api/auth/mfa/setup`
+  → QR code (PNG data URI), otpauth URL, Base32 secret; 401 without the step; 409 `MFA_ALREADY_ENROLLED`.
+  `POST /api/auth/mfa/verify` → `{user}` + session (new id, 15 idle minutes); 401 `INVALID_CODE`; 400 for a code
+  that is not 6 digits (checked after the step, so a caller without one gets 401); 423 `MFA_LOCKED` from the 5th
+  wrong code. Patients are unchanged.
+- **Library choice:** RFC 6238 is a few lines of `javax.crypto` (HMAC-SHA1, dynamic truncation), so it is our own
+  `service/Totp`, checked against the RFC's published vectors; ZXing `core` 3.5.3 (no transitive dependency)
+  draws the QR code, the JDK writes the PNG. A TOTP library would add a dependency for less than 100 lines.
+- **Decisions** (with Mohamed, recorded in [ss3-staff-totp.md](ss3-staff-totp.md)):
+  - The secret is sealed with AES-256-GCM, a new IV each time, the user id as associated data (a secret copied to
+    another row does not decrypt). Key `APP_MFA_ENCRYPTION_KEY` (32 bytes, base64), checked at start.
+  - Wrong codes are counted per user in the database, not per pending step: 5 → the code step is locked for 15
+    minutes, across logins and parallel requests (stronger than plan.md's first draft). The lock also drops the
+    pending step and ends the Keycloak session. A good code resets the count.
+  - A code works once (`last_used_step`), within one step of tolerance either side.
+  - `repository/UserMfaStore` uses `JdbcClient`, not JPA: each rule is one SQL statement, atomic without a
+    transaction (like `SessionRevocationStore`).
+  - The forced password change and the code step share `security/PendingStep<T>` (5 minutes, old session dropped).
+  - MFA audit entries come after #90 (Chourouk's `LOGIN` audit) merges; for staff, `LOGIN` SUCCESS should then be
+    recorded after the code (proposed on #90). Logs name the user and the outcome only.
+- **Proof:** `MfaFunctionalTest` 20 (every contract line, over HTTP, real Keycloak and database), `MfaServiceTest` 9,
+  `UserMfaStoreTest` 15 (10 wrong codes at once: exactly 5 counted; one code twice at once: works once),
+  `TotpTest` 27, `MfaSecretCipherTest` 14, `MfaKeyStartupTest` 3, `QrCodesTest` 3, `PendingStepTest` 7; the access
+  matrix has the 2 routes (57 cells). Each rule was broken once on purpose and its test turned red. Full suite
+  **349/349** in normal and reverse class order. Postman: folder 6's staff step now does the code; new folder 8
+  (28 requests) on a disposable practitioner; newman **101 requests, 240 assertions, 0 failures**, twice in a row.
+- **Tests:** in functional tests the API's `Clock` is real time shifted forward (`FunctionalTestBase.CLOCK`): each
+  staff login uses the next 30-second code, and a test lets the 15-minute lock or the 5-minute step run out.
+  `Browser.login()` does the code step for practitioners and staff, so teammates' tests keep working.
+- **Found on the way:**
+  - A full session opened after a pending step kept its 5-minute idle time; `LoginSessions.open` now sets the
+    usual 15 minutes again (red test first).
+  - The realm's `defaultGroups: ["/patients"]` put every console-made practitioner or staff member in `/patients`
+    too: fixed in review round 1 below.
+- **Review round 1 (code owner, 2026-10-28):**
+  - **Role leak:** `defaultGroups` removed from `keycloak/realm-medlink.json` (registration adds `/patients`
+    itself); the test helper no longer cleans up after the console. `ConsoleStaffAccountFunctionalTest`: a
+    console-made practitioner and staff member hold their own group and role only; `RealmFileTest` keeps the
+    default out. **Fail closed:** a login whose token holds more than one MedLink role gets 403
+    `ACCOUNT_SETUP_INCOMPLETE`, no session, its Keycloak session ended, logged (3 two-group cases).
+  - **First-enrolment takeover:** the password alone no longer enrols a code. A login with `mfaSetupRequired:
+    true` mails a single-use link (`MfaEnrolmentLinks`, purpose `MFA_ENROLMENT`, **V12**, 30 minutes, at most one
+    mail per 15 minutes, a "someone knows your password" warning); endpoint 8 needs its `{token}`, bound to the
+    account (another staff member's valid link: 400 `INVALID_TOKEN`), and the first good code closes it.
+    `MfaEnrolmentLinkFunctionalTest` (9, over HTTP) and `MfaEnrolmentLinksTest` (3: throttle, mail failure
+    logged without the token). The TOTP rules (`Totp`, cipher, `user_mfa`, endpoint 9, the lock) are unchanged.
+  - **SCA:** the gate was red on `master`'s baseline, not on ZXing (run 190 completed and flagged only
+    devtools and DOMPurify): fixed for every PR in #98 (MLink-127).
+  - Each new rule: a red commit, then green, then broken on purpose once (two-role limit, owner filter of the
+    token, "send only when setup is needed", the token check, closing the link).
+- **Limits:** changing `APP_MFA_ENCRYPTION_KEY` makes every enrolled code unreadable: verify answers 500 and the
+  log names the user and the likely cause, never the secret; re-enrolment would come with an admin reset (later
+  ticket). A pending step that runs out leaves its Keycloak
+  session to Keycloak's idle timeout. No second factor for patients (not planned).
+- **Before merging:** add `APP_MFA_ENCRYPTION_KEY` (`openssl rand -base64 32`, one per environment) to the
+  staging and prod `DEPLOY_ENV_FILE`; compose refuses to start without it. Local `.env`: the setup scripts add it.
+  In the staging and prod Keycloak consoles, remove the default group `/patients` and take `/patients` off the
+  existing practitioners and staff (`docs/DEPLOYMENT.md`); locally, `setup-dev -Reset` re-imports the realm.
+
+## MLink-122 — metrics not public in production, GitHub #49 (2026-10-25, fix/49-management-port)
+
+Design agreed with the code owner on #49 (a separate management port, not authentication).
+
+**Built:**
+- `application-staging.yml`, `application-prod.yml`: `management.server.port: 9000`. All of Actuator lives there; the
+  public port no longer serves `/actuator/**`. Port 9000 is never published: Prometheus scrapes `app:9000` and
+  `app-staging:9000` over the Docker network (`monitoring/prometheus/prometheus.yml`).
+- `application.properties` (every profile): `/livez` and `/readyz` on the main port
+  (`management.endpoint.health.probes.*`); they answer `{"status":"UP"}` and nothing else.
+- `SecurityConfig` (shared file): `GET /livez` and `/readyz` public. The `/actuator/prometheus` rule stays: Spring
+  Security also guards the management port, so Prometheus (no login) needs it there; what keeps the metrics private
+  in staging and prod is the unpublished port. Mutation check: without the rule, Prometheus gets 401 on port 9000.
+- Health checks → `/readyz`: `docker/Dockerfile` `HEALTHCHECK`, `terraform/main.tf` healthcheck and its README,
+  the deploy-compose action and `docs/DEPLOYMENT.md` (with a "never publish 9000" security note), as the code owner
+  asked on #49. Dev (setup scripts, DAST with the dev profile) keeps Actuator on 8080.
+
+**Proof:** `ManagementPortIntegrationTest` (real API, real profile files): staging and prod, `/actuator/prometheus`
+and `/actuator/health` on the main port refused to anonymous callers, metrics served on the management port,
+`/livez` and `/readyz` UP on the main port with no detail; dev keeps metrics and health on the main port and gains
+`/readyz`. The management port is random there, so `ManagementPortConfigTest` reads the files: staging and prod set
+9000, every Prometheus target uses it, no compose file publishes it. Committed red first (9 failures), then green.
+`scripts/ci/check-prod-config.sh` passes.
+
+**For whoever deploys:** set the GitHub Environment variable `DEPLOY_HEALTH_URL` to the API's `/readyz` URL in
+`staging` and `production`. A proxy must not route port 9000.
+
+**Code owner's review on #94:** the default readiness group holds only `readinessState`, so with every health check
+moved to `/readyz` a database outage still looked healthy. Now `management.endpoint.health.group.readiness.include =
+readinessState,db` (every profile); `/livez` stays the process only, so a database outage never restarts the API.
+`ReadinessProbeIntegrationTest` (prod profile) stops its own Postgres container: `/readyz` 200 → **503 DOWN** (no
+detail), `/livez` still 200 UP. Committed red first (33b634d: `/readyz` still 200 without the database), then green
+(297a5ef).
+
+**Limits:** Swagger and `/v3/api-docs` are not Actuator and stay public in production: GitHub #65.
+
+## MLink-91, MLink-88, MLink-90 - password changes (2026-10-23, feat/ss4-password-change, [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89))
+
+- **MLink-91:** `POST /api/auth/password` changes the logged-in user's password. The current password
+  is checked by a Keycloak password grant, then `KeycloakAdminService.setPassword` applies the new one;
+  every session of the user then ends (see the review below). Wrong current password -> `401 INVALID_CURRENT_PASSWORD`;
+  Keycloak policy -> `400 PASSWORD_POLICY` with the existing French messages. No password or token is
+  logged; the browser keeps only its session cookie.
+- **MLink-88:** `POST /api/admin/users/{id}/force-password-reset` is staff-only (`204`, unknown id
+  `404`). It adds Keycloak's `UPDATE_PASSWORD` and ends the user's Keycloak sessions. The next password
+  login returns `200 {"passwordChangeRequired":true}` in a five-minute pending session that carries no
+  authenticated principal. `POST /api/auth/password` then needs only the new password and is single-use.
+  A normal login clears the pending marker.
+- **MLink-90:** the two routes are in `AccessMatrixFunctionalTest` (anonymous 401, patient/practitioner
+  403, staff allowed; a missing pending session is 401). The forced test also covers a weak forced
+  password (pending stays usable), the single-use rule, session shutdown and a normal login afterwards.
+- **Proof:** `PasswordChangeFunctionalTest` 5/5 green; `ForcePasswordResetFunctionalTest` 3/3 green;
+  full suite 222/222 in normal and reverse class order. Postman folder 6 (66 requests, 176 assertions,
+  0 failure) runs the complete scenario: normal change, wrong current, policy refusal, staff reset,
+  pending login, forced change, reuse refusal.
+- **Known scope:** only Keycloak sessions are ended by the reset. API sessions end at their next token
+  renewal through `SessionValidityFilter`; the access token lifespan is five minutes.
+- **Code owner's review (2026-10-23).** Scope: endpoint 10 is a password change (with a session, or the
+  pending step after a staff reset), not forgot password, which stays out of scope (plan.md §8); a
+  comment on the PR had said otherwise. Keycloak 26.8.1 checked on the dev stack first: "Account is not
+  fully set up" comes only after the right password, for any required action and for an incomplete
+  profile; `reset-password` with `temporary=false` drops `UPDATE_PASSWORD` itself and keeps the other
+  actions. Changes:
+  - Another required action next to `UPDATE_PASSWORD` (or none, an incomplete profile): the login
+    answers `403 ACCOUNT_SETUP_INCOMPLETE` before any change, logged for an admin. Only the password's
+    owner sees it, as with `ACCOUNT_DISABLED`.
+  - The forced change is one Keycloak write (`clearPasswordChange` removed): nothing left half done.
+  - The staff reset blocks new logins first, then refuses the old API sessions, then ends Keycloak's;
+    every step is idempotent, so an error means "send it again" and nothing is rolled back.
+  - A normal change ends every session (decided with the lead). Fail closed, whatever Keycloak does:
+    `V9__session_revocations.sql` adds one mark per user, set *before* the password changes;
+    `SessionValidityFilter` refuses any session opened at or before it, on every call (one primary-key
+    read). A password Keycloak refused puts the mark back (a weak attempt logs no one out); no answer
+    keeps it (the password may have changed). Keycloak's sign-out still runs; if only it fails, the
+    leftover Keycloak sessions are unusable (the browser never holds Keycloak's tokens) and a warning is
+    logged. A separate table, not a `users` column: a login saving the users row never writes an old
+    mark back. A reset landing in a still-fresh session answers `401 SESSION_EXPIRED` instead of a 500.
+  - Only Keycloak's exact wording opens the forced change; another wording fails closed as `401`.
+  - Proof: new functional tests (every session ends; an old session refused while Keycloak still
+    accepts it; another action refused; a reset sent twice), `SessionRevocationStoreTest` and unit tests
+    for the Keycloak failures between two calls, each committed red first; Postman folder 6
+    checks that the change ends the session (67 requests, 178 assertions, 0 failure); full suite 243/243 in
+    normal and reverse class order.
+
+## MLink-87 - password history (2026-10-22, feat/ss4-password-history)
+
+- Realm `passwordPolicy` gains `passwordHistory(3)`: a new password must differ from the last three.
+- No migration, no endpoint, no Postman change; Keycloak remains the only place that stores passwords.
+- The French message was already mapped in `InvalidPasswordException`
+  (`invalidPasswordHistoryMessage`): "Le mot de passe doit être différent de vos 3 derniers mots de passe."
+- **Proof:** `PasswordHistoryFunctionalTest` creates a user and sets two passwords through
+  `KeycloakAdminService`, then reuses the first: Keycloak refuses it and the API raises
+  `PASSWORD_POLICY` with that French message. Red first (no throwable), then green.
+- **Every dev machine re-imports the realm once:** the setup script sees the realm file hash change and
+  resets the volumes automatically; `-Reset` does the same by hand.
 
 ### Where we are (handoff, 2026-10-16)
 
@@ -75,6 +338,24 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## GitHub #48 — AI disclosure is conditional and truthful (2026-10-21, fix/48-ai-disclosure)
+
+**PR:** [#82](https://github.com/assali-mohamed-ali/api-MedLink/pull/82)
+
+**Built:** the `Utilisation de l'IA` section now offers two exclusive usage choices ("no AI" or "AI used")
+and the human review acknowledgment. `ai-disclosure.yml` runs a small Node validator
+(`.github/scripts/validate-ai-disclosure.mjs`) that fails when neither or both usage choices are checked,
+when AI use has no review acknowledgment, when "no AI" is combined with the review acknowledgment, and
+when a checklist line is missing or duplicated. Failure messages say exactly what to fix. The validator's
+own tests run in the workflow before it validates the PR.
+
+**Proof:** `node --test .github/scripts/validate-ai-disclosure.test.mjs`: 10 tests, 0 failures, covering
+no-AI, AI + review, AI without review, both choices, no choice, missing/duplicated lines, CRLF, indentation
+and uppercase `X`.
+
+**Limits:** the workflow can only check the PR body; it cannot know whether an author lied. The template and
+`CLAUDE.md` now state the intended declaration in the same words as the validator.
 
 ## MLink-60 — role × route matrix (2026-10-20, epic/MLink-6)
 
@@ -124,6 +405,27 @@ tests, e.g. `OwnershipFunctionalTest`). Routes outside `/api` (actuator, Swagger
 in production is GitHub #49 and #65. Maven's console names the cells by number (`[26]`); IDEs and the
 surefire XML report show the readable name.
 
+## GitHub #54 — the SCA fallback is visible and gated (2026-10-21, fix/54-sca-fallback)
+
+**PR:** [#83](https://github.com/assali-mohamed-ali/api-MedLink/pull/83)
+
+**Built:** `scripts/ci/sca-policy.sh` decides the scanner from the event, ref, `NVD_API_KEY` and the new
+repository variable `ALLOW_TRIVY_FALLBACK`. The workflow now writes the scanner, the reason and the policy
+to the log, the step summary and `target/sca-scanner.txt` (uploaded in `sca-reports`), and fails when the
+selected scanner produced no report. Release branches (`master`, `staging`, `prod`, `v*` tags) fail on the
+Trivy fallback unless `ALLOW_TRIVY_FALLBACK=true` explicitly accepts it; PRs, schedules, manual runs and
+feature-branch pushes may fall back with a visible warning. `SECURITY.md` documents what Trivy covers and
+what it does not cover (NVD/CPE/transitive Java analysis, suppressions, unfixed CVEs).
+
+**Proof:** `scripts/ci/sca-policy.test.sh` covers the NVD-key path (always primary), the missing-key paths
+for PRs, schedules, manual runs and feature branches (fallback allowed), release branches and `v*` tags
+(denied), the explicit `ALLOW_TRIVY_FALLBACK` acceptance and an unknown event (denied). It runs in the SCA
+workflow before the scan.
+
+**Limits:** the policy cannot make Trivy equivalent to OWASP Dependency-Check; the documented answer is to
+set `NVD_API_KEY` for release scans. The fallback still runs (and publishes findings) before the release
+policy fails, so a red run has usable evidence.
+
 ## MLink-121 — staff without Keycloak admin rights, GitHub #80 (2026-10-20, fix/80-staff-keycloak-rights)
 
 **Problem** (found by the threat model update, row E3, #79): the realm role `ADMINISTRATIVE_STAFF` was a composite
@@ -154,6 +456,26 @@ limit (Keycloak's lockout still applies). That token now grants no admin right; 
 public in production (threat model E4) removes the path. The threat model's E3 row turns ✅ once this and #79 are
 both on `master`.
 
+## GitHub #53 — Terraform matches the Keycloak BFF (2026-10-21, fix/53-terraform-env)
+
+**PR:** [#84](https://github.com/assali-mohamed-ali/api-MedLink/pull/84)
+
+**Built:** `terraform/main.tf` now injects every setting the production profile needs: database,
+both Keycloak clients (public/internal URLs, realm, client id and the BFF/admin secrets), SMTP
+(host, port, user, password, sender), frontend URL and CORS. The obsolete `JWT_SECRET` variable is
+removed from `variables.tf` and all three tfvars examples. The app image examples use immutable
+digests. Secret variables are `sensitive`; `terraform/README.md` documents the required values, the
+Postgres/Keycloak networking contract, remote state (`backend.tf.example`) and rollback.
+`scripts/ci/check-prod-config.sh` checks the container environment against the production profile
+(and rejects any `JWT_SECRET` reference); CI also runs `terraform init -backend=false`,
+`terraform fmt -check` and `terraform validate`.
+
+**Proof:** `scripts/ci/check-prod-config.sh` passes; `terraform fmt -check` and `terraform validate`
+pass with Terraform 1.9.8. `python3 -c 'import yaml; yaml.safe_load(...)'` on `ci.yml`: valid.
+
+**Limits:** Terraform still deploys only the API container; PostgreSQL and Keycloak are external
+dependencies (documented). Provisioning Keycloak/keycloak-db belongs to the deployment work in #47.
+
 ## MLink-84 — session cookie hardening (2026-10-19, feat/ss2-session-cookie-hardening)
 
 Unblocked by decision #58 option 1 (keep the password grant): no Keycloak redirect comes back, so Strict is safe.
@@ -175,6 +497,29 @@ the XSRF Secure switch off turns both profile tests red. The fixation test was g
 existing code). Suite: **150 tests, 0 failures**, both class orders; after merging #60: **160, 0 failures**, both orders. No endpoint change, so no Postman change.
 `scripts/setup-dev.ps1` 0 failures in both modes (dev 28 OK, `-FullStack` 29 OK): the end-to-end login and sign-up
 still work with the Strict cookies.
+
+## GitHub #47 — real CD rollout (2026-10-21, feat/47-cd-compose-rollout)
+
+**PR:** [#85](https://github.com/assali-mohamed-ali/api-MedLink/pull/85)
+
+**Built:** `cd.yml` no longer stops at `terraform validate`. The build job publishes the image and
+exports its immutable digest (`repository@sha256:...`). The staging/production jobs run in their
+GitHub Environments and call `.github/actions/deploy-compose`: pin the host key, copy
+`docker-compose.yml`, the Keycloak realm and monitoring config to `DEPLOY_PATH`, write `.env` with
+mode `600` (environment file + `APP_IMAGE`), log in to GHCR on the target, `compose pull`/`up` the API
+by digest, verify the running container uses that exact digest, poll `/actuator/health` for
+`"status":"UP"`, and print the last 200 API log lines on failure. `docker-compose.yml` now accepts
+`APP_IMAGE` (default `api-medlink:local`). `docs/DEPLOYMENT.md` documents the host prerequisites,
+environment variables/secrets, immutable-digest rollout, rollback and failure recovery. Production
+still requires the `production` environment reviewers and is unreachable from `master`.
+
+**Proof:** `python3 -c 'import yaml; yaml.safe_load(...)'` on `cd.yml` and the composite action: valid;
+`bash -n` on every workflow/composite `run` block: clean; `docker compose config --images` with
+`APP_IMAGE` set: resolves the app to the supplied digest; the deployment input gate exits 1 with
+`DEPLOY_HOST` empty and 0 with every required input set. `ComposeFilesTest` still passes (5 tests).
+
+**Limits:** the real SSH rollout needs the staging/production hosts and environment secrets; it
+cannot run in this workspace. The first deployment and the environment review remain human steps.
 
 ## MLink-112 — shared rate limits, GitHub #51 (2026-10-18, fix/51-shared-rate-limits)
 
@@ -224,6 +569,33 @@ behind it shares the proxy's count (no proxy is described yet: issue #31, Terraf
 the client's address (`$proxy_add_x_forwarded_for`), never pass the client's header as is. People behind one
 NAT (a clinic) share one count: the values leave room for that. A taken email still answers a little faster
 than a new one (no Keycloak call); the per-IP limit now caps how many emails one IP can probe.
+
+## Docker — backend in the dev compose stack, PR #86 (2026-10-21, feat/dockerize-backend)
+
+**Built:** `compose.yaml` now defines the API under the `full` profile (`docker compose --profile full
+up --build`), with fixed dev values for the database, Keycloak clients, Mailpit and the frontend URL;
+the default profile is unchanged (API on the host, `spring-boot:run`). `docker-compose.yml` keeps the
+same image and gains the same `PGDATA=/var/lib/postgresql/data` pin as `compose.yaml` (the Postgres 18
+image otherwise looks in `/var/lib/postgresql/<major>/docker`); its no-env profile default is now `dev`
+(staging/prod env files still set `staging`/`prod`). The API datasource in the dev profile
+uses the fixed `postgres` service values, so a local `.env` cannot accidentally send it another
+password. The ineffective `docker/.dockerignore` moved to the repository root (the build context is
+`.`); it now excludes `.env*`, `.git`, `target`, docs, infra and monitoring, so a local secret never
+reaches the Docker daemon and the context is smaller. README and architecture docs document the new
+profile.
+
+**Proof:** `ComposeFilesTest` passes (5 tests). `docker compose -f compose.yaml config --services`
+excludes `app` by default and `--profile full` includes it; `config --images` resolves the app to
+`api-medlink:local`. `docker compose --profile full -f compose.yaml build app` succeeds. In a clean
+isolated project (`medlink-dockerize-test`, fresh volumes, temporary host-port overrides only to avoid
+the running stack) `docker compose --profile full up -d --build` started all five services and the
+app's `/actuator/health` returned `"status":"UP"` after 6 s. The project was removed with `down -v`,
+leaving the original dev dependencies running.
+
+**Limits:** the existing local Keycloak database volume was created by PostgreSQL 16 while `master`
+now pins the Postgres 18 image; that separate dev-stack failure is #74 (a fresh volume works, as the
+clean run shows). The check covers startup and health, not a browser login or a Keycloak admin
+operation.
 
 ## MLink-113 — one compose setup per workflow, GitHub #52 (2026-10-18, fix/52-one-compose-setup)
 
@@ -593,6 +965,9 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-23 | A password change ends every session of the user, this one included; the user logs in again | A change made because a session may be compromised must close it; same ending as the forced change (review on #89) | Keeping the current session only (more calls, more partial failures); keeping all |
+| 2026-10-23 | Old sessions are refused by the API itself (`session_revocations`, set before the password changes), not only by Keycloak's sign-out | Fail closed: a Keycloak failure after the change can no longer leave a stolen session open; the browser only reaches Keycloak through the API (review on #89) | 204 + an error log when Keycloak's sign-out fails (left a window until Keycloak's idle timeout); 503 after a change that did happen (the old password cannot be put back) |
+| 2026-10-23 | Login with a Keycloak required action other than `UPDATE_PASSWORD` alone: 403 `ACCOUNT_SETUP_INCOMPLETE` | The API finishes only the forced change; starting it would leave the account blocked after the change; Keycloak checked the password first, so it reveals nothing | Running the change and leaving the user locked out; 401 (looks like a wrong password) |
 | 2026-10-20 | The role × route matrix asserts past security / 401 / 403, not exact statuses, and reads the routes from Spring | It proves access rules only, so a feature's answers (200, 400, 404) can change without touching it; a route missing from the matrix fails the build (MLink-60) | Exact status per cell; a hand-kept list of routes |
 | 2026-10-19 | The login keeps the OAuth password grant, as a consciously accepted exception: [decision record 0001](../../decisions/0001-login-password-grant.md) | Keeps "the frontend never talks to Keycloak"; decided by the plan owner and the code owner on PR #58 (GitHub #50); its conditions: per-IP rate limiting (done, #60) and this link | Authorization Code + PKCE with a themed Keycloak login page |
 | 2026-10-18 | Rate limits counted in Postgres (`rate_limits`, one atomic upsert per hit), not Redis | Shared by every instance and race-free with the database we already run; no new service to deploy and secure (GitHub #51) | Redis; the in-memory map (one instance, racy) |

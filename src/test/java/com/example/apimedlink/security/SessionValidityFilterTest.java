@@ -7,9 +7,13 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.example.apimedlink.repository.SessionRevocationStore;
 import jakarta.servlet.FilterChain;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockHttpServletRequest;
@@ -33,7 +37,10 @@ import tools.jackson.databind.json.JsonMapper;
 class SessionValidityFilterTest {
 
     final OAuth2AuthorizedClientManager manager = mock(OAuth2AuthorizedClientManager.class);
-    final SessionValidityFilter filter = new SessionValidityFilter(manager, JsonMapper.builder().build());
+    final SessionRevocationStore revocations = mock(SessionRevocationStore.class);
+    final SessionValidityFilter filter =
+            new SessionValidityFilter(manager, JsonMapper.builder().build(), revocations);
+    final UUID userId = UUID.randomUUID();
     final MockHttpServletRequest request = new MockHttpServletRequest("GET", "/api/users/_health");
     final MockHttpServletResponse response = new MockHttpServletResponse();
     final MockHttpSession session = new MockHttpSession();
@@ -41,7 +48,7 @@ class SessionValidityFilterTest {
 
     private void loggedInThroughKeycloak() {
         DefaultOAuth2User user = new DefaultOAuth2User(
-                List.of(new SimpleGrantedAuthority("ROLE_PATIENT")), Map.of("sub", "user-1"), "sub");
+                List.of(new SimpleGrantedAuthority("ROLE_PATIENT")), Map.of("sub", userId.toString()), "sub");
         SecurityContextHolder.getContext()
                 .setAuthentication(new OAuth2AuthenticationToken(user, user.getAuthorities(), "keycloak"));
         request.setSession(session);
@@ -101,6 +108,47 @@ class SessionValidityFilterTest {
 
         assertThat(response.getStatus()).isEqualTo(401);
         assertThat(session.isInvalid()).isTrue();
+    }
+
+    @Test
+    void aSessionOpenedBeforeTheMarkEndsWithoutAskingKeycloak() throws Exception {
+        loggedInThroughKeycloak();
+        Instant mark = Instant.parse("2026-10-23T08:00:00Z");
+        session.setAttribute(LoginSessions.OPENED_AT, mark.minusSeconds(60));
+        when(revocations.revokedAt(userId)).thenReturn(Optional.of(mark));
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain, never()).doFilter(any(), any());
+        verify(manager, never()).authorize(any());
+        assertThat(response.getStatus()).isEqualTo(401);
+        assertThat(response.getContentAsString()).contains("\"code\":\"SESSION_EXPIRED\"");
+        assertThat(session.isInvalid()).isTrue();
+    }
+
+    @Test
+    void aSessionWithoutAnOpeningTimeEndsOnceTheUserIsMarked() throws Exception {
+        loggedInThroughKeycloak();
+        when(revocations.revokedAt(userId)).thenReturn(Optional.of(Instant.parse("2026-10-23T08:00:00Z")));
+        when(manager.authorize(any())).thenReturn(mock(OAuth2AuthorizedClient.class));
+
+        filter.doFilter(request, response, chain);
+
+        assertThat(response.getStatus()).as("Keycloak would accept it").isEqualTo(401);
+        assertThat(session.isInvalid()).isTrue();
+    }
+
+    @Test
+    void aSessionOpenedAfterTheMarkGoesOn() throws Exception {
+        loggedInThroughKeycloak();
+        Instant mark = Instant.parse("2026-10-23T08:00:00Z");
+        session.setAttribute(LoginSessions.OPENED_AT, mark.plusSeconds(60));
+        when(revocations.revokedAt(userId)).thenReturn(Optional.of(mark));
+        when(manager.authorize(any())).thenReturn(mock(OAuth2AuthorizedClient.class));
+
+        filter.doFilter(request, response, chain);
+
+        verify(chain).doFilter(request, response);
     }
 
     @Test

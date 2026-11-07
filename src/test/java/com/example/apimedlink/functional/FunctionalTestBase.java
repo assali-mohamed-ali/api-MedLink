@@ -1,6 +1,7 @@
 package com.example.apimedlink.functional;
 
 import com.example.apimedlink.TestcontainersConfiguration;
+import com.example.apimedlink.service.Totp;
 import java.io.IOException;
 import java.net.CookieHandler;
 import java.net.HttpCookie;
@@ -11,17 +12,25 @@ import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
+import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.context.TestConfiguration;
+import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Import;
+import org.springframework.context.annotation.Primary;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.test.context.DynamicPropertyRegistry;
@@ -30,6 +39,7 @@ import org.springframework.web.client.RestClient;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.MountableFile;
+import tools.jackson.databind.ObjectMapper;
 
 /**
  * Functional tests: the real API on a real port, a real Keycloak (same image and realm file as
@@ -38,9 +48,12 @@ import org.testcontainers.utility.MountableFile;
  *
  * <p>One Keycloak for every functional test class: subclasses share the container and the Spring
  * context, so it starts once per test run.
+ *
+ * <p>The API's clock is {@link #CLOCK}: real time, shifted forward by the tests. Each staff login moves it to
+ * the next 30-second code (a code works once), and a test can let the 15-minute code lock run out.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.DEFINED_PORT)
-@Import(TestcontainersConfiguration.class)
+@Import({TestcontainersConfiguration.class, FunctionalTestBase.ShiftedClockConfig.class})
 public abstract class FunctionalTestBase {
 
     static final String BFF_SECRET = "functional-bff-secret";
@@ -91,6 +104,50 @@ public abstract class FunctionalTestBase {
         return "http://localhost:" + KEYCLOAK.getMappedPort(8080);
     }
 
+    // ---- the clock -----------------------------------------------------------------------------
+
+    static final ShiftedClock CLOCK = new ShiftedClock();
+
+    /** Real time plus a shift that only grows: the API never sees time go back. */
+    static final class ShiftedClock extends Clock {
+
+        private final AtomicLong shiftMillis = new AtomicLong();
+
+        void advance(Duration duration) {
+            shiftMillis.addAndGet(duration.toMillis());
+        }
+
+        /** The code an authenticator app shows 30 seconds from now: a step no earlier login used. */
+        String nextCode(byte[] secret) {
+            advance(Duration.ofSeconds(30)); // one TOTP step
+            return Totp.code(secret, Totp.step(instant()));
+        }
+
+        @Override
+        public Instant instant() {
+            return Instant.now().plusMillis(shiftMillis.get());
+        }
+
+        @Override
+        public ZoneOffset getZone() {
+            return ZoneOffset.UTC;
+        }
+
+        @Override
+        public Clock withZone(ZoneId zone) {
+            return this;
+        }
+    }
+
+    @TestConfiguration(proxyBeanMethods = false)
+    static class ShiftedClockConfig {
+        @Bean
+        @Primary
+        Clock shiftedClock() {
+            return CLOCK;
+        }
+    }
+
     static String appUrl(String path) {
         return "http://localhost:" + APP_PORT + path;
     }
@@ -139,14 +196,82 @@ public abstract class FunctionalTestBase {
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
 
-        /** Logs in through our login endpoint (MLink-55), as a person does in React; the answer is not checked here. */
+        /** The staff code secrets enrolled in this run, by email: the API keeps them only sealed. */
+        static final Map<String, byte[]> CODE_SECRETS = new ConcurrentHashMap<>();
+
+        private static final ObjectMapper JSON = new ObjectMapper();
+
+        /** The {@code user} of the last answer that opened a session ({@link #login}). */
+        private Map<?, ?> sessionUser;
+
+        /** The email of the last login through {@link #apiLogin}: whose mailbox holds the setup link. */
+        private String loginEmail;
+
+        /**
+         * Logs in through our login endpoint (MLink-55), as a person does in React; the password answer is not
+         * checked here. A practitioner or staff member then does the code step (MLink-62/63) as with their
+         * authenticator app: enrols at the first login of the run, then sends the next code. A code step that
+         * does not open the session fails the test.
+         */
         Browser login(String email, String password) throws Exception {
-            apiLogin(email, password);
+            Map<?, ?> answer = json(apiLogin(email, password));
+            if (!Boolean.TRUE.equals(answer.get("mfaRequired"))) {
+                sessionUser = (Map<?, ?>) answer.get("user");
+                return this;
+            }
+            String who = email.toLowerCase();
+            if (Boolean.TRUE.equals(answer.get("mfaSetupRequired"))) {
+                HttpResponse<String> setup = mfaSetup();
+                if (setup.statusCode() != 200) {
+                    throw new AssertionError("code setup for " + email + ": " + setup.statusCode() + " " + setup.body());
+                }
+                CODE_SECRETS.put(who, Totp.fromBase32((String) json(setup).get("secret")));
+            }
+            byte[] secret = CODE_SECRETS.get(who);
+            if (secret == null) {
+                throw new AssertionError(email + " has a code enrolled outside this run: no secret to compute it");
+            }
+            HttpResponse<String> verify = mfaVerify(CLOCK.nextCode(secret));
+            if (verify.statusCode() != 200) {
+                throw new AssertionError("code step for " + email + ": " + verify.statusCode() + " " + verify.body());
+            }
+            sessionUser = (Map<?, ?>) json(verify).get("user");
             return this;
+        }
+
+        /** The roles the API gave the session that {@link #login} opened, as React reads them. */
+        List<String> sessionRoles() {
+            return sessionUser == null ? List.of()
+                    : ((List<?>) sessionUser.get("roles")).stream().map(String::valueOf).toList();
+        }
+
+        /**
+         * Endpoint 8, as React does once the person opened the setup link mailed at this login (review of #97): the
+         * token of the newest such mail to the address this browser logged in with.
+         */
+        HttpResponse<String> mfaSetup() throws Exception {
+            return mfaSetup(new Mailbox().enrolmentToken(loginEmail));
+        }
+
+        /** Endpoint 8 with this token ({@code null}: no body), the pending code step being the session's. */
+        HttpResponse<String> mfaSetup(String token) throws Exception {
+            return post("/api/auth/mfa/setup", token == null ? "" : "{\"token\":\"" + token + "\"}", true);
+        }
+
+        /** Endpoint 9, as React does. */
+        HttpResponse<String> mfaVerify(String code) throws Exception {
+            return post("/api/auth/mfa/verify", "{\"code\":\"" + code + "\"}", true);
+        }
+
+        /** A JSON object body, or an empty map when there is none. */
+        static Map<?, ?> json(HttpResponse<String> response) {
+            String body = response.body();
+            return body == null || !body.startsWith("{") ? Map.of() : JSON.readValue(body, Map.class);
         }
 
         /** Logs in through our login endpoint (MLink-55), as React does: CSRF cookie first, then the JSON post. */
         HttpResponse<String> apiLogin(String email, String password) throws Exception {
+            loginEmail = email;
             call("/api/auth/csrf");
             return post("/api/auth/login", "{\"email\":\"" + email + "\",\"password\":\"" + password + "\"}", true);
         }
@@ -259,12 +384,36 @@ public abstract class FunctionalTestBase {
 
         /** Same, choosing whether the email is verified (an unverified one: a sign-up whose link was never opened). */
         UUID createUser(String email, String password, boolean emailVerified) {
+            return createUser(email, password, emailVerified, List.of("/patients"));
+        }
+
+        /**
+         * A practitioner ({@code /practitioners}) or staff member ({@code /administrative-staff}) made in the
+         * console, in that group only: exactly what the admin does, nothing cleaned up after.
+         */
+        UUID createUser(String email, String password, String group) {
+            return createUser(email, password, true, List.of(group));
+        }
+
+        /** An account an admin put in several groups by mistake (a person holds one role only). */
+        UUID createUserInGroups(String email, String password, List<String> groups) {
+            return createUser(email, password, true, groups);
+        }
+
+        /** The paths of the user's groups, as the console's Groups tab lists them. */
+        List<String> groups(UUID user) {
+            return ((List<?>) read("/users/{id}/groups", user)).stream()
+                    .map(group -> (String) ((Map<?, ?>) group).get("path"))
+                    .toList();
+        }
+
+        private UUID createUser(String email, String password, boolean emailVerified, List<String> groups) {
             URI location = http.post().uri("/admin/realms/medlink/users")
                     .header(HttpHeaders.AUTHORIZATION, token())
                     .contentType(MediaType.APPLICATION_JSON)
                     .body(Map.of(
                             "username", email, "email", email, "firstName", "Console", "lastName", "User",
-                            "enabled", true, "emailVerified", emailVerified, "groups", List.of("/patients"),
+                            "enabled", true, "emailVerified", emailVerified, "groups", groups,
                             "credentials", List.of(Map.of("type", "password", "value", password, "temporary", false))))
                     .retrieve()
                     .toBodilessEntity()
@@ -345,7 +494,11 @@ public abstract class FunctionalTestBase {
     /** The mails the API sent, read through Mailpit's API. */
     static final class Mailbox {
 
+        static final String VERIFICATION_SUBJECT = "Confirmez votre adresse e-mail MedLink";
+        static final String ENROLMENT_SUBJECT = "Configurez votre code de connexion MedLink";
+
         private static final Pattern VERIFY_LINK = Pattern.compile("verifier-email[?]token=([A-Za-z0-9_-]+)");
+        private static final Pattern ENROLMENT_LINK = Pattern.compile("configurer-code[?]token=([A-Za-z0-9_-]+)");
 
         private final RestClient http =
                 RestClient.builder().baseUrl("http://localhost:" + MAILPIT.getMappedPort(8025)).build();
@@ -371,13 +524,22 @@ public abstract class FunctionalTestBase {
 
         /** The token in the newest verification mail to this address. */
         String verificationToken(String email) {
-            List<Map<?, ?>> mails = to(email, "Confirmez votre adresse e-mail MedLink");
+            return token(email, VERIFICATION_SUBJECT, VERIFY_LINK);
+        }
+
+        /** The token in the newest staff-code setup mail to this address (MLink-62, review of #97). */
+        String enrolmentToken(String email) {
+            return token(email, ENROLMENT_SUBJECT, ENROLMENT_LINK);
+        }
+
+        private String token(String email, String subject, Pattern linkPattern) {
+            List<Map<?, ?>> mails = to(email, subject);
             if (mails.isEmpty()) {
-                throw new AssertionError("no verification mail to " + email);
+                throw new AssertionError("no mail \"" + subject + "\" to " + email);
             }
-            Matcher link = VERIFY_LINK.matcher(text(mails.get(0)));
+            Matcher link = linkPattern.matcher(text(mails.get(0)));
             if (!link.find()) {
-                throw new AssertionError("no verification link in the mail to " + email);
+                throw new AssertionError("no link in the mail \"" + subject + "\" to " + email);
             }
             return link.group(1);
         }

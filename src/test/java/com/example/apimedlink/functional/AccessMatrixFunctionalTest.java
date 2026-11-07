@@ -42,7 +42,13 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("POST",   "/api/auth/verify-email",        O, O, O, O),
             new Rule("POST",   "/api/auth/verify-email/resend", O, O, O, O),
             new Rule("POST",   "/api/auth/login",               O, O, O, O),
+            new Rule("GET",    "/api/auth/me",                  L, O, O, O),
             new Rule("POST",   "/api/auth/logout",              L, O, O, O),
+            new Rule("POST",   "/api/auth/password",            L, O, O, O),
+            // Only a pending code step (staff login, password accepted) gets past these; a full session does not
+            new Rule("POST",   "/api/auth/mfa/setup",           L, L, L, L),
+            new Rule("POST",   "/api/auth/mfa/verify",          L, L, L, L),
+            new Rule("POST",   "/api/admin/users/{id}/force-password-reset", L, F, F, O),
             new Rule("GET",    "/api/users",                    L, F, F, O),
             new Rule("GET",    "/api/users/{id}",               L, F, F, O),
             new Rule("DELETE", "/api/users/{id}",               L, F, F, O),
@@ -68,7 +74,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
 
     enum Who { ANONYMOUS, PATIENT, PRACTITIONER, STAFF }
 
-    /** Every cell of the matrix: 10 routes × 4 callers. */
+    /** Every cell of the matrix: each route × 4 callers. */
     static Stream<Arguments> cells() {
         return MATRIX.stream().flatMap(rule -> Stream.of(
                 Arguments.of(rule, Who.ANONYMOUS, rule.anonymous()),
@@ -93,7 +99,10 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
         }
     }
 
-    /** A fresh browser per cell (a logout cannot spoil the next one), logged in as the realm's dev user. */
+    /**
+     * A fresh browser per cell (a logout cannot spoil the next one), logged in as the realm's dev user; a
+     * practitioner or staff member through the code step too (MLink-62/63).
+     */
     private static Browser as(Who who) throws Exception {
         Browser browser = new Browser();
         String email = switch (who) {
@@ -103,7 +112,8 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             case STAFF -> "staff.dev@medlink.local";
         };
         if (email != null) {
-            assertThat(browser.apiLogin(email, DEV_USERS_PASSWORD).statusCode()).as(who + " logged in").isEqualTo(200);
+            assertThat(browser.login(email, DEV_USERS_PASSWORD).call("/api/users/_health").statusCode())
+                    .as(who + " logged in").isEqualTo(200);
         }
         return browser;
     }

@@ -14,14 +14,44 @@
   `surefire-reports` + `jacoco-report` publiés à chaque run.
 - `SAST-CodeQL` : requêtes `security-extended` — alertes code-scanning
   bloquantes une fois marquées required.
-- `SCA-Dependency-Check` : échoue sur CVSS >= 7 (SARIF publié).
-  Seule échappatoire : suppression justifiée dans
-  `security/owasp-suppressions.xml` (expiry + ticket).
+- `SCA-Dependency-Check` : OWASP Dependency-Check (source NVD) échoue sur
+  CVSS >= 7 (SARIF publié). Seule échappatoire : suppression justifiée dans
+  `security/owasp-suppressions.xml` (expiry + ticket). Si `NVD_API_KEY` est
+  absent, le workflow utilise Trivy en secours (voir ci-dessous).
 - `Secrets-Scan` (Gitleaks) : tout leak bloque.
 - `Container-Scan` (Trivy config+image) : CRITICAL/HIGH bloque (SARIF publié).
 - `DAST-ZAP` : `fail_action: true` bloque sur violation des règles.
 - `CD` : `staging` → env `staging` ; seuls `prod` / `v*` atteignent
   l'env `production` (reviewers requis).
+
+### SCA : scanner principal et secours accepté
+
+**Scanner principal :** OWASP Dependency-Check avec la base NVD, `CVSS >= 7`
+bloquant, suppressions dans `security/owasp-suppressions.xml`. C'est le seul
+scanner qui honore ce fichier de suppressions.
+
+**Secours :** sans `NVD_API_KEY`, le workflow lance Trivy (`rootfs` sur le jar
+construit) avec `CRITICAL,HIGH` bloquant et `ignore-unfixed: true`. Le scanner
+utilisé, la raison et la politique appliquée sont écrits dans le log, le résumé
+du run et l'artefact `sca-reports/sca-scanner.txt` ; un rapport absent fait
+échouer le run.
+
+**Couverture du secours :** Trivy utilise ses propres bases (NVD, GHSA/OSV) et
+détecte les dépendances empaquetées dans le jar. Il ne remplace pas
+OWASP Dependency-Check : il n'applique pas `owasp-suppressions.xml`, ne fait pas
+la même analyse CPE/transitive Java, et ignore les vulnérabilités sans correctif.
+Un run Trivy vert n'est donc **pas** équivalent à un run NVD vert.
+
+**Politique :**
+
+| Événement | Sans `NVD_API_KEY` |
+|---|---|
+| Pull request, schedule, workflow manuel | Secours Trivy autorisé, clairement signalé |
+| Push sur une branche de travail | Secours Trivy autorisé, clairement signalé |
+| Push sur `master`, `staging`, `prod` ou un tag `v*` | **Échec**, sauf si la variable de dépôt `ALLOW_TRIVY_FALLBACK=true` accepte explicitement le secours |
+
+Les deux chemins (clé présente / clé absente) sont testés par
+`scripts/ci/sca-policy.test.sh`, lancé dans le workflow.
 
 ## Signaler une vulnérabilité
 

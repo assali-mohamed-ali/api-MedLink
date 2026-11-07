@@ -1,5 +1,6 @@
 package com.example.apimedlink.config;
 
+import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.security.JsonAccessDeniedHandler;
 import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
 import com.example.apimedlink.security.RouteWords;
@@ -34,6 +35,7 @@ public class SecurityConfig {
             JsonMapper json,
             AuditService audit,
             RouteWords routeWords,
+            SessionRevocationStore revocations,
             @Value("${server.servlet.session.cookie.secure:false}") boolean secureCookies) throws Exception {
         // Same cookie as csrf.spa() (readable by the SPA), plus SameSite and Secure like the session cookie (MLink-84);
         // when not forced Secure, it stays Secure on HTTPS requests (the repository's default)
@@ -55,10 +57,15 @@ public class SecurityConfig {
                                 "/actuator/health",
                                 "/actuator/info",
                                 "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html")
+                                "/scalar",
+                                "/scalar/**")
                         .permitAll()
+                        // Staging/prod: Actuator exists only on the private management port, where Prometheus
+                        // scrapes without a login; dev serves it on the main port (GitHub #49)
                         .requestMatchers(HttpMethod.GET, "/actuator/prometheus")
+                        .permitAll()
+                        // Probes on the main port: {"status":"UP"} only, for the deploy check and healthchecks
+                        .requestMatchers(HttpMethod.GET, "/livez", "/readyz")
                         .permitAll()
                         // Public auth endpoints (plan.md §4); CSRF still applies to these POSTs
                         .requestMatchers(HttpMethod.GET, "/api/auth/csrf")
@@ -67,12 +74,16 @@ public class SecurityConfig {
                                 "/api/auth/login",
                                 "/api/auth/register",
                                 "/api/auth/verify-email",
-                                "/api/auth/verify-email/resend")
+                                "/api/auth/verify-email/resend",
+                                "/api/auth/password",
+                                // Staff code step: the pending step login started is the guard (MLink-62/63)
+                                "/api/auth/mfa/setup",
+                                "/api/auth/mfa/verify")
                         .permitAll()
                         .anyRequest()
                         .authenticated())
                 // Every logged-in call checks Keycloak still accepts the account (GitHub #28)
-                .addFilterBefore(new SessionValidityFilter(authorizedClients, json), AuthorizationFilter.class)
+                .addFilterBefore(new SessionValidityFilter(authorizedClients, json, revocations), AuthorizationFilter.class)
                 // Not logged in (no session, unknown, ended or expired): 401 with our JSON error, never a redirect
                 .exceptionHandling(ex -> ex
                         .authenticationEntryPoint(new JsonAuthenticationEntryPoint(json))

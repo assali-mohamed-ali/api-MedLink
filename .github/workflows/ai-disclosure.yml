@@ -10,7 +10,7 @@ on:
       - ready_for_review
 
 permissions:
-  pull-requests: read
+  contents: read
 
 concurrency:
   group: ai-disclosure-${{ github.event.pull_request.number }}
@@ -22,44 +22,15 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Validate both AI checklist declarations
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const pr = context.payload.pull_request;
+      - uses: actions/checkout@v7
 
-            if (!pr) {
-              core.setFailed("Unable to retrieve pull request information.");
-              return;
-            }
+      - name: Test the disclosure validator
+        run: node --test .github/scripts/validate-ai-disclosure.test.mjs
 
-            const body = pr.body || "";
-            const aiText = "J'ai utilisé des outils d'IA générative pour contribuer à cette PR.";
-            const humanText = "Je confirme avoir relu, compris et validé les modifications proposées par l'IA.";
-
-            const findItems = (text) =>
-              body.split(/\r?\n/)
-                .map((line) => line.match(/^\s*-\s*\[([ xX])\]\s*(.*?)\s*$/))
-                .filter((match) => match && match[2] === text);
-
-            const aiItems = findItems(aiText);
-            const humanItems = findItems(humanText);
-            let reason = "";
-
-            if (aiItems.length !== 1 || humanItems.length !== 1) {
-              reason = "Both AI checklist items must appear exactly once in the PR description.";
-            } else {
-              const aiChecked = aiItems[0][1].toLowerCase() === "x";
-              const humanChecked = humanItems[0][1].toLowerCase() === "x";
-
-              if (aiChecked !== humanChecked) {
-                reason = "The AI-use and human-review checkboxes must have the same state: both checked or both unchecked.";
-              }
-            }
-
-            if (reason) {
-              core.setFailed(reason + " Correct the checklist in the PR description and push/edit the PR to rerun this check.");
-              return;
-            }
-
-            core.info("Both AI checklist items are present exactly once and have matching states.");
+      # The validator is tested above and runs against the body of this PR.
+      # It fails when exactly one usage choice is not selected, when AI use has
+      # no human review acknowledgment, or when a declaration is contradictory.
+      - name: Validate the AI disclosure in the PR description
+        env:
+          PR_BODY: ${{ github.event.pull_request.body }}
+        run: node .github/scripts/validate-ai-disclosure.mjs

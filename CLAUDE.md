@@ -8,11 +8,11 @@ This repository is its Spring Boot API. It is also the only component that talks
 Any AI agent working on this repository MUST follow these rules:
 
 1. **Disclose AI usage:** If you generate, modify, refactor, or materially influence any code, tests, configuration, documentation, or other files in a change, you MUST disclose AI assistance in the associated Pull Request.
-2. **Update the PR description:** Ensure the PR description contains the following checklist item and that it is checked when AI assistance was used:
+2. **Update the PR description:** The `Utilisation de l'IA` section offers two exclusive usage choices. Check exactly one: when AI assistance was used, check the following item; when it was not, check `- [x] Cette PR n'utilise pas d'outils d'IA générative.` instead.
 
    `- [x] J'ai utilisé des outils d'IA générative pour contribuer à cette PR.`
 
-3. **Human review:** Include the following item and do not mark it as completed on behalf of the human contributor:
+3. **Human review:** When AI was used, include the following item and do not mark it as completed on behalf of the human contributor. When AI was not used, leave it unchecked.
 
    `- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.`
 
@@ -98,8 +98,8 @@ classes (see README §7). Use only APIs of these versions.
 - A cloud session starts from a fresh clone: nothing from a local session carries over except
   what is written in this repository. Read the Status in `report.md` first.
 - The tests need **Docker** (Testcontainers: PostgreSQL, Keycloak, Mailpit). Without it, say so in
-  the PR and in `report.md`; the proof is then CI's `build-test`, which runs fully only on PRs whose
-  base is `master` (a PR stacked on another branch gets the secrets scan only).
+  the PR and in `report.md`; CI runs for PRs targeting `master`, `staging`, `prod`, and the configured
+  integration branches. CD builds/scans PR candidates but only deploys on a push to `staging` or a lowercase `v*` tag.
 - YouTrack and GitHub must be reachable (connectors / `gh`); without YouTrack, list the ticket moves
   for a person to do. No production secret is ever needed: dev values come from `compose.yaml`.
 
@@ -108,13 +108,17 @@ classes (see README §7). Use only APIs of these versions.
 - Before any work, check the worktree: clean status, in sync with the remote, no unknown
   stash, no local branch ahead of its remote or tracking a gone one
   (`docs/sprints/sprint-2/README.md` step 3). Stop and report if one fails.
-- Pull `master`, then branch: `feat/ss<N>-<slug>` for a sub-sprint,
-  `fix/…`, `docs/…`, `chore/…` otherwise. Never commit on `master`, `staging` or `prod`.
+- Never commit directly on `master`, `staging`, or `prod`. For product changes, after the release-pipeline migration,
+  branch from `staging`: `feat/<slug>`, `fix/<slug>`, `core/<slug>`, `docs/<slug>`, or `chore/<slug>`. Workflow/bootstrap
+  changes may first PR to `master`; keep repository variable `ENABLE_AUTO_PROMOTION` false until the branch-baseline migration is reviewed.
 - One commit per task, message prefixed `feat:`, `fix:`, `docs:`, `chore:`, `refactor:`,
   `test:`; mention the YouTrack id (`MLink-79`) in the body.
-- Open a PR to `master`, fill the template honestly, and update `report.md` in the same PR.
-- **No stacked PRs: always base a PR on `master`.** A PR based on another branch merges into that branch;
-  if that branch already reached `master`, the work never arrives (it happened with #39). CI also runs fully
-  only on PRs based on `master`.
-- `master` is protected (ruleset `mamnou333`): a code-owner review (@assali-mohamed-ali) and CodeQL
-  are required, merge commits only. You cannot merge your own PR; ask for the review.
+- Product PRs target `staging` after migration; workflow/bootstrap changes may target `master`. Fill the template honestly
+  and disclose AI use. Promotion from `staging` to `prod` and release-version PRs are automated but blocked by failing checks.
+- Use the intended PR base: product changes → `staging`; workflow/bootstrap changes during migration → `master`.
+  Don't stack feature PRs on one another. The promotion PR is specifically `staging` → `prod` and must wait for checks.
+- `master` is currently protected (ruleset `mamnou333`): code-owner review (@assali-mohamed-ali), CodeQL, and merge commits.
+  Configure PR/check-required rules on `staging` and `prod` during migration. With this PAT-based automation, don't require
+  reviewers on those branches or on the production environment: that would block promotion and release-version sync PRs. Keep
+  all CI/security checks required. If reviewer gates must stay enforced, use a GitHub App with narrow ruleset bypass for only
+  automation PRs. Production deploys only from lowercase `v*` tags.

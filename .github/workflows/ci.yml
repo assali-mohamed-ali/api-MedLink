@@ -21,6 +21,25 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # GitHub #53: the Terraform container must match the production profile.
+      - name: Check the production container configuration
+        run: bash scripts/ci/check-prod-config.sh
+
+      # MLink-68: the lockout script refuses non-local targets (offline, no stack needed).
+      - name: Test the lockout script's target guard
+        run: bash scripts/check-lockout.test.sh
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.9.x
+
+      - name: Validate Terraform
+        run: |
+          cd terraform
+          terraform init -backend=false -input=false
+          terraform fmt -check
+          terraform validate
+
       - name: Validate Maven wrapper
         run: |
           test -f mvnw || (echo "mvnw missing" && exit 1)
@@ -33,6 +52,17 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: maven
+
+      - name: Set up Python for pre-commit
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install pre-commit
+        run: python -m pip install --disable-pip-version-check pre-commit==4.7.0
+
+      - name: Run repository pre-commit hooks
+        run: pre-commit run --all-files --show-diff-on-failure --verbose
 
       # Blocking gate: test/build failures fail the job.
       - name: Build + tests

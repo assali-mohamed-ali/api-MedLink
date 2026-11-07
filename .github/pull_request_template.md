@@ -11,6 +11,9 @@
 
 ## Utilisation de l'IA
 
+<!-- Cochez exactement une des deux premières cases. La troisième est obligatoire si l'IA a été utilisée. -->
+
+- [ ] Cette PR n'utilise pas d'outils d'IA générative.
 - [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR.
 - [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.
 

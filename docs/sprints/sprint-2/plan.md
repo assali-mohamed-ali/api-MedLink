@@ -161,10 +161,12 @@ one is mailed. At most one mail per minute per account, also under parallel requ
 ### 5 · `POST /api/auth/login`
 `{ "email": "…", "password": "…" }`
 - **200** `{ "user": {…} }` + session cookie (patient, or staff after the code step)
-- **200** `{ "mfaRequired": true, "mfaSetupRequired": true|false }` — practitioner or staff (sub-sprint 3)
+- **200** `{ "mfaRequired": true, "mfaSetupRequired": true|false }` — practitioner or staff (sub-sprint 3). With
+  `mfaSetupRequired: true` the API also mails the setup link of endpoint 8 to the account's own address (at most one
+  mail per 15 minutes; the answer is the same either way, even if the mail fails)
 - **200** `{ "passwordChangeRequired": true }` — forced change pending (sub-sprint 4)
 - **401** `INVALID_CREDENTIALS` "E-mail ou mot de passe incorrect, ou compte temporairement verrouillé." (same for an unknown email and a locked account)
-- **403** `EMAIL_NOT_VERIFIED` (React offers endpoint 4) · `ACCOUNT_DISABLED`
+- **403** `EMAIL_NOT_VERIFIED` (React offers endpoint 4) · `ACCOUNT_DISABLED` · `ACCOUNT_SETUP_INCOMPLETE` "Votre compte n'est pas encore prêt. Contactez l'administration." (a Keycloak required action other than a forced change, or an account holding more than one MedLink role; right password only; logged)
 - **429** `TOO_MANY_REQUESTS` per IP (see "Rate limits"), before Keycloak is asked: the same for any email
 - **503** `IDENTITY_UNAVAILABLE`
 How Keycloak 26.7.5 answers the password grant (checked on the dev stack, 2026-10-15):
@@ -176,6 +178,8 @@ How Keycloak 26.7.5 answers the password grant (checked on the dev stack, 2026-1
 | Email not verified, right password | **200, accepted** (`email_verified: false`) | 403 `EMAIL_NOT_VERIFIED`; the Keycloak session is ended |
 | Disabled, right password | 400 "Account disabled" | 403 `ACCOUNT_DISABLED` |
 | Disabled, wrong password | 400 "Invalid user credentials" | 401: only the password's owner learns the account is disabled |
+| Required action or incomplete profile, right password (26.8.1, 2026-10-23) | 400 "Account is not fully set up" (exact text) | `UPDATE_PASSWORD` alone in the admin API: 200 `passwordChangeRequired`; anything else: 403 `ACCOUNT_SETUP_INCOMPLETE`, before any change |
+| Same, wrong password | 400 "Invalid user credentials" | 401, identical; any other wording of the answer also fails closed as 401 |
 | Locked (right or wrong password) | 400 "Invalid user credentials" | 401, identical to a wrong password (decided on MLink-55, 2026-10-16): a 423 would tell anyone that the email has an account |
 | Keycloak down, 5xx, or the API refused as a client | — | 503 `IDENTITY_UNAVAILABLE` |
 
@@ -184,30 +188,55 @@ access token with the refresh token and ends the session when Keycloak refuses (
 valid", GitHub #28). Logout (endpoint 7) uses the same refresh token to end the Keycloak session.
 
 ### 6 · `GET /api/auth/me`
-→ **200** `{ "user": {…} }` from the session · **401**.
+→ **200** `{ "user": {…} }` from the session · **401** `UNAUTHENTICATED` (no session, logged out, or only a
+pending code step). Built 2026-10-29 (MLink-53): read from the session the login opened, no Keycloak or
+database call. React calls it on page load to restore who is logged in.
 
 ### 7 · `POST /api/auth/logout`
 → **204**. The API ends the Keycloak session (logout endpoint with the stored refresh token;
 a failure is only logged) and invalidates our session.
 
-### 8 · `POST /api/auth/mfa/setup` (pending code step, first time only)
+### 8 · `POST /api/auth/mfa/setup` (pending code step + the mailed link, first time only)
+`{ "token": "…" }` (from the link `{frontend}/configurer-code?token=…` mailed at endpoint 5; review of #97: the
+password alone must not enrol a code, or a stolen password would let anyone bind their own app first)
 → **200** `{ "otpauthUrl": "otpauth://totp/MedLink:…", "qrCode": "data:image/png;base64,…", "secret": "…" }`
-· **409** when a code is already enrolled · **401** without a pending step.
-Stores the secret encrypted, not yet active; the first valid code at endpoint 9 activates it.
+· checked in this order: **401** `UNAUTHORIZED` without a pending step · **409** `MFA_ALREADY_ENROLLED` when a
+code is already enrolled · **400** `VALIDATION_FAILED` without a token · **400** `INVALID_TOKEN` (unknown, or
+another account's) · **410** `TOKEN_EXPIRED` (after 30 minutes, or replaced by a newer mail). The link works until
+the first good code at endpoint 9, then stops.
+Stores the secret encrypted (AES-256-GCM, `app.mfa.encryption-key`), not yet active; the first valid code at
+endpoint 9 activates it. A second setup before that replaces the secret. The pending step (from endpoint 5) lasts
+5 minutes and holds no session: every other endpoint stays closed.
 
 ### 9 · `POST /api/auth/mfa/verify` (pending code step)
-`{ "code": "123456" }` → **200** `{ "user": {…} }` + session · **401** `INVALID_CODE` ·
-**423** `MFA_LOCKED` after 5 wrong codes (the pending step is dropped; log in again).
-TOTP: 30 s, 6 digits, one step of tolerance either side.
+`{ "code": "123456" }` → **200** `{ "user": {…} }` + session (new session id, 15 idle minutes) ·
+**401** `INVALID_CODE` (wrong, already used, or no secret enrolled; the step goes on) ·
+**401** `UNAUTHORIZED` without a pending step (checked before the body) · **400** `VALIDATION_FAILED` when the
+code is not 6 digits · **423** `MFA_LOCKED` from the 5th wrong code: the lock is **per user, for 15 minutes,
+across logins** (a new login reaches the code step but even the right code gets 423); the pending step is dropped
+and the Keycloak session ended (log in again). A good code resets the count.
+TOTP: RFC 6238, SHA-1, 30 s, 6 digits, one step of tolerance either side; each code works once.
 
 ### 10 · `POST /api/auth/password`
-- With a session: `{ "currentPassword", "newPassword" }` → **204** · **401** wrong current · **400** `PASSWORD_POLICY`.
+- With a session: `{ "currentPassword", "newPassword" }` → **204** · **401** `INVALID_CURRENT_PASSWORD` · **400** `PASSWORD_POLICY`.
+  Every session of the user ends (review of PR #89, 2026-10-23): this one at once (cookie dropped),
+  every older API session at its next call, whatever Keycloak does (the user's mark in
+  `session_revocations`, set before the password changes), and Keycloak's sessions are signed out too.
+  React sends the user to the login page. **401** `SESSION_EXPIRED` when staff forced a reset meanwhile.
 - With a pending forced change (from endpoint 5): `{ "newPassword" }` → **204**; then the user logs in again.
-The API checks the current password with Keycloak, sets the new one through the admin API,
-and removes the `UPDATE_PASSWORD` action in the forced case. Policy errors are mapped to French.
+The API checks the current password with Keycloak and sets the new one through the admin API; a
+permanent password also removes `UPDATE_PASSWORD` in that same call (one write, nothing half done).
+Policy errors are mapped to French; a refused password puts the mark back, so a weak attempt logs
+no one out. No answer from Keycloak keeps the mark (the password may have changed: fail closed). If
+only Keycloak's sign-out fails, the change stands (password history forbids putting the old one back)
+and the old sessions are refused anyway: the browser never holds Keycloak's tokens.
+Not a forgot-password flow: that needs a mailed single-use link and is out of scope (§8).
 
 ### 11 · `POST /api/admin/users/{id}/force-password-reset` (staff)
-→ **204** · **404**. Adds `UPDATE_PASSWORD` in Keycloak and ends the user's Keycloak sessions.
+→ **204** · **404** · **503** `IDENTITY_UNAVAILABLE`. Adds `UPDATE_PASSWORD` in Keycloak (first, so no
+new login gets past it), then sets the user's mark (every older API session refused at its next
+call), then ends the user's Keycloak sessions. Every step is idempotent: after an error staff send it
+again, nothing is rolled back.
 
 ### 12 · `GET /api/admin/users?search=&page=0&size=20` (staff)
 → **200** `{ "items": [ { "id", "email", "firstName", "lastName", "role", "enabled", "emailVerified" } ], "total": 0 }`.
@@ -242,8 +271,8 @@ Existing `/api/users` endpoints become staff-only in sub-sprint 5.
 |---|---|---|---|
 | 1 | `users.username` → `varchar(254)`; `patients(id PK/FK users, first_name, last_name, birth_date, phone, address, created_at)`; `email_tokens(id, user_id FK, purpose VERIFY_EMAIL\|ACTIVATE_ACCOUNT, token_hash char(64) unique, expires_at, used_at, created_at)` | client `medlink-admin` (service account: `manage-users`, `view-users`, `query-users`, `query-groups`; secret `${KC_ADMIN_CLIENT_SECRET}`) | `keycloak.admin.*`, `spring.mail.*`, `app.frontend-url`; Mailpit in both compose files (inbox 8025); setup scripts generate the new secret and add missing `.env` keys |
 | 2 | — | `medlink-bff`: direct grants on, standard flow off; `ssoSessionIdleTimeout 900`; lockout 5 failures → 900 s; login events stored | `server.servlet.session.timeout=15m`, cookie flags; `oauth2Login` removed; setup scripts log in through endpoint 5 |
-| 3 | `user_mfa(user_id PK/FK users, secret_enc, enabled, enrolled_at)` | — | `app.mfa.encryption-key` (env, 32 bytes base64) |
-| 4 | — | `passwordHistory(3)` added to the policy | French messages for Keycloak policy errors |
+| 3 | `user_mfa(user_id PK/FK users ON DELETE CASCADE, secret_enc, enabled, enrolled_at, last_used_step, failed_attempts, locked_until)` (V11; the last three: a code works once, 5 wrong codes lock for 15 min) | — | `app.mfa.encryption-key` = `APP_MFA_ENCRYPTION_KEY` (32 bytes base64, required: the API does not start without it); compose, `.env` examples, Terraform; setup scripts generate it. V12: `email_tokens.purpose` also takes `MFA_ENROLMENT` (the 30-minute setup link) |
+| 4 | `session_revocations(user_id PK/FK users, revoked_at)` (V9, review of #89) | `passwordHistory(3)` added to the policy | French messages for Keycloak policy errors |
 | 5 | `audit_entries(id, timestamp, user_id, action, resource_type, resource_id, ip_address, outcome)` | — | — |
 | #51 | `rate_limits(key PK, hits, expires_at)` (V8) | — | `app.rate-limit.*`, `TRUSTED_PROXIES` (staging/prod: the reverse proxy's address) |
 

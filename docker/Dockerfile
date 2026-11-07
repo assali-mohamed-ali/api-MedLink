@@ -20,5 +20,5 @@ RUN chown app:app /app/app.jar
 USER app
 EXPOSE 8080
 ENV SPRING_PROFILES_ACTIVE=prod
-HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget -qO- http://localhost:8080/actuator/health | grep UP || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD wget -qO- http://localhost:8080/readyz | grep UP || exit 1
 ENTRYPOINT ["java","-jar","/app/app.jar"]
