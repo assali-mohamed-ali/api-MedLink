@@ -14,8 +14,9 @@
 #      Before any wipe, the current realm is saved to .dev/realm-backups/ (no users, no secrets).
 #   5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
 #   6. Runs ./mvnw verify (unless --skip-tests).
-#   7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login,
-#      and a practitioner.dev login that stops at the staff code step (no session without the code).
+#   7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login
+#      (GET /api/auth/me then answers with the PATIENT role), and a practitioner.dev login that stops at the
+#      staff code step (no session without the code).
 #
 # Usage: ./scripts/setup-dev.sh [--skip-tests] [--full-stack] [--reset] [--keep-data] [--stop]
 #
@@ -546,17 +547,19 @@ api_login() { # $1 = password -> HTTP status of POST /api/auth/login as patient.
 STATUS="$(api_login 'Not-The-Password-1!')"
 if [ "$STATUS" = 401 ]; then ok 'login with a wrong password returns 401'; else bad "login with a wrong password returned $STATUS, expected 401"; fi
 STATUS="$(api_login "$USERS_PASSWORD")"
-API_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/users/_health")"
-if [ "$STATUS" = 200 ] && [ "$API_STATUS" = 200 ]; then
-    ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/users/_health 200 with the session'
+ME_ANSWER="$LOG_DIR/me-answer.json"
+API_STATUS="$(curl -s -o "$ME_ANSWER" -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/auth/me")"
+IS_PATIENT=false
+grep -q '"PATIENT"' "$ME_ANSWER" 2>/dev/null && IS_PATIENT=true
+if [ "$STATUS" = 200 ] && [ "$API_STATUS" = 200 ] && [ "$IS_PATIENT" = true ]; then
+    ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/auth/me 200 with the PATIENT role'
 else
-    bad "login as patient.dev: POST /api/auth/login returned $STATUS (expected 200), then /api/users/_health $API_STATUS (expected 200)"
+    bad "login as patient.dev: POST /api/auth/login returned $STATUS (expected 200), then /api/auth/me $API_STATUS (expected 200 with PATIENT: $IS_PATIENT)"
 fi
-rm -f "$COOKIES"
+rm -f "$COOKIES" "$ME_ANSWER"
 
 # Staff code (MLink-65): a practitioner's right password alone opens no session. The login answers 200
-# {"mfaRequired":true} and the code step comes next; until then no API call works. /api/auth/me is not built
-# yet (MLink-53), so "no session" is checked on /api/users/_health, which needs one.
+# {"mfaRequired":true} and the code step comes next; until then /api/auth/me answers 401 (no session).
 STAFF_COOKIES="$LOG_DIR/staff-cookies.txt"
 STAFF_ANSWER="$LOG_DIR/staff-login-answer.json"
 rm -f "$STAFF_COOKIES" "$STAFF_ANSWER"
@@ -568,11 +571,11 @@ STATUS="$(curl -s -o "$STAFF_ANSWER" -w '%{http_code}' --max-time 30 -c "$STAFF_
     "$APP_URL/api/auth/login")"
 MFA_REQUIRED=false
 grep -q '"mfaRequired" *: *true' "$STAFF_ANSWER" 2>/dev/null && MFA_REQUIRED=true
-API_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$STAFF_COOKIES" "$APP_URL/api/users/_health")"
+API_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$STAFF_COOKIES" "$APP_URL/api/auth/me")"
 if [ "$STATUS" = 200 ] && [ "$MFA_REQUIRED" = true ] && [ "$API_STATUS" = 401 ]; then
-    ok 'staff code asked: practitioner.dev login 200 with mfaRequired, and no session before the code (/api/users/_health 401)'
+    ok 'staff code asked: practitioner.dev login 200 with mfaRequired, and no session before the code (/api/auth/me 401)'
 else
-    bad "login as practitioner.dev: POST /api/auth/login returned $STATUS (expected 200 with mfaRequired: $MFA_REQUIRED), then /api/users/_health $API_STATUS (expected 401, no session)"
+    bad "login as practitioner.dev: POST /api/auth/login returned $STATUS (expected 200 with mfaRequired: $MFA_REQUIRED), then /api/auth/me $API_STATUS (expected 401, no session)"
 fi
 rm -f "$STAFF_COOKIES" "$STAFF_ANSWER"
 
