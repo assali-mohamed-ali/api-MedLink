@@ -13,6 +13,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-07:** `epic/MLink-8` (PR #87): current `master` merged (Scalar instead of Swagger UI, so the SCA run is
+green again); `GET /api/slots` now checks the role before reading any parameter, so a non-patient gets 403 even with
+`clinicId=abc` (code owner's review, see the MLink-100 section). The migration stays **V13**. No new route.
+
 **2026-10-29 (night):** MLink-53, `GET /api/auth/me` (endpoint 6, `feat/mlink-53-auth-me`): the user object of the
 login, read from the session the login opened (the id token and the granted roles), with no Keycloak or database
 call; 401 `UNAUTHENTICATED` without a session, after a logout, or with only a pending code step. React needs it to
@@ -362,6 +366,22 @@ Nothing matches at all: 200 `{ "items": [], "total": 0, "message": "Aucun créne
 recherche (dates, clinique ou spécialité)." }`; `message` is absent whenever something matches (and on a page past
 the last one, where `total` is not 0).
 
+**Code owner's review on PR #87 (2026-11-02): the role before the parameters.** Spring converted the typed
+parameters (`Instant`, `UUID`, `int`) before `@PreAuthorize` ran, so a practitioner sending `clinicId=abc` got this
+controller's 400 instead of the 403 of a patient-only endpoint (the "Limits" below). `SlotController.search` now
+takes every parameter as text and reads it itself, after the role check (`instant`, `uuid`, `integer`), with the same
+French messages; the local `MethodArgumentTypeMismatchException` handler is gone, and an unreadable value is now
+listed together with the other broken fields. A patient sees no change. New functional test
+`aPractitionerAndStaffAreRefusedEvenWithUnreadableParameters`: a practitioner and a staff member send `clinicId=abc`,
+`practitionerId=abc`, `from=demain`, `page=x`, `size=51` and no parameter at all, and get 403 every time. The same day
+`master` was merged (75 commits, conflict in this report only, both sides kept): Scalar replaces Swagger UI, which
+clears the SCA finding (DOMPurify) that blocked this PR. Proof:
+- red first (a31ac35): `SlotSearchFunctionalTest` 12 tests, 1 failure, `practitioner …&clinicId=abc`
+  expected 403 but was 400;
+- green (1eef08b): `./mvnw -B clean verify` **448 tests, 0 failures**; reverse order 448, 0 failures;
+- `setup-dev --reset` then newman: **121 requests, 290 assertions, 0 failures**;
+- CI on 1eef08b: every check green, `SCA-Dependency-Check` included; PR mergeable.
+
 **Built:**
 - `SlotController`: the rules, all collected before answering, so one call lists every broken field. The
   31-day bound and the 50-slot page bound the work one request can ask of the database (`MAX_PERIOD`,
@@ -386,8 +406,8 @@ the last one, where `total` is not 0).
 **Decisions** (also in the log below): the messages above; 31 days at most, exactly 31 accepted; pages of 1 to
 50, numbered from 0; the type-mismatch handler local to `SlotController`; the message only when nothing matches.
 
-**Limits:** an unreadable parameter is converted by Spring before `@PreAuthorize`: a practitioner sending
-`clinicId=abc` gets this 400, not 403 (a malformed request reveals nothing; a well-formed one still gets 403).
+**Limits:** ~~an unreadable parameter is converted by Spring before `@PreAuthorize`: a practitioner sending
+`clinicId=abc` gets this 400, not 403~~. Fixed on 2026-11-07 after the code owner's review (see above).
 
 ## MLink-98 — slot search, `GET /api/slots` (2026-10-23, epic/MLink-8)
 
