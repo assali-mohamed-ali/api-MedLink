@@ -13,6 +13,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-07:** MLink-99 (slot search index) on `epic/MLink-8`, PR #87: **migration V14**
+(`V14__slot_search_index.sql`, one partial index on the free slots); dev databases need the setup script once
+(V14 runs on start, no `--reset` needed). No new route. See the MLink-99 section.
+
 **2026-11-07:** `epic/MLink-8` (PR #87): current `master` merged (Scalar instead of Swagger UI, so the SCA run is
 green again); `GET /api/slots` now checks the role before reading any parameter, so a non-patient gets 403 even with
 `clinicId=abc` (code owner's review, see the MLink-100 section). The migration stays **V13**. No new route.
@@ -344,6 +348,42 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-99 — slot search index, an answer in less than 2 seconds (2026-11-07, epic/MLink-8)
+
+Task 25.3 of MLink-25, its acceptance criterion: "the results show in less than 2 seconds".
+
+**Built:**
+- `V14__slot_search_index.sql`: `CREATE INDEX slots_free_by_start ON slots (starts_at, id) WHERE status = 'FREE'`.
+  Partial (free slots only) and in the search's own order (`ORDER BY starts_at, id`): the search reads the first
+  rows of the period and stops at the page, instead of reading the whole table and sorting it. No code change.
+- No index for the practitioner filter: `slots_practitioner_starts_at_unique (practitioner_id, starts_at)` (V13)
+  already serves it. No clinic or specialty index: a test with one clinic could not show it helps, so none without
+  proof (the ticket asked for them only "if the EXPLAIN shows it").
+- `SlotSearchIndexTest` (real PostgreSQL, Testcontainers): 50,000 slots (50 practitioners × 1,000 back-to-back
+  30-minute slots, every fifth booked), `ANALYZE`, then `EXPLAIN` of the search's SQL with no filter (the widest
+  search): the plan uses `slots_free_by_start` and holds no `Seq Scan on slots`.
+- `SlotSearchPerformanceFunctionalTest` (real API, real port, a patient logged in): the same 50,000 slots, in 2031
+  so no other test sees them, then `GET /api/slots` over 31 days with `size=50`: 200 in less than 2 seconds,
+  `total` 40,000, 50 items. The rows are deleted afterwards (`@AfterEach`).
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (e95aab9, the tests alone): `SlotSearchIndexTest` fails; the timing test is already green (50,000 rows
+  are little for PostgreSQL: it guards the criterion, the index test proves the index). The plan without the index:
+  ```
+  Limit  (cost=3046.61..3046.66 rows=20 width=920)
+    ->  Sort  (cost=3046.61..3146.85 rows=40097 width=920)
+          Sort Key: s.starts_at, s.id
+          ->  Hash Join  (cost=55.97..1979.64 rows=40097 width=920)
+                ...
+                                  ->  Seq Scan on slots s  (cost=0.00..1493.00 rows=40097 width=64)
+                                        Filter: ((starts_at >= '2031-03-03 08:00:00+00') AND (starts_at < '2031-04-03 08:00:00+00') AND ((status)::text = 'FREE'::text))
+  ```
+  every free slot of the month read, joined, then sorted, to keep 20.
+- Green (32fd3f1): both tests pass; the plan reads `slots_free_by_start`.
+- Mutation check: without the `CREATE INDEX` line, `SlotSearchIndexTest` turns red again (`Seq Scan on slots`).
+- `./mvnw -B clean verify` **450 tests, 0 failures**; reverse order 450, 0 failures.
+- `setup-dev --reset` then newman: **121 requests, 290 assertions, 0 failures**.
 
 ## MLink-100 — slot search input rules and "no result" message (2026-10-24, epic/MLink-8)
 
