@@ -19,8 +19,6 @@ import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.service.KeycloakAdminService;
 import com.example.apimedlink.service.KeycloakUser;
 import com.example.apimedlink.service.KeycloakUserPage;
-import com.example.apimedlink.service.KeycloakUserPage.Entry;
-
 import jakarta.persistence.EntityNotFoundException;
 import java.util.List;
 import java.util.UUID;
@@ -140,6 +138,7 @@ class AdminUserControllerTest {
                 .andExpect(status().isNoContent());
 
         verify(keycloak).moveToGroup(keycloakId, "/administrative-staff");
+        verify(keycloak).endSessions(keycloakId);
     }
 
     @Test

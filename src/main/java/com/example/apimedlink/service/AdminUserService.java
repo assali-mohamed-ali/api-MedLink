@@ -12,6 +12,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
+import com.example.apimedlink.repository.SessionRevocationStore;
 
 /**
  * Account management by staff (MLink-69): list, create a practitioner or staff account, change a role.
@@ -26,10 +27,13 @@ public class AdminUserService {
     private final KeycloakAdminService keycloak;
     private final UserRepository users;
     private final TransactionTemplate tx;
+    private final SessionRevocationStore revocations;
 
-    public AdminUserService(KeycloakAdminService keycloak, UserRepository users, TransactionTemplate tx) {
+        public AdminUserService(KeycloakAdminService keycloak, UserRepository users,
+        SessionRevocationStore revocations, TransactionTemplate tx) {
         this.keycloak = keycloak;
         this.users = users;
+        this.revocations = revocations;
         this.tx = tx;
     }
 
@@ -68,9 +72,18 @@ public class AdminUserService {
                 "Un compte existe déjà avec cette adresse e-mail.");
     }
 
-    /** @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404) */
+        /**
+     * Moves the user to the role's Keycloak group, then ends their open sessions the way a forced password
+     * reset does: the API refuses the old sessions at once (session_revocations), then Keycloak signs them out.
+     * A session keeps the roles it was opened with, so without this a demoted admin would stay admin until the
+     * session ends. Every step is idempotent: after an error staff send the change again.
+     *
+     * @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404)
+     */
     public void changeRole(UUID id, String role) {
         keycloak.moveToGroup(id, staffGroupOf(role));
+        revocations.revoke(id);
+        keycloak.endSessions(id);
     }
 
     /** The Keycloak group of a staff role; PATIENT and anything unknown are refused. */
