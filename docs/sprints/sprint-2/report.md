@@ -13,6 +13,9 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-08:** MLink-110 on `epic/MLink-8`: a **scheduled job** mails a reminder 24 hours before a booked appointment
+(H-02 = `app.appointments.reminder-hours-before`). No route, no migration. See the MLink-110 section.
+
 **2026-11-08:** MLink-107 on `epic/MLink-8`: **new route `POST /api/appointments/{id}/reschedule`** (move to another
 slot, all or nothing); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-107 section.
 
@@ -381,6 +384,35 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-110 — reminder mail before an appointment, scheduled job (2026-11-08, epic/MLink-8)
+
+Task 36.1 of MLink-36: a patient gets a reminder before their appointment.
+
+**Rule:** every 15 minutes (`app.appointments.reminder-interval`), each `BOOKED` appointment that starts within the next
+H-02 hours (`app.appointments.reminder-hours-before=24`, UTC, the shared `Clock`) and has no `reminder_sent_at` gets one
+mail. A cancelled appointment, or one further away, gets none. No new route, no migration (`reminder_sent_at` is in V13).
+
+**Built:**
+- `AppointmentReminderJob.sendDueReminders()` (`@Scheduled`, first run one interval after start so a restart never sends
+  a burst; `synchronized` so two runs never overlap): `AppointmentRepository.findRemindersDue` (slot, clinic and
+  practitioner in one query), the holders' `patients` rows in one `findAllById`, the mail, then
+  `markReminderSent` (only when still empty). A failed mail (`MailException`) is logged with the appointment id only and
+  `reminder_sent_at` stays empty: the next run tries again. Retries with backoff are MLink-111.
+- `MailService.sendAppointmentReminder(to, firstName, clinic, practitioner, startsAt)`: French, text + HTML, subject
+  "Rappel de votre rendez-vous MedLink"; date and time in Tunisia's time (`Africa/Tunis`), practitioner, clinic, and a
+  link to "Mes rendez-vous" to cancel or move it. No medical detail.
+- `@EnableScheduling` was already on `config/RateLimitConfig` (MLink-112): no configuration file changed.
+- One API instance today; several would need a lock on the job (out of this task).
+
+**Proof** (Ubuntu VM with Docker): `AppointmentReminderFunctionalTest`, 3 tests calling the job directly, mails read in
+Mailpit: booked within 24 h → one mail with date, time, practitioner and clinic, `reminder_sent_at` set; cancelled → no
+mail; 30 h away → no mail.
+- Red first (a90a02e, the test alone): it does not compile without the job.
+- Mutation check (the ticket's): without the `BOOKED` filter, `aCancelledAppointmentGetsNoReminder` turns red (3 tests,
+  1 failure). Green (e93f2dc): 3 tests, 0 failures.
+- `./mvnw -B verify` **515 tests, 0 failures**; reverse order 515, 0 failures.
+- Postman: no endpoint changed.
 
 ## MLink-107 — move an appointment, `POST /api/appointments/{id}/reschedule` (2026-11-08, epic/MLink-8)
 
