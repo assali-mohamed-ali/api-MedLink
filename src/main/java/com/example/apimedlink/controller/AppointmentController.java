@@ -16,8 +16,10 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -89,6 +91,23 @@ public class AppointmentController {
             throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Certains champs sont invalides.", errors);
         }
         return AppointmentMapper.toPageResponse(service.mine(currentUser.id(), page, size));
+    }
+
+    /**
+     * MLink-106: the holder cancels their appointment (204). {@code id} is text: an unreadable one is refused like an
+     * unknown one or someone else's, with the same 403, so nothing tells whether an appointment exists.
+     */
+    @PostMapping("/{id}/cancel")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
+    public void cancel(@PathVariable("id") String idText) {
+        UUID id;
+        try {
+            id = UUID.fromString(idText);
+        } catch (IllegalArgumentException e) {
+            throw new AccessDeniedException("Unreadable appointment id");
+        }
+        service.cancel(id);
     }
 
     private static Integer integer(String field, String text, Map<String, String> errors) {

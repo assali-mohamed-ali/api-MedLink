@@ -2,14 +2,19 @@ package com.example.apimedlink.service;
 
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.model.Appointment;
+import com.example.apimedlink.model.AppointmentStatus;
 import com.example.apimedlink.model.Slot;
 import com.example.apimedlink.model.SlotStatus;
 import com.example.apimedlink.repository.AppointmentRepository;
 import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.repository.SlotRepository;
+import com.example.apimedlink.security.OwnershipGuard;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.UUID;
 import org.hibernate.Hibernate;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
@@ -30,11 +35,42 @@ public class AppointmentService {
     private final AppointmentRepository appointments;
     private final SlotRepository slots;
     private final PatientRepository patients;
+    private final OwnershipGuard ownership;
+    /** H-03: no cancel less than this before the start (app.appointments.cancel-deadline-hours). */
+    private final Duration cancelDeadline;
 
-    public AppointmentService(AppointmentRepository appointments, SlotRepository slots, PatientRepository patients) {
+    public AppointmentService(AppointmentRepository appointments, SlotRepository slots, PatientRepository patients,
+            OwnershipGuard ownership, @Value("${app.appointments.cancel-deadline-hours}") long cancelDeadlineHours) {
         this.appointments = appointments;
         this.slots = slots;
         this.patients = patients;
+        this.ownership = ownership;
+        this.cancelDeadline = Duration.ofHours(cancelDeadlineHours);
+    }
+
+    /**
+     * MLink-106: the holder cancels their appointment, up to the H-03 deadline before it starts. An unknown id is refused
+     * like someone else's appointment (never tell whether it exists); a cancelled one stays as it is. One transaction,
+     * the appointment and then its slot locked: the appointment becomes CANCELLED and the slot FREE again.
+     */
+    @Transactional
+    public void cancel(UUID appointmentId) {
+        Appointment appointment = appointments.findForChangeById(appointmentId)
+                .orElseThrow(() -> new AccessDeniedException("No appointment " + appointmentId + " for the caller"));
+        ownership.check(appointment.getPatientId());
+        if (appointment.getStatus() == AppointmentStatus.CANCELLED) {
+            return;
+        }
+        Slot slot = slots.findForBookingById(appointment.getSlot().getId()).orElseThrow();
+        Instant now = Instant.now();
+        if (Duration.between(now, slot.getStartsAt()).compareTo(cancelDeadline) < 0) {
+            throw new ApiException(HttpStatus.UNPROCESSABLE_ENTITY, "CANCEL_DEADLINE_PASSED",
+                    "Ce rendez-vous ne peut plus être annulé moins de " + cancelDeadline.toHours()
+                            + " heures avant son début.");
+        }
+        appointment.setStatus(AppointmentStatus.CANCELLED);
+        appointment.setCancelledAt(now);
+        slot.setStatus(SlotStatus.FREE);
     }
 
     /** MLink-108: a page of the patient's own appointments, latest first, cancelled ones included. */

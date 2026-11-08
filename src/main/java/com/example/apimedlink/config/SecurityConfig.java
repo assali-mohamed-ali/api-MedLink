@@ -84,7 +84,7 @@ public class SecurityConfig {
                         // Patients only, checked before the body is read: a body Spring cannot parse would otherwise
                         // give a non-patient the 400 of the parsing, not 403 (review on #87). The method keeps its
                         // @PreAuthorize as well.
-                        .requestMatchers(HttpMethod.POST, "/api/appointments")
+                        .requestMatchers(HttpMethod.POST, "/api/appointments", "/api/appointments/**")
                         .hasRole(Roles.PATIENT)
                         .anyRequest()
                         .authenticated())

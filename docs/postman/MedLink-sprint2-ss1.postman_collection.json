@@ -3237,6 +3237,224 @@
               }
             }
           ]
+        },
+        {
+          "name": "GET /slots two days ahead → keep a slot to book then cancel (MLink-106)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{cancelFrom}}&to={{cancelTo}}&size=1"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// More than 12 hours ahead (the cancel deadline, H-03): from two days on, for a week",
+                  "const from = new Date(Date.now() + 2 * 86400000);",
+                  "pm.collectionVariables.set(\"cancelFrom\", from.toISOString());",
+                  "pm.collectionVariables.set(\"cancelTo\", new Date(from.getTime() + 7 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const first = pm.response.json().items[0];",
+                  "pm.test(\"a free slot two days ahead\", () => pm.expect(first).to.be.an(\"object\"));",
+                  "pm.collectionVariables.set(\"cancelSlotId\", first.slotId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN before the cancel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments → 201, a booking to cancel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slotId\": \"{{cancelSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"cancelAppointmentId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments/{id}/cancel → 204, the holder cancels",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments/{{cancelAppointmentId}}/cancel"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /appointments/me → the appointment is CANCELLED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/appointments/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const cancelled = pm.response.json().items.find(a => a.id === pm.collectionVariables.get(\"cancelAppointmentId\"));",
+                  "pm.test(\"cancelled, still listed\", () => pm.expect(cancelled.status).to.eql(\"CANCELLED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots two days ahead → the slot is free again",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{cancelFrom}}&to={{cancelTo}}&size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"offered again\", () => pm.expect(pm.response.json().items.map(s => s.slotId)).to.include(pm.collectionVariables.get(\"cancelSlotId\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments/{id}/cancel again → 204, nothing changes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments/{{cancelAppointmentId}}/cancel"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments/{unknown}/cancel → 403, same answer as someone else's",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments/{{$guid}}/cancel"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"FORBIDDEN\", () => pm.expect(pm.response.json().code).to.eql(\"FORBIDDEN\"));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -4547,6 +4765,22 @@
     },
     {
       "key": "bookedAppointmentId",
+      "value": ""
+    },
+    {
+      "key": "cancelFrom",
+      "value": ""
+    },
+    {
+      "key": "cancelTo",
+      "value": ""
+    },
+    {
+      "key": "cancelSlotId",
+      "value": ""
+    },
+    {
+      "key": "cancelAppointmentId",
       "value": ""
     }
   ]
