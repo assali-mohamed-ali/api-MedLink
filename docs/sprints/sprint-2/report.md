@@ -13,6 +13,9 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-08:** MLink-111 on `epic/MLink-8`: a failed reminder is tried 3 times then logged (id only) and left for the
+next run; one reminder only. New property `app.appointments.reminder-retry-backoff`. See the MLink-111 section.
+
 **2026-11-08:** MLink-110 on `epic/MLink-8`: a **scheduled job** mails a reminder 24 hours before a booked appointment
 (H-02 = `app.appointments.reminder-hours-before`). No route, no migration. See the MLink-110 section.
 
@@ -384,6 +387,28 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-111 — one reminder only, retried and logged on failure (2026-11-08, epic/MLink-8)
+
+Task 36.2 of MLink-36: "un échec d'envoi est réessayé et consigné", and never two reminders.
+
+**Built** (in `AppointmentReminderJob`, no new dependency):
+- A failed mail (`MailException`) is tried 3 times in the run, waiting `app.appointments.reminder-retry-backoff` (2 s),
+  then twice that. After the third failure: one `WARN` line with the appointment id only (never the address, the
+  practitioner or the clinic), `reminder_sent_at` stays empty, and the next run (15 minutes later) tries again.
+- `reminder_sent_at` is set only after a sent mail (MLink-110), and the job's query skips rows where it is set: two runs
+  send one mail. If the application stops during a wait, the reminder is left for the next start.
+
+**Proof:**
+- `AppointmentReminderFunctionalTest.theJobRunningTwiceSendsOneReminderOnly` (Mailpit): two runs, one mail,
+  `reminder_sent_at` unchanged by the second.
+- `AppointmentReminderJobTest` (unit, mocked mail server, the outage a functional test cannot cause on demand): down →
+  3 attempts, the failure logged without the address, `markReminderSent` never called; server back → the next run sends
+  and marks it; one failure then success → sent at the second attempt.
+- Red first (the tests alone): they do not compile without the backoff in the job's constructor.
+- Mutation check (the ticket's): with `reminder_sent_at` set before sending, the outage test and the "server back" test
+  turn red (3 tests, 2 failures).
+- `./mvnw -B verify` **TOTAL tests, 0 failures**; reverse order TOTAL, 0 failures. Postman: no endpoint changed.
 
 ## MLink-110 — reminder mail before an appointment, scheduled job (2026-11-08, epic/MLink-8)
 
