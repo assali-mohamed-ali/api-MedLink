@@ -24,17 +24,22 @@ import org.yaml.snakeyaml.Yaml;
  * Every service they share must be the same service: same image, command, container ports, mounts,
  * healthcheck, dependencies and environment. Only the secrets differ: docker-compose.yml requires them
  * ({@code ${X:?...}}), compose.yaml gives the dev value. Any other value is the default of the full stack.
+ * Dev-only services ({@code DEV_ONLY}) are left out of the comparison: they exist in compose.yaml alone.
  */
 class ComposeFilesTest {
 
     private static final Set<String> FULL_STACK_ONLY = Set.of("app", "prometheus");
+
+    // Dev-only services exist in compose.yaml alone, on purpose: they must never reach the full stack or a
+    // deployment (keycloak-dev-users, review on PR #87, checked by RealmImportSeparationTest).
+    private static final Set<String> DEV_ONLY = Set.of("keycloak-dev-users");
 
     // ${NAME:-default}, ${NAME:?message}, ${NAME}; $$ is a literal $ for the container.
     private static final Pattern VARIABLE = Pattern.compile("\\$\\$|\\$\\{(\\w+)(?::([-?])([^}]*))?}");
 
     private static final String REQUIRED = "<required>";
 
-    private final Map<String, Map<String, Object>> dev = services("compose.yaml");
+    private final Map<String, Map<String, Object>> dev = withoutDevOnly(services("compose.yaml"));
     private final Map<String, Map<String, Object>> full = services("docker-compose.yml");
 
     @Test
@@ -101,6 +106,12 @@ class ComposeFilesTest {
     @SuppressWarnings("unchecked")
     private static Map<String, Map<String, Object>> services(String file) {
         return (Map<String, Map<String, Object>>) load(file).get("services");
+    }
+
+    private static Map<String, Map<String, Object>> withoutDevOnly(Map<String, Map<String, Object>> services) {
+        Map<String, Map<String, Object>> shared = new LinkedHashMap<>(services);
+        shared.keySet().removeAll(DEV_ONLY);
+        return shared;
     }
 
     private static Set<String> topLevelVolumes(String file) {
