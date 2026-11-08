@@ -55,7 +55,8 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/users/_health",            L, O, O, O),
             new Rule("GET",    "/api/slots",                    L, O, F, F), // MLink-98: patients search slots
             new Rule("GET",    "/api/slots/filters",            L, O, F, F), // MLink-163: the search form's lists
-            new Rule("POST",   "/api/appointments",             L, O, F, F)); // MLink-102: patients book a slot
+            new Rule("POST",   "/api/appointments",             L, O, F, F), // MLink-102: patients book a slot
+            new Rule("GET",    "/api/appointments/me",          L, O, F, F)); // MLink-108: a patient's own appointments
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")
