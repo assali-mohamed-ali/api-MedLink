@@ -528,9 +528,11 @@ $status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $cookies
     -H 'Content-Type: application/json' --data-binary "@$loginFile" "$AppUrl/api/auth/login")
 $meAnswer = Join-Path $LogDir 'me-answer.json'
 $apiStatus = [int](& curl.exe -s -o $meAnswer -w '%{http_code}' --max-time 10 -b $cookies "$AppUrl/api/auth/me")
-$isPatient = (Test-Path $meAnswer) -and ((Get-Content $meAnswer -Raw) -match '"PATIENT"')
-if ($status -eq 200 -and $apiStatus -eq 200 -and $isPatient) { Write-Ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/auth/me 200 with the PATIENT role' }
-else { Write-Bad "login as patient.dev: POST /api/auth/login returned $status (expected 200), then /api/auth/me $apiStatus (expected 200 with PATIENT: $isPatient)" }
+# The roles array must be exactly ["PATIENT"]: an extra role (a privileged one) or none at all fails.
+$roles = ''
+try { $roles = (@((Get-Content $meAnswer -Raw -ErrorAction Stop | ConvertFrom-Json).user.roles) | ForEach-Object { "`"$_`"" }) -join ',' } catch { }
+if ($status -eq 200 -and $apiStatus -eq 200 -and $roles -ceq '"PATIENT"') { Write-Ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/auth/me 200 with roles exactly ["PATIENT"]' }
+else { Write-Bad "login as patient.dev: POST /api/auth/login returned $status (expected 200), then /api/auth/me $apiStatus with roles [$roles] (expected 200 with roles exactly [`"PATIENT`"])" }
 
 # Staff code (MLink-65): a practitioner's right password alone opens no session. The login answers 200
 # {"mfaRequired":true} and the code step comes next; until then /api/auth/me answers 401 (no session).

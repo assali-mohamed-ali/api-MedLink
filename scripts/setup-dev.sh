@@ -549,12 +549,12 @@ if [ "$STATUS" = 401 ]; then ok 'login with a wrong password returns 401'; else 
 STATUS="$(api_login "$USERS_PASSWORD")"
 ME_ANSWER="$LOG_DIR/me-answer.json"
 API_STATUS="$(curl -s -o "$ME_ANSWER" -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/auth/me")"
-IS_PATIENT=false
-grep -q '"PATIENT"' "$ME_ANSWER" 2>/dev/null && IS_PATIENT=true
-if [ "$STATUS" = 200 ] && [ "$API_STATUS" = 200 ] && [ "$IS_PATIENT" = true ]; then
-    ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/auth/me 200 with the PATIENT role'
+# The roles array must be exactly ["PATIENT"]: an extra role (a privileged one) or none at all fails.
+ROLES="$(tr -d ' \t\r\n' < "$ME_ANSWER" 2>/dev/null | sed -n 's/.*"roles":\[\([^]]*\)\].*/\1/p')"
+if [ "$STATUS" = 200 ] && [ "$API_STATUS" = 200 ] && [ "$ROLES" = '"PATIENT"' ]; then
+    ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/auth/me 200 with roles exactly ["PATIENT"]'
 else
-    bad "login as patient.dev: POST /api/auth/login returned $STATUS (expected 200), then /api/auth/me $API_STATUS (expected 200 with PATIENT: $IS_PATIENT)"
+    bad "login as patient.dev: POST /api/auth/login returned $STATUS (expected 200), then /api/auth/me $API_STATUS with roles [$ROLES] (expected 200 with roles exactly [\"PATIENT\"])"
 fi
 rm -f "$COOKIES" "$ME_ANSWER"
 

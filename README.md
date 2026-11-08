@@ -40,7 +40,7 @@ cd api-MedLink
 
 The script creates `.env` with random secrets, starts Postgres, Keycloak and Mailpit, checks the realm, runs
 the tests, starts the API and logs in as `patient.dev` to prove the whole chain works (`/api/auth/me` answers with the
-`PATIENT` role); it also checks that `practitioner.dev` is asked for the staff code (no session on the password alone). Add `-SkipTests` /
+roles exactly `["PATIENT"]`); it also checks that `practitioner.dev` is asked for the staff code (no session on the password alone). Add `-SkipTests` /
 `--skip-tests` for a faster run. **Re-run it after every `git pull`**: it keeps your Keycloak in step with the
 team's realm file. All options: [§8](#8-dev-setup-in-detail).
 

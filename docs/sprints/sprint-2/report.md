@@ -166,7 +166,7 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
 ## MLink-65 — setup scripts check the session and the staff code (2026-10-31, updated 2026-11-07, feat/ss3-setup-staff-code-check)
 
 - **Built:** `scripts/setup-dev.ps1` and `scripts/setup-dev.sh` (same behaviour, bash 3.2 safe). The `patient.dev`
-  login check now calls `GET /api/auth/me` (#107): `[OK]` only for 200 with `PATIENT` in the roles. Then a fresh
+  login check now calls `GET /api/auth/me` (#107): `[OK]` only for 200 with the `roles` array exactly `["PATIENT"]`. Then a fresh
   browser logs in as `practitioner.dev` with the right password: `[OK]` only when the login answers 200 with `"mfaRequired": true` **and** the same cookies get 401 on `/api/auth/me` (no
   session before the code); anything else is a warning. The cookie and answer files are deleted afterwards; the
   password is never printed. README and the scripts' header mention the check.
@@ -176,6 +176,14 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
   `setup-dev.sh --skip-tests`, **0 warnings** each, both print the `PATIENT` role line and `[OK] staff code asked`.
 - **2026-11-07:** the first version checked the session on `/api/users/_health`, because `/api/auth/me` was not on
   `master` yet; after #107 merged, both checks use it, as the ticket asks.
+- **Review of #113 (2026-11-08):** the first `/api/auth/me` check searched the whole answer for `"PATIENT"`, so
+  `PATIENT` plus a privileged role would still have passed. Both scripts now read the `roles` array (`tr`/`sed` in
+  bash 3.2, `ConvertFrom-Json` in PowerShell) and want exactly `["PATIENT"]`. Checked offline on 8 fake answers in
+  bash, Windows PowerShell 5.1 and PowerShell 7: only `["PATIENT"]` (compact or pretty-printed) passes; `PATIENT`
+  with `ADMINISTRATIVE_STAFF` or `PRACTITIONER`, an empty array, no array, `patient` in lower case and a missing
+  answer all fail. `master` merged in (52 commits). Live: `setup-dev.ps1 -SkipTests` and `setup-dev.sh --skip-tests`
+  0 warnings each (`roles exactly ["PATIENT"]`, `staff code asked`); `./mvnw -B verify` 475/475 and reverse class
+  order 475/475.
 - **Found on the way:** after an API run started by `setup-dev.sh` (Git Bash on Windows), both `setup-dev.ps1 -Stop`
   and `setup-dev.sh --stop` stop the containers, but the API's Java process (forked by `spring-boot:run`) keeps port
   8080, so the next run stops at "Free these ports first". A run started by `setup-dev.ps1` stops cleanly. To report
