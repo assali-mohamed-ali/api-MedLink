@@ -408,7 +408,7 @@ Task 36.2 of MLink-36: "un échec d'envoi est réessayé et consigné", and neve
 - Red first (the tests alone): they do not compile without the backoff in the job's constructor.
 - Mutation check (the ticket's): with `reminder_sent_at` set before sending, the outage test and the "server back" test
   turn red (3 tests, 2 failures).
-- `./mvnw -B verify` **TOTAL tests, 0 failures**; reverse order TOTAL, 0 failures. Postman: no endpoint changed.
+- `./mvnw -B verify` **519 tests, 0 failures**; reverse order 519, 0 failures. Postman: no endpoint changed.
 
 ## MLink-110 — reminder mail before an appointment, scheduled job (2026-11-08, epic/MLink-8)
 
