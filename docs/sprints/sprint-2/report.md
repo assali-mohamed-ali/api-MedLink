@@ -13,6 +13,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-08:** MLink-104 on `epic/MLink-8`: every booking writes one audit line (`APPOINTMENT_BOOKED`, SUCCESS,
+ids only). `AuditAction` and `AuditOutcome` gain a value each (`SUCCESS` is also added by MLink-114 and epic MLink-9).
+No migration, no new route. See the MLink-104 section.
+
 **2026-11-08:** PR #87 (epic MLink-8, first batch: MLink-97, 98, 99, 100, 163, 102, 103) **merged into `master`**
 (f71c577). `epic/MLink-8` goes on for the rest of the epic. Post-merge review fix on it: **`SecurityConfig`** (shared)
 makes `POST /api/appointments` PATIENT-only in the filter chain, so a malformed body from a non-patient is 403, not
@@ -365,6 +369,26 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-104 — every booking in the audit trail (2026-11-08, epic/MLink-8)
+
+Task 27.3 of MLink-27: each booking leaves a trace in the shared audit trail (MLink-59).
+
+**Built:**
+- `AuditAction.APPOINTMENT_BOOKED` and `AuditOutcome.SUCCESS` (MLink-114 and epic MLink-9 add `SUCCESS` on their
+  branches too: a one-line conflict to keep once when the branches meet).
+- `AppointmentController.book` calls `AuditService.record(APPOINTMENT_BOOKED, "APPOINTMENT", <appointment id>, SUCCESS)`
+  once `AppointmentService.book` has returned, so the booking is committed: a refused (409, 404, 403) or rolled-back
+  booking writes no SUCCESS. The line holds ids only: the caller (from the session, in `AuditService`), the appointment
+  id and the client IP; never a name or a medical detail.
+- `AppointmentAuditFunctionalTest` (real API): a booking writes exactly one `APPOINTMENT_BOOKED` line with the
+  caller, `APPOINTMENT`, the appointment id, SUCCESS and an IP; a booking refused with 409 writes no SUCCESS line.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (94941ad, the tests alone; checked with the code of the commit before): 2 tests, 1 failure, the
+  one-line test (no audit line). The refused-booking test already held: without an audit call there is no SUCCESS.
+- Green (49e2d73); `./mvnw -B clean verify` **478 tests, 0 failures**; reverse order 478, 0 failures. No endpoint
+  changed.
 
 ## MLink-103 — one booking per slot under concurrency, 409 `SLOT_TAKEN` (2026-11-07, epic/MLink-8)
 
