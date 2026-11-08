@@ -3147,6 +3147,7 @@
                   "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
                   "const body = pm.response.json();",
                   "pm.test(\"booked\", () => pm.expect(body.status).to.eql(\"BOOKED\"));",
+                  "pm.collectionVariables.set(\"bookedAppointmentId\", body.id);",
                   "pm.test(\"where, with whom and when\", () => pm.expect(body).to.have.all.keys(\"id\", \"status\", \"clinic\", \"practitioner\", \"startsAt\", \"endsAt\"));",
                   "pm.test(\"no email of the practitioner\", () => pm.expect(pm.response.text()).to.not.include(\"@\"));"
                 ]
@@ -3208,6 +3209,30 @@
                   "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
                   "pm.test(\"SLOT_TAKEN\", () => pm.expect(pm.response.json().code).to.eql(\"SLOT_TAKEN\"));",
                   "pm.test(\"a French message\", () => pm.expect(pm.response.json().message).to.eql(\"Ce créneau n'est plus disponible. Choisissez-en un autre.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /appointments/me → 200, the demo patient's appointments, latest first (MLink-108)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/appointments/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"the appointment just booked is there\", () => pm.expect(body.items.map(a => a.id)).to.include(pm.collectionVariables.get(\"bookedAppointmentId\")));",
+                  "pm.test(\"latest first\", () => { const starts = body.items.map(a => a.startsAt); pm.expect(starts).to.eql([...starts].sort().reverse()); });",
+                  "pm.test(\"total counts them all\", () => pm.expect(body.total).to.be.at.least(body.items.length));",
+                  "pm.test(\"no email of the practitioner\", () => pm.expect(pm.response.text()).to.not.include(\"@\"));"
                 ]
               }
             }
@@ -4518,6 +4543,10 @@
     },
     {
       "key": "bookSlotId",
+      "value": ""
+    },
+    {
+      "key": "bookedAppointmentId",
       "value": ""
     }
   ]

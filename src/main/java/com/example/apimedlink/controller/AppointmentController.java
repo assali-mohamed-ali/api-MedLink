@@ -1,6 +1,7 @@
 package com.example.apimedlink.controller;
 
 import com.example.apimedlink.dto.AppointmentDto;
+import com.example.apimedlink.dto.AppointmentPageResponse;
 import com.example.apimedlink.dto.BookAppointmentRequest;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.mapper.AppointmentMapper;
@@ -11,13 +12,16 @@ import com.example.apimedlink.security.CurrentUser;
 import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.service.AppointmentService;
 import com.example.apimedlink.service.AuditService;
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.prepost.PreAuthorize;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -25,6 +29,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/appointments")
 public class AppointmentController {
+
+    static final int MAX_PAGE_SIZE = 50;
 
     private final AppointmentService service;
     private final CurrentUser currentUser;
@@ -59,6 +65,39 @@ public class AppointmentController {
         // ids only (the caller is taken from the session by AuditService)
         audit.record(AuditAction.APPOINTMENT_BOOKED, "APPOINTMENT", appointment.getId().toString(), AuditOutcome.SUCCESS);
         return AppointmentMapper.toDto(appointment);
+    }
+
+    /**
+     * MLink-108: the caller's own appointments, latest first, cancelled ones included; never an id in the URL.
+     * {@code page} and {@code size} are text, read after the role check, with the slot search's rules.
+     */
+    @GetMapping("/me")
+    @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
+    public AppointmentPageResponse mine(
+            @RequestParam(name = "page", defaultValue = "0") String pageText,
+            @RequestParam(name = "size", defaultValue = "20") String sizeText) {
+        Map<String, String> errors = new LinkedHashMap<>();
+        Integer page = integer("page", pageText, errors);
+        Integer size = integer("size", sizeText, errors);
+        if (page != null && page < 0) {
+            errors.put("page", "Le numéro de page ne peut pas être négatif.");
+        }
+        if (size != null && (size < 1 || size > MAX_PAGE_SIZE)) {
+            errors.put("size", "La taille de page doit être comprise entre 1 et 50.");
+        }
+        if (!errors.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Certains champs sont invalides.", errors);
+        }
+        return AppointmentMapper.toPageResponse(service.mine(currentUser.id(), page, size));
+    }
+
+    private static Integer integer(String field, String text, Map<String, String> errors) {
+        try {
+            return Integer.valueOf(text);
+        } catch (NumberFormatException e) {
+            errors.put(field, "Nombre entier attendu.");
+            return null;
+        }
     }
 
     private static ApiException invalid(String message) {

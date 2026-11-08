@@ -11,6 +11,9 @@ import java.time.Instant;
 import java.util.UUID;
 import org.hibernate.Hibernate;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -32,6 +35,13 @@ public class AppointmentService {
         this.appointments = appointments;
         this.slots = slots;
         this.patients = patients;
+    }
+
+    /** MLink-108: a page of the patient's own appointments, latest first, cancelled ones included. */
+    @Transactional(readOnly = true)
+    public Page<Appointment> mine(UUID patientId, int page, int size) {
+        Sort latestFirst = Sort.by(Sort.Direction.DESC, "slot.startsAt").and(Sort.by(Sort.Direction.DESC, "id"));
+        return appointments.findByPatientId(patientId, PageRequest.of(page, size, latestFirst));
     }
 
     /**
