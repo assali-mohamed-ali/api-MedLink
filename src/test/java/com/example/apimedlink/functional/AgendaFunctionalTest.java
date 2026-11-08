@@ -25,7 +25,7 @@ import tools.jackson.databind.json.JsonMapper;
  * MLink-26 (story 26, "Agenda multi-sites"), through the real API: a practitioner sees their slots of the three
  * clinics in one answer, opens and closes slots, is refused an overlap in any clinic, and nobody else can touch
  * their slots. Written first (red), then made green by 26.3 to 26.6. Each test creates its own practitioners and
- * patients, so the other tests' rows never show in its agenda. The three clinics are the real ones of V14.
+ * patients, so the other tests' rows never show in its agenda. The three clinics are the real ones of V15.
  */
 class AgendaFunctionalTest extends FunctionalTestBase {
 

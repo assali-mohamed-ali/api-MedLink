@@ -15,7 +15,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | `PATCH /api/practitioner/slots/{id}` | `{"status":"OPEN"\|"CLOSED"}`; 409 `SLOT_BOOKED`, `SLOT_IN_PAST`; 403 if not the caller's slot |
 
 **Decisions**
-- V14 inserts the three reference clinics (no endpoint creates a clinic) and adds the `CLOSED` slot status.
+- V15 inserts the three reference clinics (no endpoint creates a clinic) and adds the `CLOSED` slot status.
 - The overlap is enforced by the database (`slots_no_overlap`); the application check only names the slot in the way, and a lost race is translated to the same 409 (never a 500).
 - A closed slot keeps its time range: reopening it frees the time (decision D4, to confirm).
 - Closing is one conditional `UPDATE` (free and no active appointment): a concurrent booking cannot end on a closed slot. The booking flow (MLink-8) needs the same guard.
