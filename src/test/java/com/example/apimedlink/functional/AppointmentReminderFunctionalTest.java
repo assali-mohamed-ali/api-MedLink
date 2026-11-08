@@ -19,7 +19,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * MLink-110 (story MLink-36): a patient gets a reminder mail within 24 hours of a booked appointment (H-02); a
+ * MLink-110 and MLink-111 (story MLink-36): a patient gets one reminder mail within 24 hours of a booked appointment (H-02); a
  * cancelled appointment or one further away gets none. The job runs every 15 minutes: the tests call it directly and
  * read the mails in Mailpit.
  */
@@ -58,6 +58,26 @@ class AppointmentReminderFunctionalTest extends FunctionalTestBase {
                 .contains("/patient/rendez-vous");
         assertThat(jdbc.queryForObject("select reminder_sent_at from appointments where id = ?", Timestamp.class,
                 appointment)).isNotNull();
+    }
+
+    /** MLink-111: the job runs every 15 minutes while the appointment stays in the window: one mail, never two. */
+    @Test
+    void theJobRunningTwiceSendsOneReminderOnly() {
+        Instant start = CLOCK.instant().plus(5, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MINUTES);
+        String email = uniqueEmail("reminder-once");
+        UUID appointment = appointment(patient(email, "Yasmine"),
+                slot(practitioner("Karim", "Ayari", "Cardiologie (rappel une fois)"), clinic("Clinique Rappel Bizerte"),
+                        start),
+                "BOOKED");
+
+        job.sendDueReminders();
+        Timestamp firstSent = jdbc.queryForObject("select reminder_sent_at from appointments where id = ?",
+                Timestamp.class, appointment);
+        job.sendDueReminders();
+
+        assertThat(mailbox.to(email, SUBJECT)).hasSize(1);
+        assertThat(jdbc.queryForObject("select reminder_sent_at from appointments where id = ?", Timestamp.class,
+                appointment)).isEqualTo(firstSent).isNotNull();
     }
 
     @Test
