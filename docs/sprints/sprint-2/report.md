@@ -13,6 +13,9 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-08:** MLink-108 on `epic/MLink-8`: **new route `GET /api/appointments/me`** (a patient's own appointments,
+latest first, cancelled included); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-108 section.
+
 **2026-11-08:** MLink-104 on `epic/MLink-8`: every booking writes one audit line (`APPOINTMENT_BOOKED`, SUCCESS,
 ids only). `AuditAction` and `AuditOutcome` gain a value each (`SUCCESS` is also added by MLink-114 and epic MLink-9).
 No migration, no new route. See the MLink-104 section.
@@ -369,6 +372,35 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-108 — my appointments, `GET /api/appointments/me` (2026-11-08, epic/MLink-8)
+
+Task 28.3 of MLink-28: a patient sees their own appointments, to cancel or reschedule them (28.1, 28.2, 28.4).
+
+**Contract:** session required, PATIENT only. `GET /api/appointments/me?page=0&size=20` → 200 `{ "items": [ { "id",
+"status", "clinic": { "id", "name" }, "practitioner": { "id", "firstName", "lastName" }, "startsAt", "endsAt" } ],
+"total" }`, latest first (`startsAt` descending, then id), cancelled appointments included. 400 `VALIDATION_FAILED`
+for `page` below 0 or `size` outside 1–50 (the slot search's messages) · 401 · 403 for a non-patient. No id in the URL:
+always the caller's appointments.
+
+**Built:**
+- `AppointmentController.mine` (`@GetMapping("/me")`, `@PreAuthorize` PATIENT): `page` and `size` arrive as text and
+  are read after the role check (a non-patient gets 403 even with `size=abc`); the patient is `currentUser.id()`.
+- `AppointmentService.mine` → `AppointmentRepository.findByPatientId` with `@EntityGraph({"slot", "slot.clinic",
+  "slot.practitioner"})` (one query, no N+1), sorted by `slot.startsAt` then id, descending. `AppointmentMapper` →
+  `AppointmentPageResponse` (items are MLink-102's `AppointmentDto`). A patient without a profile simply has none.
+- `AccessMatrixFunctionalTest`: one line, `GET /api/appointments/me` (anonymous 401, patient open, practitioner and
+  staff 403). Postman folder 7: the 201 booking keeps the appointment id; a new request checks the demo patient's list
+  holds it, latest first.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (dcd1b27; checked with the code of the commit before): `MyAppointmentsFunctionalTest` 6 tests, 4 failures
+  and 1 error (the route did not exist; the anonymous 401 already held). Tests: patient A sees only A's, never B's,
+  latest first, the cancelled one included; paging and `total`; an empty list; `size=51` and `page=-1` → 400;
+  anonymous 401; practitioner and staff 403.
+- Green (12596de): with the access matrix, 83 tests, 0 failures.
+- `./mvnw -B clean verify` **488 tests, 0 failures**; reverse order 488, 0 failures.
+- `setup-dev --skip-tests` then newman: **133 requests, 319 assertions, 0 failures**.
 
 ## MLink-104 — every booking in the audit trail (2026-11-08, epic/MLink-8)
 
