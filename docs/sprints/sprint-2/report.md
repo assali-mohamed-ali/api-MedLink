@@ -13,6 +13,12 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-08:** MLink-106 on `epic/MLink-8`: **new route `POST /api/appointments/{id}/cancel`** (the holder cancels up
+to 12 hours before, H-03 = `app.appointments.cancel-deadline-hours`); one new line in `AccessMatrixFunctionalTest`;
+**`SecurityConfig`** (shared): every POST under `/api/appointments` is PATIENT-only in the filter chain. No migration.
+`QrCodesTest` (MLink-62/63) errored once in the reverse order and passed on reruns: reported as flaky. See the
+MLink-106 section.
+
 **2026-11-08:** MLink-108 on `epic/MLink-8`: **new route `GET /api/appointments/me`** (a patient's own appointments,
 latest first, cancelled included); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-108 section.
 
@@ -372,6 +378,43 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-106 — cancel an appointment, `POST /api/appointments/{id}/cancel` (2026-11-08, epic/MLink-8)
+
+Task 28.1 of MLink-28: a patient cancels their own appointment, within the allowed time.
+
+**Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments/{id}/cancel` → 204. 401
+`UNAUTHENTICATED` · 403 `FORBIDDEN`, one answer for someone else's appointment, an unknown id, an unreadable id, a
+non-patient or a missing CSRF header (never tell whether an appointment exists) · 422 `CANCEL_DEADLINE_PASSED` "Ce
+rendez-vous ne peut plus être annulé moins de 12 heures avant son début." An already cancelled appointment: 204, nothing
+changes.
+
+**Built:**
+- `AppointmentController.cancel` (`@PostMapping("/{id}/cancel")`, `@PreAuthorize` PATIENT, so administrative staff,
+  whom `OwnershipGuard` lets through, cannot cancel here: the story says the holder only). `{id}` is text; an
+  unreadable one is refused with the same 403 as an unknown one.
+- `AppointmentService.cancel`, one transaction: `AppointmentRepository.findForChangeById` locks the appointment (an
+  unknown id → `AccessDeniedException`, the shared 403), `OwnershipGuard.check(patientId)`, a CANCELLED appointment is
+  left as it is (even if its slot has been booked again since), then the slot is locked (`findForBookingById`, as for
+  a booking); less than the H-03 deadline before the start → 422; otherwise the appointment becomes CANCELLED with
+  `cancelled_at` and the slot FREE.
+- H-03 is `app.appointments.cancel-deadline-hours=12` (`application.properties`), computed on the server in UTC.
+- `SecurityConfig` (shared): the PATIENT rule of the filter chain now covers `POST /api/appointments` and
+  `/api/appointments/**`, so a path or body Spring cannot read never gives a non-patient anything but 403.
+- `AccessMatrixFunctionalTest`: one line, `POST /api/appointments/{id}/cancel` (anonymous 401, and 403 for every role:
+  `{id}` is a random id, someone else's). Postman folder 7: book a slot two days ahead, cancel it (204), it shows
+  CANCELLED in my appointments, the slot is offered again, cancel again (204), an unknown id (403).
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (the tests alone; checked with the code of the commit before): `CancelAppointmentFunctionalTest` 7 tests,
+  5 failures (the route did not exist; anonymous 401 and the missing-CSRF 403 already held).
+- Green (596fb4f): with the access matrix, 88 tests, 0 failures.
+- Mutation check (the ticket's): without `ownership.check`, `anotherPatientAnUnknownIdAndAnUnreadableIdGetTheSame403…`
+  turns red.
+- `./mvnw -B clean verify` **499 tests, 0 failures**. Reverse order: once `QrCodesTest.scanningTheQrCodeGivesBackTheUrl`
+  errored (ZXing `NotFoundException`, MLink-62/63, not touched here); it passed three times alone, and the reverse
+  order run again gave **499, 0 failures**: a flaky decoding test, reported on its ticket.
+- `setup-dev --skip-tests` then newman: **141 requests, 331 assertions, 0 failures**.
 
 ## MLink-108 — my appointments, `GET /api/appointments/me` (2026-11-08, epic/MLink-8)
 
