@@ -55,15 +55,15 @@ public class AdminUserController {
     @PreAuthorize("hasRole('" + Roles.ADMINISTRATIVE_STAFF + "')")
     @ResponseStatus(HttpStatus.CREATED)
     public AdminUserDto create(@Valid @RequestBody CreateUserRequest body) {
-        return AdminUserMapper.toDto(
-                admin.create(body.email(), body.firstName(), body.lastName(), body.role()));
+        return AdminUserMapper.toDto(admin.create(body.email(), body.firstName(), body.lastName(), body.role(),
+                body.specialtyId(), body.clinicIds()));
     }
 
     @PutMapping("/{id}/role")
     @PreAuthorize("hasRole('" + Roles.ADMINISTRATIVE_STAFF + "')")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void changeRole(@PathVariable UUID id, @Valid @RequestBody ChangeRoleRequest body) {
-        admin.changeRole(id, body.role());
+        admin.changeRole(id, body.role(), body.specialtyId(), body.clinicIds());
     }
 
     private static ApiException invalid(String field, String message) {

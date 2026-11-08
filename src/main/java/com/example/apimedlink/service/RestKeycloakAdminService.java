@@ -196,8 +196,8 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
         if (found != null) {
             for (UserRepresentation user : found) {
                 UUID id = UUID.fromString(user.id());
-                List<GroupRepresentation> groups = groupsOf(id);
-                items.add(new KeycloakUserPage.Entry(toUser(id, user), groups.isEmpty() ? null : groups.get(0).path()));
+                List<String> groupPaths = groupsOf(id).stream().map(GroupRepresentation::path).toList();
+                items.add(new KeycloakUserPage.Entry(toUser(id, user), groupPaths));
             }
         }
         return new KeycloakUserPage(items, total == null ? 0 : total);
