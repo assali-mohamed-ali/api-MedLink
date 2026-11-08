@@ -13,6 +13,11 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-08:** PR #87 (epic MLink-8, first batch: MLink-97, 98, 99, 100, 163, 102, 103) **merged into `master`**
+(f71c577). `epic/MLink-8` goes on for the rest of the epic. Post-merge review fix on it: **`SecurityConfig`** (shared)
+makes `POST /api/appointments` PATIENT-only in the filter chain, so a malformed body from a non-patient is 403, not
+400. See the MLink-102 section.
+
 **2026-11-07:** MLink-103 on `epic/MLink-8`, PR #87: two patients booking one slot at once get one appointment and
 one 409 `SLOT_TAKEN`; a double booking only the unique index catches also answers 409, never 500. No migration (the
 index is in V13), no new route. See the MLink-103 section.
@@ -389,6 +394,15 @@ other is told".
 ## MLink-102 — book an appointment, `POST /api/appointments` (2026-11-07, epic/MLink-8)
 
 Task 27.1 of MLink-27: a patient books a free slot online and sees the confirmation.
+
+**Code owner's post-merge review on #87 (2026-11-08): the role before the body.** Reading `slotId` as text after the
+role check (below) is not enough: a body Spring cannot parse at all (`{"slotId":`, `not json`, `[]`) failed during the
+`@RequestBody` conversion, before the method-level `@PreAuthorize`, so a practitioner or staff member got the parsing's
+400 instead of 403. `SecurityConfig` (shared file) now makes `POST /api/appointments` PATIENT-only in the filter chain,
+before the body is read; the method keeps its `@PreAuthorize`. New test
+`aPractitionerAndStaffAreRefusedEvenWithMalformedJson`. Proof: red first (c785ea4; with the previous `SecurityConfig`,
+1 failure, expected 403 but was 400, which is also the mutation check), green (137f7f8); `./mvnw -B clean verify`
+**476 tests, 0 failures**, reverse order 476, 0 failures.
 
 **Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments { "slotId" }` → 201
 `{ "id", "status": "BOOKED", "clinic": { "id", "name" }, "practitioner": { "id", "firstName", "lastName" },
