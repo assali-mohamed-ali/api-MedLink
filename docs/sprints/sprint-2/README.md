@@ -27,7 +27,9 @@ context than these files.
    - `git branch -vv` shows no branch `ahead` of its remote or tracking a `gone` one
      (merged or not, decide before deleting).
 
-   Then `git checkout master && git pull --ff-only && git checkout -b feat/ss<N>-<slug>`.
+   Then go to the epic's shared branch (rule of 2026-11-06, `CLAUDE.md` "Epic branches"):
+   `git checkout epic/MLink-<epic id> && git pull --no-rebase`. Only the first person on an epic
+   creates it: `git checkout master && git pull && git checkout -b epic/MLink-<epic id>`.
    Run the setup script once (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`); it must end
    with 0 failures.
 4. **Plan the work** in a few lines: files, migrations, realm changes, tests. Move **each**
@@ -37,15 +39,21 @@ context than these files.
    case), watch them fail, then write the code.
 6. **Verify for real.** `./mvnw -B verify` (JDK 17, Docker running) and the setup script.
    Try the endpoints by hand once (curl or Scalar API docs at `http://localhost:8080/scalar`).
-7. **Commit per task** (YouTrack id in the message), push, open the PR to `master`.
-8. **Report.** In the same PR: update `report.md` (status, PR link, proof, decisions, limits,
-   next step) and move the YouTrack tasks to *To Verify* with a link to the PR.
+7. **Commit, check green, pull, push** (the loop in `CLAUDE.md` "Epic branches"): the red test
+   commit, then the green code commit (YouTrack id in both); `./mvnw -B verify` and the reversed
+   class order green; `git pull --no-rebase` (if it merged a teammate's commits, check green
+   again); then `git push` (refused: pull again). Never rebase or force-push the epic branch.
+8. **Report.** With the task's commit: update `report.md` (status, proof, decisions, limits, next
+   step) and move the YouTrack task to *To Verify* with a link to the commit.
+9. **When the whole epic is done** (every task green, both test orders, Postman 0 failures,
+   `report.md` up to date, the team has walked through it): open one PR from the epic branch to
+   `master`, and comment its link on the epic.
 
-A sub-sprint is **done** when its PR is merged and `report.md` says so; its tasks then move
-to *Done*. A task that review sends back returns to *In Progress*.
+An epic is **done** when its PR is merged and `report.md` says so; its tasks, stories and the
+epic then move to *Done*. A task that review sends back returns to *In Progress*.
 
-YouTrack states in short: *Open* → *In Progress* (work started) → *To Verify* (PR open) →
-*Done* (PR merged).
+YouTrack states in short: *Open* → *In Progress* (work started) → *To Verify* (pushed green on the
+epic branch) → *Done* (epic PR merged).
 
 ## Rules that apply to every sub-sprint
 
