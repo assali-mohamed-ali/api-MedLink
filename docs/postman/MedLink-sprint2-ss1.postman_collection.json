@@ -3455,6 +3455,167 @@
               }
             }
           ]
+        },
+        {
+          "name": "GET /slots two days ahead → keep two free slots, to book one then move to the other (MLink-107)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{cancelFrom}}&to={{cancelTo}}&size=2"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().items;",
+                  "pm.test(\"two free slots\", () => pm.expect(items).to.have.lengthOf(2));",
+                  "pm.collectionVariables.set(\"moveFromSlotId\", items[0].slotId);",
+                  "pm.collectionVariables.set(\"moveToSlotId\", items[1].slotId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments → 201, a booking to move",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slotId\": \"{{moveFromSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"moveAppointmentId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments/{id}/reschedule → 200, the new appointment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments/{{moveAppointmentId}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newSlotId\": \"{{moveToSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a new, booked appointment\", () => { pm.expect(body.status).to.eql(\"BOOKED\"); pm.expect(body.id).to.not.eql(pm.collectionVariables.get(\"moveAppointmentId\")); });",
+                  "pm.collectionVariables.set(\"movedAppointmentId\", body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /appointments/me → the old one CANCELLED, the new one BOOKED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/appointments/me?size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().items;",
+                  "pm.test(\"the old appointment is cancelled\", () => pm.expect(items.find(a => a.id === pm.collectionVariables.get(\"moveAppointmentId\")).status).to.eql(\"CANCELLED\"));",
+                  "pm.test(\"the new appointment is booked\", () => pm.expect(items.find(a => a.id === pm.collectionVariables.get(\"movedAppointmentId\")).status).to.eql(\"BOOKED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments/{cancelled id}/reschedule → 409 APPOINTMENT_CANCELLED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments/{{moveAppointmentId}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newSlotId\": \"{{moveFromSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"APPOINTMENT_CANCELLED\", () => pm.expect(pm.response.json().code).to.eql(\"APPOINTMENT_CANCELLED\"));"
+                ]
+              }
+            }
+          ]
         }
       ]
     },
@@ -4781,6 +4942,22 @@
     },
     {
       "key": "cancelAppointmentId",
+      "value": ""
+    },
+    {
+      "key": "moveFromSlotId",
+      "value": ""
+    },
+    {
+      "key": "moveToSlotId",
+      "value": ""
+    },
+    {
+      "key": "moveAppointmentId",
+      "value": ""
+    },
+    {
+      "key": "movedAppointmentId",
       "value": ""
     }
   ]

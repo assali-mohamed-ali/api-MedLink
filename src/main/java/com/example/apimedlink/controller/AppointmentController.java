@@ -3,6 +3,7 @@ package com.example.apimedlink.controller;
 import com.example.apimedlink.dto.AppointmentDto;
 import com.example.apimedlink.dto.AppointmentPageResponse;
 import com.example.apimedlink.dto.BookAppointmentRequest;
+import com.example.apimedlink.dto.RescheduleAppointmentRequest;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.mapper.AppointmentMapper;
 import com.example.apimedlink.model.Appointment;
@@ -52,16 +53,7 @@ public class AppointmentController {
     @ResponseStatus(HttpStatus.CREATED)
     @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
     public AppointmentDto book(@RequestBody(required = false) BookAppointmentRequest request) {
-        String text = request == null ? null : request.slotId();
-        if (text == null || text.isBlank()) {
-            throw invalid("Le créneau est obligatoire.");
-        }
-        UUID slotId;
-        try {
-            slotId = UUID.fromString(text);
-        } catch (IllegalArgumentException e) {
-            throw invalid("Identifiant invalide.");
-        }
+        UUID slotId = slotId("slotId", request == null ? null : request.slotId(), "Le créneau est obligatoire.");
         Appointment appointment = service.book(currentUser.id(), slotId);
         // MLink-104: recorded once the booking is committed, so a refused or rolled-back booking leaves no SUCCESS;
         // ids only (the caller is taken from the session by AuditService)
@@ -101,13 +93,42 @@ public class AppointmentController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
     public void cancel(@PathVariable("id") String idText) {
-        UUID id;
+        service.cancel(appointmentId(idText));
+    }
+
+    /**
+     * MLink-107: the holder moves their appointment to another free slot (200, the new appointment). An unreadable
+     * {@code id} is the same 403 as for a cancel; then {@code newSlotId} is checked (400), then the move.
+     */
+    @PostMapping("/{id}/reschedule")
+    @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
+    public AppointmentDto reschedule(@PathVariable("id") String idText,
+            @RequestBody(required = false) RescheduleAppointmentRequest request) {
+        UUID id = appointmentId(idText);
+        UUID newSlotId = slotId("newSlotId", request == null ? null : request.newSlotId(),
+                "Le nouveau créneau est obligatoire.");
+        return AppointmentMapper.toDto(service.reschedule(id, newSlotId));
+    }
+
+    /** An appointment id from the path: unreadable is refused like unknown (403), never telling it apart. */
+    private static UUID appointmentId(String text) {
         try {
-            id = UUID.fromString(idText);
+            return UUID.fromString(text);
         } catch (IllegalArgumentException e) {
             throw new AccessDeniedException("Unreadable appointment id");
         }
-        service.cancel(id);
+    }
+
+    /** A slot id from the body: missing or unreadable is a 400 under its field. */
+    private static UUID slotId(String field, String text, String missing) {
+        if (text == null || text.isBlank()) {
+            throw invalid(field, missing);
+        }
+        try {
+            return UUID.fromString(text);
+        } catch (IllegalArgumentException e) {
+            throw invalid(field, "Identifiant invalide.");
+        }
     }
 
     private static Integer integer(String field, String text, Map<String, String> errors) {
@@ -119,8 +140,8 @@ public class AppointmentController {
         }
     }
 
-    private static ApiException invalid(String message) {
+    private static ApiException invalid(String field, String message) {
         return new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Certains champs sont invalides.",
-                Map.of("slotId", message));
+                Map.of(field, message));
     }
 }
