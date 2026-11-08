@@ -13,6 +13,9 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-08:** MLink-107 on `epic/MLink-8`: **new route `POST /api/appointments/{id}/reschedule`** (move to another
+slot, all or nothing); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-107 section.
+
 **2026-11-08:** MLink-106 on `epic/MLink-8`: **new route `POST /api/appointments/{id}/cancel`** (the holder cancels up
 to 12 hours before, H-03 = `app.appointments.cancel-deadline-hours`); one new line in `AccessMatrixFunctionalTest`;
 **`SecurityConfig`** (shared): every POST under `/api/appointments` is PATIENT-only in the filter chain. No migration.
@@ -378,6 +381,39 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-107 — move an appointment, `POST /api/appointments/{id}/reschedule` (2026-11-08, epic/MLink-8)
+
+Task 28.2 of MLink-28: a patient moves their appointment to another free slot, without losing it if that slot is taken.
+
+**Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments/{id}/reschedule { "newSlotId" }`
+→ 200, the new appointment (MLink-102's body). 400 `VALIDATION_FAILED` (`newSlotId` missing: "Le nouveau créneau est
+obligatoire.", not a UUID: "Identifiant invalide.") · 401 · 403 `FORBIDDEN` (MLink-106's cases: someone else's, unknown
+or unreadable `{id}`, a non-patient, no CSRF header) · 404 unknown new slot · 409 `SLOT_TAKEN` · 409
+`APPOINTMENT_CANCELLED` "Ce rendez-vous est annulé : réservez un nouveau créneau." (not in the ticket: a cancelled
+appointment has nothing to move) · 422 `CANCEL_DEADLINE_PASSED` (H-03 on the current appointment).
+
+**Built:**
+- `AppointmentService.reschedule`, one transaction: the appointment locked (unknown → the shared 403),
+  `OwnershipGuard`, a cancelled one → 409; both slots locked in one order, lower id first, so two crossed moves never
+  wait on each other (no deadlock); H-03 on the old slot; the old appointment is cancelled and its slot freed, then the
+  new slot is booked (`bookLocked`, shared with `book`: FREE and not started, or 409; the unique index as last guard).
+  Any refusal after the first change rolls the whole move back: the patient keeps the appointment they had.
+- `AppointmentController.reschedule`: `{id}` read as for a cancel (unreadable → 403), then `newSlotId` (400). For a
+  patient the body is checked before the appointment, which tells nothing about `{id}`: hence the access matrix line
+  `POST /api/appointments/{id}/reschedule` (anonymous 401, patient past security with its 400, practitioner and staff
+  403 from the filter chain). Path and body ids are read by two shared helpers (`appointmentId`, `slotId`).
+- Postman folder 7: book a slot two days ahead, move it to the next one (200), my appointments shows the old one
+  CANCELLED and the new one BOOKED, moving the cancelled one → 409 `APPOINTMENT_CANCELLED`.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (the tests alone; checked with the code of the commit before): `RescheduleAppointmentFunctionalTest` 9 tests,
+  6 failures.
+- Green (a1fadb7): with the access matrix, 94 tests, 0 failures.
+- Mutation check (the ticket's): without `@Transactional` on `reschedule`, 6 tests turn red, among them
+  `whenTheNewSlotIsTakenTheOldAppointmentIsKeptAsItWas`.
+- `./mvnw -B clean verify` **512 tests, 0 failures**; reverse order 512, 0 failures.
+- `setup-dev --skip-tests` then newman: **146 requests, 341 assertions, 0 failures**.
 
 ## MLink-106 — cancel an appointment, `POST /api/appointments/{id}/cancel` (2026-11-08, epic/MLink-8)
 
