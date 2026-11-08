@@ -56,7 +56,9 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/slots",                    L, O, F, F), // MLink-98: patients search slots
             new Rule("GET",    "/api/slots/filters",            L, O, F, F), // MLink-163: the search form's lists
             new Rule("POST",   "/api/appointments",             L, O, F, F), // MLink-102: patients book a slot
-            new Rule("GET",    "/api/appointments/me",          L, O, F, F)); // MLink-108: a patient's own appointments
+            new Rule("GET",    "/api/appointments/me",          L, O, F, F), // MLink-108: a patient's own appointments
+            // MLink-106: only the holder; {id} is someone else's (a random one), so even a patient gets 403
+            new Rule("POST",   "/api/appointments/{id}/cancel", L, F, F, F));
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")
