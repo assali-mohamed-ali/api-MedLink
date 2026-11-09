@@ -68,8 +68,12 @@ Tasks:
   on a closed port, no Docker. Missing username, missing password and each placeholder must fail with a root cause
   that names the variable and not the value; a control case (real-looking values) must *not* be refused. Red run:
   18 cases fail with `Connection refused` (the start got past the missing check), the 2 control cases pass. ~35 s.
-- [ ] **A2** Green: remove the defaults, add the placeholder check. Check once that putting a default back turns the
-  test red.
+- [x] **A2** Green: no default in `application-prod.yml` / `application-staging.yml`;
+  `config/DatabaseCredentialsCheck` (`@Profile({"staging","prod"})`, a `BeanFactoryPostProcessor`, so it runs
+  before Flyway) refuses a missing, empty, unresolved or placeholder value. The 4 staging/prod integration tests
+  set `TestcontainersConfiguration.UNUSED_DB_CREDENTIAL` (never used to connect: `@ServiceConnection` wins).
+  Mutation check done once: `${SPRING_DATASOURCE_USERNAME:medlink}` back in prod turned the prod "no username"
+  case red.
 - [ ] **A3** Red then green: an offline test script for the compose file (like `scripts/check-lockout.test.sh`):
   `docker compose -f docker-compose.yml config` with the variables unset fails and names them, and with values
   set passes. Then the `:?` changes.
@@ -146,6 +150,6 @@ Tasks:
 
 - [x] Plan written (2026-11-09), issues #57, #64, #67 taken by Mohamed.
 - [x] A1 red test committed (2026-11-09), not pushed: a red commit is pushed only with its green commit.
-- Next step: **A2** (remove the defaults, add the check before Flyway, dummy credentials in the staging/prod
-  integration tests; then put a default back once and see the test go red).
-- Last commit: the A1 red test.
+- [x] A2 green committed (2026-11-09), not pushed yet (push waits for Mohamed's go). MLink-164 is In Progress.
+- Next step: **A3** (offline test script for `docker-compose.yml`, then the `:?` changes).
+- Last commit: the A2 green commit.

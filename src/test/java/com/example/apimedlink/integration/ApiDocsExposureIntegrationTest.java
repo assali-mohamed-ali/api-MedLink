@@ -23,12 +23,17 @@ import org.springframework.test.context.TestPropertySource;
  * GitHub #65 (MLink-127): staging and prod serve neither the API reference UI (Scalar since #100) nor the OpenAPI
  * description, so an anonymous visitor learns no route, schema or security assumption of a health-data API. Dev
  * keeps both for the developers and for DAST (ZAP runs the dev profile). The old Swagger UI paths stay in the list:
- * they must never come back either. The real profile files, on real ports; the Keycloak secrets have no default
- * outside dev: dummy ones.
+ * they must never come back either. The real profile files, on real ports; the Keycloak secrets and the database
+ * credentials have no default outside dev: dummy ones.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"keycloak.client-secret=unused", "keycloak.admin.client-secret=unused"})
+        properties = {
+            "keycloak.client-secret=unused",
+            "keycloak.admin.client-secret=unused",
+            "spring.datasource.username=" + TestcontainersConfiguration.UNUSED_DB_CREDENTIAL,
+            "spring.datasource.password=" + TestcontainersConfiguration.UNUSED_DB_CREDENTIAL
+        })
 @Import(TestcontainersConfiguration.class)
 class ApiDocsExposureIntegrationTest {
 

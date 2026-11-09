@@ -21,11 +21,17 @@ import org.springframework.test.context.TestPropertySource;
  * port that only the private network reaches; the public port keeps only /livez and /readyz, which say UP or
  * DOWN and nothing else, for the deployment check and the container healthchecks. Dev keeps Actuator on the
  * main port. The real profile files, on real ports; the management port is a random one here (its value,
- * 9000, is checked by ManagementPortConfigTest). The Keycloak secrets have no default outside dev: dummy ones.
+ * 9000, is checked by ManagementPortConfigTest). The Keycloak secrets and the database credentials have no default
+ * outside dev: dummy ones.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"keycloak.client-secret=unused", "keycloak.admin.client-secret=unused"})
+        properties = {
+            "keycloak.client-secret=unused",
+            "keycloak.admin.client-secret=unused",
+            "spring.datasource.username=" + TestcontainersConfiguration.UNUSED_DB_CREDENTIAL,
+            "spring.datasource.password=" + TestcontainersConfiguration.UNUSED_DB_CREDENTIAL
+        })
 @Import(TestcontainersConfiguration.class)
 class ManagementPortIntegrationTest {
 

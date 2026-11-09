@@ -19,11 +19,17 @@ import org.springframework.test.context.ActiveProfiles;
  * MLink-84: under the staging and prod profiles the session and XSRF-TOKEN cookies are {@code Secure}
  * (HTTPS only), even when the request reached the API over plain HTTP (TLS ends at the proxy).
  * The real profile files, on a real port; not a functional test, which runs one profile on one fixed
- * port for every class. The Keycloak secrets have no default outside dev: dummy ones, no login here.
+ * port for every class. The Keycloak secrets and the database credentials have no default outside dev: dummy
+ * ones, no login here.
  */
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
-        properties = {"keycloak.client-secret=unused", "keycloak.admin.client-secret=unused"})
+        properties = {
+            "keycloak.client-secret=unused",
+            "keycloak.admin.client-secret=unused",
+            "spring.datasource.username=" + TestcontainersConfiguration.UNUSED_DB_CREDENTIAL,
+            "spring.datasource.password=" + TestcontainersConfiguration.UNUSED_DB_CREDENTIAL
+        })
 @Import(TestcontainersConfiguration.class)
 class SecureCookiesIntegrationTest {
 

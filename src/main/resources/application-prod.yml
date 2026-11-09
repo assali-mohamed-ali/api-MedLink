@@ -1,8 +1,9 @@
 spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/mydatabase}
-    username: ${SPRING_DATASOURCE_USERNAME:myuser}
-    password: ${SPRING_DATASOURCE_PASSWORD:secret}
+    # No default (GitHub #64): DatabaseCredentialsCheck stops the start when one is missing or a known placeholder
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
       maximum-pool-size: 20
   jpa:
