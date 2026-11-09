@@ -35,7 +35,12 @@ services:
       KEYCLOAK_REALM: medlink
       KEYCLOAK_CLIENT_ID: medlink-bff
       KEYCLOAK_CLIENT_SECRET: ${KC_BFF_CLIENT_SECRET:?KC_BFF_CLIENT_SECRET must be set}
+      KEYCLOAK_ADMIN_CLIENT_ID: medlink-admin
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KC_ADMIN_CLIENT_SECRET:?KC_ADMIN_CLIENT_SECRET must be set}
+      # Staging/prod: the front's origin(s). Fallback: the dev front ports.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:4200}
+      # Staging/prod: the reverse proxy's address, as a regex (GitHub #51). Never empty: empty trusts everyone.
+      TRUSTED_PROXIES: '${TRUSTED_PROXIES:-127\.0\.0\.1|0:0:0:0:0:0:0:1}'
       APP_MFA_ENCRYPTION_KEY: ${APP_MFA_ENCRYPTION_KEY:?APP_MFA_ENCRYPTION_KEY must be set}
       # Dev and local runs: Mailpit below. Staging/prod: the real SMTP server.
       MAIL_HOST: ${MAIL_HOST:-mailpit}
