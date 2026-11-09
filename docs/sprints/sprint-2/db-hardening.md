@@ -45,19 +45,29 @@ pull again, push. Each task: a red commit then its green commit, `#64`/`#57`/`#6
 
 Design (simplest that meets the issue):
 - `application-prod.yml` and `application-staging.yml`: `${SPRING_DATASOURCE_USERNAME}` and
-  `${SPRING_DATASOURCE_PASSWORD}` with **no default**: a missing variable stops the start ("Could not resolve
-  placeholder").
-- A small startup check, prod and staging profiles only, that refuses the known placeholders (`myuser`, `secret`,
-  `change-me`, `change-me-prod`, empty): the app stops before serving requests, and the message names the
-  variable, never its value.
+  `${SPRING_DATASOURCE_PASSWORD}` with **no default**.
+  **Found in A1:** that alone does *not* stop the start. `spring.datasource.*` is bound as configuration
+  properties, and Spring Boot's binder keeps an unresolved `${...}` as plain text: the app tries to log in as the
+  literal user `${SPRING_DATASOURCE_USERNAME}` and fails later, on the connection, with a confusing message. The
+  check below is what makes it fail closed.
+- A small startup check, prod and staging profiles only, that refuses a missing value (absent, empty, or still an
+  unresolved `${...}`) and the known placeholders (`myuser`, `secret`, `change-me`, `change-me-prod`): the app
+  stops **before anything connects to the database** (so it must run before Flyway: a `BeanFactoryPostProcessor`
+  or an environment check, not an ordinary bean), and the message names the variable, never its value.
+  Read the values through `Environment.getProperty`, which fails on an unresolved placeholder instead of keeping it.
+- The staging/prod integration tests that start with `@ServiceConnection` (`SecureCookies`, `ManagementPort`,
+  `ApiDocsExposure`, `ReadinessProbe` integration tests) do not set these variables: A2 gives them dummy
+  non-placeholder values (like they already do for the Keycloak secrets), or the check must accept them another way.
 - `docker-compose.yml`: `${POSTGRES_USER:?POSTGRES_USER is required}` (same for the password and the DB name):
   `docker compose` refuses to start when one is missing or empty.
 - Dev keeps its fixed values (`compose.yaml`, `application-dev.yml`).
 
 Tasks:
-- [ ] **A1** Red: a test starts the context with the prod profile and no DB username/password and expects a start
-  failure; a second one with `secret` as password expects the placeholder refusal. (Spring `ApplicationContextRunner`
-  or `SpringApplicationBuilder`, no Docker needed.) Same for staging.
+- [x] **A1** Red: `DatabaseCredentialsStartupTest` starts the real application (`SpringApplicationBuilder`, real
+  profile file) under prod and staging with a fake process environment (the real one removed) and the database URL
+  on a closed port, no Docker. Missing username, missing password and each placeholder must fail with a root cause
+  that names the variable and not the value; a control case (real-looking values) must *not* be refused. Red run:
+  18 cases fail with `Connection refused` (the start got past the missing check), the 2 control cases pass. ~35 s.
 - [ ] **A2** Green: remove the defaults, add the placeholder check. Check once that putting a default back turns the
   test red.
 - [ ] **A3** Red then green: an offline test script for the compose file (like `scripts/check-lockout.test.sh`):
@@ -135,5 +145,7 @@ Tasks:
 ## Progress
 
 - [x] Plan written (2026-11-09), issues #57, #64, #67 taken by Mohamed.
-- Next step: **A1** (red test: prod profile without DB credentials must not start).
-- Last commit: this plan.
+- [x] A1 red test committed (2026-11-09), not pushed: a red commit is pushed only with its green commit.
+- Next step: **A2** (remove the defaults, add the check before Flyway, dummy credentials in the staging/prod
+  integration tests; then put a default back once and see the test go red).
+- Last commit: the A1 red test.
