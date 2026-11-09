@@ -74,7 +74,7 @@ Tasks:
   set `TestcontainersConfiguration.UNUSED_DB_CREDENTIAL` (never used to connect: `@ServiceConnection` wins).
   Mutation check done once: `${SPRING_DATASOURCE_USERNAME:medlink}` back in prod turned the prod "no username"
   case red.
-- [ ] **A3** Red then green: an offline test script for the compose file (like `scripts/check-lockout.test.sh`):
+- [x] **A3** Red then green: an offline test script for the compose file (like `scripts/check-lockout.test.sh`):
   `docker compose -f docker-compose.yml config` with the variables unset fails and names them, and with values
   set passes. Then the `:?` changes.
   Red done: `scripts/compose-credentials.test.sh` (+ a step in `ci.yml`). It passes `--env-file` an empty file,
@@ -83,6 +83,12 @@ Tasks:
   Note for A4/A5: the full stack runs `SPRING_PROFILES_ACTIVE=dev` by default (`.env.example`), so A2's check
   does not apply there; someone switching the full stack to `prod` must also replace `myuser` (say so in
   `.env.example`).
+  Green: `${POSTGRES_DB|USER|PASSWORD:?... must be set}` in `docker-compose.yml` (postgres and app services; the
+  container-side healthcheck `$${POSTGRES_USER:-myuser}` stays, it must match `compose.yaml`). 7/7, and the real
+  local `.env` still passes. Mutation: a default back on *one* reference still refuses (the other one requires
+  it); back on every password reference turns 2 cases red.
+  **To check with the lead:** the deploy action writes the staging/prod `.env` from a GitHub secret; that secret
+  must hold `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, or the next deploy stops at compose (on purpose).
 - [ ] **A4** Setup scripts (both, same behaviour, `.sh` bash 3.2 safe): `--full-stack` still works, since `.env`
   already holds the values. Run both scripts once: 0 failures.
 - [ ] **A5** Docs: `.env.example`, `terraform/terraform.tfvars*.example` (say the placeholders are refused),
@@ -157,5 +163,6 @@ Tasks:
 - [x] Plan written (2026-11-09), issues #57, #64, #67 taken by Mohamed.
 - [x] A1 red test committed (2026-11-09), not pushed: a red commit is pushed only with its green commit.
 - [x] A2 green committed (2026-11-09), not pushed yet (push waits for Mohamed's go). MLink-164 is In Progress.
-- Next step: **A3** (offline test script for `docker-compose.yml`, then the `:?` changes).
-- Last commit: the A2 green commit.
+- [x] A3 red + green committed (2026-11-09), not pushed.
+- Next step: **A4** (both setup scripts, `--full-stack` included: 0 failures).
+- Last commit: the A3 green commit.
