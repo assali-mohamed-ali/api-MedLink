@@ -2,16 +2,23 @@ package com.example.apimedlink.functional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.apimedlink.model.Clinic;
+import com.example.apimedlink.model.Specialty;
+import com.example.apimedlink.repository.ClinicRepository;
+import com.example.apimedlink.repository.PractitionerRepository;
 import com.example.apimedlink.repository.SessionRevocationStore;
+import com.example.apimedlink.repository.SpecialtyRepository;
 import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.service.AdminUserService;
+import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 
 /**
  * MLink-69 (review of PR #112): a role change ends the user's open sessions at once. A session keeps the roles
- * it was opened with, so a demoted admin must not stay admin. Real Keycloak, real API, real database.
+ * it was opened with, so a demoted admin must not stay admin. Becoming a practitioner also creates their profile.
+ * Real Keycloak, real API, real database.
  */
 class AdminRoleChangeFunctionalTest extends FunctionalTestBase {
 
@@ -27,19 +34,31 @@ class AdminRoleChangeFunctionalTest extends FunctionalTestBase {
     @Autowired
     SessionRevocationStore revocations;
 
+    @Autowired
+    PractitionerRepository practitioners;
+
+    @Autowired
+    SpecialtyRepository specialties;
+
+    @Autowired
+    ClinicRepository clinics;
+
     @Test
     void aDemotedAdminLosesAdminAccessAtOnceAndLogsInAgainWithTheNewRoleOnly() throws Exception {
         String email = uniqueEmail("demoted");
         UUID id = console.createUser(email, PASSWORD, "/administrative-staff");
         Browser demoted = new Browser().login(email, PASSWORD);
         assertThat(demoted.call(STAFF_ONLY).statusCode()).as("admin before the change").isEqualTo(200);
+        UUID specialtyId = specialties.save(new Specialty("Spec-" + id)).getId();
+        UUID clinicId = clinics.save(new Clinic("Clinic-" + id, "Sousse")).getId();
 
-        admin.changeRole(id, Roles.PRACTITIONER);
+        admin.changeRole(id, Roles.PRACTITIONER, specialtyId, Set.of(clinicId));
 
         assertThat(demoted.call(STAFF_ONLY).statusCode()).as("the old session, at once").isEqualTo(401);
         assertThat(console.groups(id)).containsExactly("/practitioners");
         assertThat(console.sessions(id)).as("Keycloak sessions").isEmpty();
         assertThat(revocations.revokedAt(id)).as("the API's own mark").isPresent();
+        assertThat(practitioners.existsById(id)).as("the practitioner profile").isTrue();
 
         Browser again = new Browser().login(email, PASSWORD);
         assertThat(again.sessionRoles()).as("roles of the new session").containsExactly(Roles.PRACTITIONER);

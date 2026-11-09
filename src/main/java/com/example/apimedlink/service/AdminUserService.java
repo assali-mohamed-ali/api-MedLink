@@ -2,11 +2,22 @@ package com.example.apimedlink.service;
 
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.EmailTakenException;
+import com.example.apimedlink.model.Clinic;
+import com.example.apimedlink.model.Practitioner;
+import com.example.apimedlink.model.Specialty;
 import com.example.apimedlink.model.User;
+import com.example.apimedlink.repository.ClinicRepository;
+import com.example.apimedlink.repository.PractitionerRepository;
 import com.example.apimedlink.repository.SessionRevocationStore;
+import com.example.apimedlink.repository.SpecialtyRepository;
 import com.example.apimedlink.repository.UserRepository;
 import com.example.apimedlink.security.Roles;
+import jakarta.persistence.EntityNotFoundException;
+import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -15,25 +26,39 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Account management by staff (MLink-69, MLink-70): list, create a practitioner or staff account, change a
- * role, enable or disable an account. The Keycloak user and our users row are created in the same request;
- * when ours fails, the Keycloak user is deleted, so no account is left half made. Patients are never created
- * here: they register.
+ * Account management by staff (MLink-69): list, create a practitioner or staff account, change a role. A
+ * practitioner is a user with a profile (specialty and clinics, V13): it is created with the account, and a role
+ * change adds or removes it, so no practitioner account exists without its profile. The Keycloak user and our rows
+ * are created in the same request; when ours fail, the Keycloak user is deleted, so no account is left half made.
+ * Patients are never created here: they register.
  */
 @Service
 public class AdminUserService {
 
     private static final Logger log = LoggerFactory.getLogger(AdminUserService.class);
 
+    /** What a practitioner needs besides their account: a specialty and at least one clinic. */
+    private record Profile(Specialty specialty, Set<Clinic> clinics) {}
+
     private final KeycloakAdminService keycloak;
     private final UserRepository users;
+    private final PractitionerRepository practitioners;
+    private final SpecialtyRepository specialties;
+    private final ClinicRepository clinics;
+    private final PractitionerProfiles profiles;
     private final SessionRevocationStore revocations;
     private final TransactionTemplate tx;
 
     public AdminUserService(KeycloakAdminService keycloak, UserRepository users,
+                            PractitionerRepository practitioners, SpecialtyRepository specialties,
+                            ClinicRepository clinics, PractitionerProfiles profiles,
                             SessionRevocationStore revocations, TransactionTemplate tx) {
         this.keycloak = keycloak;
         this.users = users;
+        this.practitioners = practitioners;
+        this.specialties = specialties;
+        this.clinics = clinics;
+        this.profiles = profiles;
         this.revocations = revocations;
         this.tx = tx;
     }
@@ -42,9 +67,15 @@ public class AdminUserService {
         return keycloak.searchUsers(search, page, size);
     }
 
-    /** @throws ApiException 409 {@code EMAIL_TAKEN} when the email already has an account */
-    public KeycloakUserPage.Entry create(String email, String firstName, String lastName, String role) {
+    /**
+     * @throws ApiException 409 {@code EMAIL_TAKEN} when the email already has an account, 400
+     *     {@code VALIDATION_FAILED} when a practitioner has no valid specialty or clinics
+     */
+    public KeycloakUserPage.Entry create(String email, String firstName, String lastName, String role,
+                                         UUID specialtyId, Set<UUID> clinicIds) {
         String groupPath = staffGroupOf(role);
+        // Everything we can refuse is refused before Keycloak is touched
+        Profile profile = Roles.PRACTITIONER.equals(role) ? resolveProfile(specialtyId, clinicIds) : null;
         String normalized = email.trim().toLowerCase(Locale.ROOT);
         if (users.existsByEmail(normalized) || users.existsByUsername(normalized)) {
             throw emailTaken();
@@ -57,8 +88,7 @@ public class AdminUserService {
             throw emailTaken();
         }
         try {
-            tx.executeWithoutResult(status ->
-                    users.save(User.builder().id(id).username(normalized).email(normalized).build()));
+            tx.executeWithoutResult(status -> saveAccount(id, normalized, firstName, lastName, profile));
         } catch (RuntimeException e) {
             deleteKeycloakUser(id);
             throw e;
@@ -68,37 +98,90 @@ public class AdminUserService {
     }
 
     /**
-     * Moves the user to the role's Keycloak group, then ends their open sessions the way a forced password
-     * reset does: the API refuses the old sessions at once (session_revocations), then Keycloak signs them out.
-     * A session keeps the roles it was opened with, so without this a demoted admin would stay admin until the
-     * session ends. Every step is idempotent: after an error staff send the change again.
+     * Changes the role. Everything that can be refused is refused first, then the user's sessions are refused by
+     * the API (session_revocations) before anything is changed, so a failure half-way (the new group added, the old
+     * one not removed) never leaves an admin session valid: the user logs in again, the safe outcome. Then the
+     * practitioner profile is added or removed, the user moves to the role's Keycloak group, and Keycloak signs them
+     * out. A session keeps the roles it was opened with, so without this a demoted admin would stay admin. Every
+     * step is idempotent: after an error staff send the change again.
      *
      * @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404)
+     * @throws ApiException 409 {@code PRACTITIONER_HAS_SLOTS} when a practitioner who holds slots would lose their
+     *     profile, 400 {@code VALIDATION_FAILED} when a new practitioner has no valid specialty or clinics
      */
-    public void changeRole(UUID id, String role) {
-        keycloak.moveToGroup(id, staffGroupOf(role));
+    public void changeRole(UUID id, String role, UUID specialtyId, Set<UUID> clinicIds) {
+        String groupPath = staffGroupOf(role);
+        boolean hasProfile = practitioners.existsById(id);
+        final Runnable profileChange;
+        if (Roles.PRACTITIONER.equals(role) && !hasProfile) {
+            Profile profile = resolveProfile(specialtyId, clinicIds);
+            if (!users.existsById(id)) {
+                throw new EntityNotFoundException("User " + id + " not found");
+            }
+            KeycloakUser account = keycloak.getUser(id); // 404 when Keycloak does not know it either
+            if (isBlank(account.firstName()) || isBlank(account.lastName())) {
+                throw new ApiException(HttpStatus.CONFLICT, "PROFILE_NAME_MISSING",
+                        "Ce compte n'a ni prénom ni nom : complétez-les avant d'en faire un praticien.");
+            }
+            Set<UUID> ids = new HashSet<>();
+            profile.clinics().forEach(clinic -> ids.add(clinic.getId()));
+            profileChange = () -> profiles.create(id, account.firstName(), account.lastName(),
+                    profile.specialty().getId(), ids);
+        } else if (!Roles.PRACTITIONER.equals(role) && hasProfile) {
+            if (profiles.hasSlots(id)) {
+                throw new ApiException(HttpStatus.CONFLICT, "PRACTITIONER_HAS_SLOTS",
+                        "Ce praticien a des créneaux : ils doivent être supprimés avant de changer son rôle.");
+            }
+            profileChange = () -> profiles.delete(id);
+        } else {
+            profileChange = () -> { };
+        }
         revocations.revoke(id);
+        tx.executeWithoutResult(status -> profileChange.run());
+        keycloak.moveToGroup(id, groupPath);
         keycloak.endSessions(id);
     }
 
-    /**
-     * Enables or disables an account. Disabling: Keycloak first, so no new login gets past it; then the API
-     * refuses the user's open sessions at once (session_revocations, as for a forced password reset); then
-     * Keycloak signs them out. Every step is idempotent: after an error staff send it again.
-     *
-     * @throws ApiException 409 {@code CANNOT_DISABLE_SELF} when staff disable their own account
-     * @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404)
-     */
-    public void setEnabled(UUID id, boolean enabled, UUID actingUser) {
-        if (!enabled && id.equals(actingUser)) {
-            throw new ApiException(HttpStatus.CONFLICT, "CANNOT_DISABLE_SELF",
-                    "Vous ne pouvez pas désactiver votre propre compte.");
+    /** The specialty and clinics a practitioner needs, or a 400 naming what is missing or unknown. */
+    private Profile resolveProfile(UUID specialtyId, Set<UUID> clinicIds) {
+        Map<String, String> details = new LinkedHashMap<>();
+        Specialty specialty = null;
+        if (specialtyId == null) {
+            details.put("specialtyId", "La spécialité est obligatoire pour un praticien.");
+        } else {
+            specialty = specialties.findById(specialtyId).orElse(null);
+            if (specialty == null) {
+                details.put("specialtyId", "Cette spécialité n'existe pas.");
+            }
         }
-        keycloak.setEnabled(id, enabled);
-        if (!enabled) {
-            revocations.revoke(id);
-            keycloak.endSessions(id);
+        Set<Clinic> found = new HashSet<>();
+        if (clinicIds == null || clinicIds.isEmpty()) {
+            details.put("clinicIds", "Au moins une clinique est obligatoire pour un praticien.");
+        } else {
+            found.addAll(clinics.findAllById(clinicIds));
+            if (found.size() != clinicIds.size()) {
+                details.put("clinicIds", "Une de ces cliniques n'existe pas.");
+            }
         }
+        if (!details.isEmpty()) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED",
+                    "Certains champs sont invalides.", details);
+        }
+        return new Profile(specialty, found);
+    }
+
+    /** A staff member is a plain users row; a practitioner is saved with their profile (both rows at once). */
+    private void saveAccount(UUID id, String email, String firstName, String lastName, Profile profile) {
+        if (profile == null) {
+            users.save(User.builder().id(id).username(email).email(email).build());
+            return;
+        }
+        Practitioner practitioner = new Practitioner(firstName, lastName, profile.specialty());
+        practitioner.setId(id);
+        practitioner.setUsername(email);
+        practitioner.setEmail(email);
+        practitioner.setClinics(new HashSet<>(profile.clinics()));
+        practitioners.save(practitioner);
     }
 
     /** The Keycloak group of a staff role; PATIENT and anything unknown are refused. */
@@ -115,6 +198,10 @@ public class AdminUserService {
     private static ApiException emailTaken() {
         return new ApiException(HttpStatus.CONFLICT, "EMAIL_TAKEN",
                 "Un compte existe déjà avec cette adresse e-mail.");
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 
     private void deleteKeycloakUser(UUID id) {
