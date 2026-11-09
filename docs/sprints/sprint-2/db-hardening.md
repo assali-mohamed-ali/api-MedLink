@@ -127,7 +127,8 @@ Tasks:
 - [ ] **B5** Docs: `report.md` (MLink-59 "Limits" entry closed), `docs/ARCHITECTURE.md`, threat model, README
   dev-stack section (`-Reset` not needed thanks to B3). Comment on #57. Postman: no endpoint changes, nothing to do.
 - [ ] **B6** PR `fix/db-hardening` → `master` (AI section honest, review box left for Mohamed). Before it:
-  pull, verify + reversed order, both setup scripts.
+  pull, verify + reversed order, both setup scripts. **The PR description must carry the section
+  "PR notes" below** (Mohamed asked for it on 2026-11-09), plus the findings Part B adds to it.
 
 ## Part C: #67, backup and restore (branch `chore/db-backup-restore`)
 
@@ -151,6 +152,31 @@ Tasks:
   the secret store, consistency (both DBs in the same run), verification steps. Link from `docs/ARCHITECTURE.md`
   (backup line goes from "Gap" to "Done").
 - [ ] **C5** PR `chore/db-backup-restore` → `master`. Comment on #67.
+
+## PR notes (copy into the PR description of `fix/db-hardening`)
+
+Critical findings, to put in front of the reviewers, not only in the commits:
+
+1. **Removing the yml default alone does not fail closed.** `spring.datasource.*` is bound as configuration
+   properties, and Spring Boot's binder keeps an unresolved `${SPRING_DATASOURCE_USERNAME}` as plain text: the
+   app would try to log in as that literal user and fail later, on the connection, with a misleading error. The
+   real guard is `DatabaseCredentialsCheck`, a `BeanFactoryPostProcessor` that runs before Flyway. Any future
+   "no default" secret bound through `@ConfigurationProperties` has the same trap (`@Value` does fail).
+2. **Deploy secret: action needed before merging.** The deploy action writes the staging/prod `.env` from a
+   GitHub secret. `docker-compose.yml` now requires `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`: if that
+   secret lacks one, the next deploy stops at `docker compose` (on purpose). The lead must check the secret's keys;
+   nobody else can read it. Its values must also not be `myuser` / `secret` / `change-me*`, or the API refuses to
+   start under the prod profile.
+3. **Full stack under the prod profile with the example values is refused.** `.env.example` holds
+   `POSTGRES_USER=myuser` and `SPRING_PROFILES_ACTIVE=dev`. The dev default is unaffected; anyone switching the
+   full stack to `prod` must also replace `myuser` (A5 writes this into `.env.example`).
+4. **Tests that run the staging/prod profiles need DB credentials now.** The four integration tests pass
+   `TestcontainersConfiguration.UNUSED_DB_CREDENTIAL` (never used to connect: `@ServiceConnection` gives the
+   container's user). A new staging/prod test must do the same, or its context will not start.
+5. **How the compose test stays honest.** `docker compose` reads `.env` next to the compose file on its own, so
+   `scripts/compose-credentials.test.sh` passes an empty `--env-file`; without it the test would pass on any
+   machine where the setup script wrote `.env`. Putting a default back on only one of the two references of a
+   variable is still refused (the other reference requires it); the test goes red when every reference has one.
 
 ## Bookkeeping
 
