@@ -167,6 +167,10 @@ Critical findings, to put in front of the reviewers, not only in the commits:
    secret lacks one, the next deploy stops at `docker compose` (on purpose). The lead must check the secret's keys;
    nobody else can read it. Its values must also not be `myuser` / `secret` / `change-me*`, or the API refuses to
    start under the prod profile.
+   *Status 2026-11-09:* the `production` environment had no `DEPLOY_ENV_FILE` yet (nothing deployed). Mohamed
+   created it with generated secrets (`POSTGRES_USER=medlink_owner`); the public URLs, SMTP, CORS origin and
+   proxy address are still `REPLACE-ME` until the server exists. Interim copies are kept outside the repo, until
+   a vault server holds them.
 3. **Full stack under the prod profile with the example values is refused.** `.env.example` holds
    `POSTGRES_USER=myuser` and `SPRING_PROFILES_ACTIVE=dev`. The dev default is unaffected; anyone switching the
    full stack to `prod` must also replace `myuser` (A5 writes this into `.env.example`).
@@ -177,6 +181,12 @@ Critical findings, to put in front of the reviewers, not only in the commits:
    `scripts/compose-credentials.test.sh` passes an empty `--env-file`; without it the test would pass on any
    machine where the setup script wrote `.env`. Putting a default back on only one of the two references of a
    variable is still refused (the other reference requires it); the test goes red when every reference has one.
+6. **`CORS_ALLOWED_ORIGINS` and `TRUSTED_PROXIES` never reached the API container.** They were in
+   `.env.prod.example` / `.env.staging.example`, but `docker-compose.yml` did not pass them, so a server would have
+   allowed only the placeholder CORS origin and, behind its reverse proxy, put every client in one rate-limit
+   bucket (#51). Both are passed now (with `KEYCLOAK_ADMIN_CLIENT_ID`); `ComposeFilesTest` fails when a variable
+   the configuration reads is not passed to the container. The `TRUSTED_PROXIES` fallback stays loopback only:
+   an empty fallback would trust every client's `X-Forwarded-For`.
 
 ## Bookkeeping
 
@@ -190,5 +200,6 @@ Critical findings, to put in front of the reviewers, not only in the commits:
 - [x] A1 red test committed (2026-11-09), not pushed: a red commit is pushed only with its green commit.
 - [x] A2 green committed (2026-11-09), not pushed yet (push waits for Mohamed's go). MLink-164 is In Progress.
 - [x] A3 red + green committed (2026-11-09), not pushed.
-- Next step: **A4** (both setup scripts, `--full-stack` included: 0 failures).
-- Last commit: the A3 green commit.
+- [x] A3b red + green committed (2026-11-09), not pushed: compose passes CORS, proxies, admin client id (PR note 6).
+- Next step: **A4** (both setup scripts, `--full-stack` included: 0 failures). Needs about 3 GB of free RAM.
+- Last commit: the A3b green commit.
