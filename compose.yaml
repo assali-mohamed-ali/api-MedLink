@@ -41,7 +41,7 @@ services:
       retries: 10
 
   keycloak:
-    image: 'quay.io/keycloak/keycloak:26.8.1'
+    image: 'quay.io/keycloak/keycloak:26.8.2'
     command: ['start-dev', '--import-realm']
     labels:
       org.springframework.boot.ignore: 'true'
@@ -81,7 +81,7 @@ services:
   # keycloak/dev/dev-practitioners.json (fixed ids, used by the dev seed) to the realm, then exits.
   # Existing users are skipped, so it runs at every start. Logs: docker compose logs keycloak-dev-users.
   keycloak-dev-users:
-    image: 'quay.io/keycloak/keycloak:26.8.1'
+    image: 'quay.io/keycloak/keycloak:26.8.2'
     entrypoint: ['bash', '/opt/keycloak/dev/import-dev-users.sh']
     restart: 'no'
     labels:
@@ -99,7 +99,7 @@ services:
 
   # Catches every mail the API sends in dev: inbox at http://localhost:8025, SMTP on 1025.
   mailpit:
-    image: 'axllent/mailpit:v1.31.6'
+    image: 'axllent/mailpit:v1.33.0'
     labels:
       org.springframework.boot.ignore: 'true'
     ports:
