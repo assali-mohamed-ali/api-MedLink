@@ -93,7 +93,8 @@ class AdminUserControllerTest {
                 .andExpect(jsonPath("$.items[0].id").value(keycloakId.toString()))
                 .andExpect(jsonPath("$.items[0].role").value("PRACTITIONER"))
                 .andExpect(jsonPath("$.items[0].enabled").value(true))
-                .andExpect(jsonPath("$.items[0].emailVerified").value(true));
+                .andExpect(jsonPath("$.items[0].emailVerified").value(true))
+                .andExpect(jsonPath("$.items[0].ambiguousRole").value(false));
     }
 
     @Test
@@ -107,14 +108,24 @@ class AdminUserControllerTest {
     @Test
     void aValidBodyCreatesAStaffAccount() throws Exception {
         asStaff(post("/api/admin/users").contentType(MediaType.APPLICATION_JSON)
-                .content(createBody(email, Roles.PRACTITIONER)))
+                .content(createBody(email, Roles.ADMINISTRATIVE_STAFF)))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.id").value(keycloakId.toString()))
                 .andExpect(jsonPath("$.email").value(email))
-                .andExpect(jsonPath("$.role").value("PRACTITIONER"))
+                .andExpect(jsonPath("$.role").value("ADMINISTRATIVE_STAFF"))
                 .andExpect(jsonPath("$.emailVerified").value(false));
 
-        verify(keycloak).createUser(email, email, "Karim", "Mansour", "/practitioners");
+        verify(keycloak).createUser(email, email, "Karim", "Mansour", "/administrative-staff");
+    }
+
+    @Test
+    void aPractitionerWithoutSpecialtyAndClinicIsRefused() throws Exception {
+        asStaff(post("/api/admin/users").contentType(MediaType.APPLICATION_JSON)
+                .content(createBody(email, Roles.PRACTITIONER)))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.code").value("VALIDATION_FAILED"))
+                .andExpect(jsonPath("$.details.specialtyId").isNotEmpty())
+                .andExpect(jsonPath("$.details.clinicIds").isNotEmpty());
     }
 
     @Test
@@ -129,7 +140,7 @@ class AdminUserControllerTest {
     @Test
     void anInvalidEmailIsRefused() throws Exception {
         asStaff(post("/api/admin/users").contentType(MediaType.APPLICATION_JSON)
-                .content(createBody("not-an-email", Roles.PRACTITIONER)))
+                .content(createBody("not-an-email", Roles.ADMINISTRATIVE_STAFF)))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details.email").isNotEmpty());
     }
@@ -160,7 +171,7 @@ class AdminUserControllerTest {
         doThrow(new EntityNotFoundException("unknown")).when(keycloak).moveToGroup(eq(keycloakId), anyString());
 
         asStaff(put("/api/admin/users/" + keycloakId + "/role").contentType(MediaType.APPLICATION_JSON)
-                .content("{\"role\":\"PRACTITIONER\"}"))
+                .content("{\"role\":\"ADMINISTRATIVE_STAFF\"}"))
                 .andExpect(status().isNotFound());
     }
 
@@ -219,14 +230,27 @@ class AdminUserControllerTest {
     @Test
     void aPatientIsRefusedEvenWithAValidBody() throws Exception {
         mvc.perform(post("/api/admin/users").with(user("patient").roles(Roles.PATIENT)).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON).content(createBody(email, Roles.PRACTITIONER)))
+                        .contentType(MediaType.APPLICATION_JSON).content(createBody(email, Roles.ADMINISTRATIVE_STAFF)))
                 .andExpect(status().isForbidden());
     }
 
     @Test
     void aPractitionerIsRefusedEvenWithAValidBody() throws Exception {
         mvc.perform(post("/api/admin/users").with(user("practitioner").roles(Roles.PRACTITIONER)).with(csrf())
-                        .contentType(MediaType.APPLICATION_JSON).content(createBody(email, Roles.PRACTITIONER)))
+                        .contentType(MediaType.APPLICATION_JSON).content(createBody(email, Roles.ADMINISTRATIVE_STAFF)))
                 .andExpect(status().isForbidden());
+    }
+
+    @Test
+    void anAccountInTwoRolesIsShownAsAmbiguousNotAsOneOfThem() throws Exception {
+        KeycloakUser karim = new KeycloakUser(keycloakId, email, "Karim", "Mansour", true, true);
+        when(keycloak.searchUsers("", 0, 20)).thenReturn(new KeycloakUserPage(
+                List.of(new KeycloakUserPage.Entry(karim, List.of("/practitioners", "/administrative-staff"))), 1));
+
+        asStaff(get("/api/admin/users"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.items[0].ambiguousRole").value(true))
+                .andExpect(jsonPath("$.items[0].role").doesNotExist())
+                .andExpect(jsonPath("$.items[0].roles.length()").value(2));
     }
 }
