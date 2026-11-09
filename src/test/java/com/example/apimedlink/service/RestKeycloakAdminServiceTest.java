@@ -451,4 +451,41 @@ class RestKeycloakAdminServiceTest {
         assertThat(page.items().get(0).groupPaths()).containsExactly("/practitioners", "/administrative-staff");
         assertThat(page.items().get(0).groupPath()).as("no single group").isNull();
     }
+
+    
+    @Test
+    void setEnabledPutsTheEnabledFlagOnTheUser() {
+        expectToken("t", 300);
+        server.expect(once(), requestTo(USERS + "/" + ID))
+                .andExpect(method(HttpMethod.PUT))
+                .andExpect(header("Authorization", "Bearer t"))
+                .andExpect(content().json("{\"enabled\":false}", JsonCompareMode.LENIENT))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+
+        service.setEnabled(ID, false);
+
+        server.verify();
+    }
+
+    @Test
+    void setEnabledOfAnUnknownUserIsNotFound() {
+        expectToken("t", 300);
+        server.expect(once(), requestTo(USERS + "/" + ID))
+                .andExpect(method(HttpMethod.PUT))
+                .andRespond(withResourceNotFound());
+
+        assertThatThrownBy(() -> service.setEnabled(ID, true))
+                .isInstanceOf(EntityNotFoundException.class);
+    }
+
+    @Test
+    void setEnabledWhenKeycloakFailsIsUnavailable() {
+        expectToken("t", 300);
+        server.expect(once(), requestTo(USERS + "/" + ID))
+                .andExpect(method(HttpMethod.PUT))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> service.setEnabled(ID, true))
+                .isInstanceOf(KeycloakUnavailableException.class);
+    }
 }
