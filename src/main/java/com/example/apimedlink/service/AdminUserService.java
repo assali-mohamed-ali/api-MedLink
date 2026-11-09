@@ -212,4 +212,16 @@ public class AdminUserService {
                     id, e.getClass().getSimpleName());
         }
     }
+    public void setEnabled(UUID id, boolean enabled, UUID actingUser) {
+        if (!enabled && id.equals(actingUser)) {
+            throw new ApiException(HttpStatus.CONFLICT, "CANNOT_DISABLE_SELF",
+                    "Vous ne pouvez pas désactiver votre propre compte.");
+        }
+        keycloak.setEnabled(id, enabled);
+        if (!enabled) {
+            revocations.revoke(id);
+            keycloak.endSessions(id);
+        }
+    }
 }
+
