@@ -77,6 +77,12 @@ Tasks:
 - [ ] **A3** Red then green: an offline test script for the compose file (like `scripts/check-lockout.test.sh`):
   `docker compose -f docker-compose.yml config` with the variables unset fails and names them, and with values
   set passes. Then the `:?` changes.
+  Red done: `scripts/compose-credentials.test.sh` (+ a step in `ci.yml`). It passes `--env-file` an empty file,
+  or compose would read the developer's `.env` and pass by accident; every other `${X:?}` variable gets a dummy.
+  Red run: 6 of 7 cases fail (missing/empty accepted), the "all set" case passes.
+  Note for A4/A5: the full stack runs `SPRING_PROFILES_ACTIVE=dev` by default (`.env.example`), so A2's check
+  does not apply there; someone switching the full stack to `prod` must also replace `myuser` (say so in
+  `.env.example`).
 - [ ] **A4** Setup scripts (both, same behaviour, `.sh` bash 3.2 safe): `--full-stack` still works, since `.env`
   already holds the values. Run both scripts once: 0 failures.
 - [ ] **A5** Docs: `.env.example`, `terraform/terraform.tfvars*.example` (say the placeholders are refused),
