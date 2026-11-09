@@ -94,7 +94,7 @@ class AccountActivationControllerTest {
         return mvc.perform(post("/api/admin/users").with(user("staff").roles(Roles.ADMINISTRATIVE_STAFF)).with(csrf())
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
-                        {"email":"%s","firstName":"Salma","lastName":"Trabelsi","role":"PRACTITIONER"}
+                        {"email":"%s","firstName":"Salma","lastName":"Trabelsi","role":"ADMINISTRATIVE_STAFF"}
                         """.formatted(email)));
     }
 
