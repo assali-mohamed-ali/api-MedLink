@@ -392,6 +392,35 @@ class AgendaFunctionalTest extends FunctionalTestBase {
         assertThat(audit(owner.id())).isEmpty();
     }
 
+    /**
+     * Review on #116: Spring converts the dates of the query and the JSON body before {@code @PreAuthorize} runs, so a
+     * malformed value must still meet the role check first. 403 for every caller who is not a practitioner, never 400.
+     */
+    @Test
+    void patientsAndStaffGet403EvenWithMalformedDatesOrJson() throws Exception {
+        String patientEmail = uniqueEmail("agenda-patient");
+        console.createUser(patientEmail, PASSWORD);
+        Browser patient = new Browser();
+        assertThat(patient.apiLogin(patientEmail, PASSWORD).statusCode()).isEqualTo(200);
+        String staffEmail = uniqueEmail("agenda-staff");
+        console.createUser(staffEmail, PASSWORD, "/administrative-staff");
+        Browser staff = new Browser().login(staffEmail, PASSWORD);
+
+        for (Browser who : List.of(patient, staff)) {
+            assertThat(who.call("/api/practitioner/agenda?from=not-a-date&to=not-a-date").statusCode())
+                    .as("agenda, malformed dates").isEqualTo(403);
+            assertThat(who.postJson("/api/practitioner/slots",
+                    "{\"clinicId\":\"abc\",\"startsAt\":\"not-a-date\",\"endsAt\":\"not-a-date\"}").statusCode())
+                    .as("open, malformed dates").isEqualTo(403);
+            assertThat(who.postJson("/api/practitioner/slots", "{not json").statusCode())
+                    .as("open, malformed JSON").isEqualTo(403);
+            assertThat(patch(who, UUID.randomUUID(), "{not json").statusCode())
+                    .as("close, malformed JSON").isEqualTo(403);
+            assertThat(who.http.send(rawPatch(who, "not-a-uuid", "{}"), HttpResponse.BodyHandlers.ofString()).statusCode())
+                    .as("close, id that is not a UUID").isEqualTo(403);
+        }
+    }
+
     @Test
     void patientsAndStaffAreRefusedOnEveryRouteEvenWithAnEmptyBodyOrNoDates() throws Exception {
         String patientEmail = uniqueEmail("agenda-patient");
