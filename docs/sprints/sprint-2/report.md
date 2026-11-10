@@ -13,6 +13,8 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-10:** MLink-31 (`feat/MLink-31-patient-record`): `GET /api/patients/{id}/record` for the practitioners the patient is attached to (a `BOOKED` appointment). No migration. **One new line in `AccessMatrixFunctionalTest`**, one new rule in `SecurityConfig`. See the MLink-31 section.
+
 **2026-10-31, updated 2026-11-08:** MLink-65 (sub-sprint 3 part, `feat/ss3-setup-staff-code-check`): both setup
 scripts check the session with `GET /api/auth/me` (#107): `patient.dev` gets 200 with exactly the roles `["PATIENT"]`, and
 `practitioner.dev`'s password alone opens no session (login 200 with `mfaRequired`, then 401). Scripts and README
@@ -162,6 +164,29 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-31 — Accéder au dossier du patient (back-end)
+
+**Tickets:** 31.1, 31.2, 31.3, 31.6 (story MLink-31, epic MLink-10). Front (31.4, 31.5) in `web-MedLink`.
+
+**Route:** `GET /api/patients/{id}/record` → 200 `{"patient": {"id", "firstName", "lastName", "birthDate", "phone"}, "reports": []}`. Practitioners only; the practitioner is always the caller.
+
+**Decisions** (agreed 2026-11-10, comment on 31.1)
+- D1 — "attached" = the practitioner has a `BOOKED` appointment with the patient, past or upcoming (`appointments → slots.practitioner_id`). A cancelled appointment does not attach: the patient was never seen (secret médical). No new table, no migration (`AppointmentRepository.existsByPractitionerAndPatient`).
+- D2 — not attached, unknown patient and an id that is not a UUID get the same 403 (`AccessDeniedException`, so the refusal is audited as `ACCESS_DENIED`); the link is checked before anything is read.
+- D3 — `RECORD_VIEWED` (`SUCCESS`, resource `PATIENT_RECORD`, ids only) is written before the record is returned: a read that cannot be traced is not answered. `AuditService` writes in its own transaction.
+- Identity only: no address, no email (31.2). `reports` stays empty until MLink-32 gives it its type.
+- `SecurityConfig` checks the `PRACTITIONER` role for `GET /api/patients/*/record` before Spring reads the request (lesson of the review on #116); the class-level `@PreAuthorize` stays. The id is read as text, so nothing is converted before the role check.
+- New enum values: `AuditAction.RECORD_VIEWED`, `AuditOutcome.SUCCESS` (#116 also adds `SUCCESS`: keep one at merge).
+
+**Proofs**
+- `PatientRecordFunctionalTest` (5 tests), committed red first (5 of 5 failing with 404), then green: attached practitioner 200 with identity only and `Cache-Control: no-store`; a past appointment attaches; not attached, cancelled only, unknown and malformed ids all get the same 403 and 4 `ACCESS_DENIED` rows, no `RECORD_VIEWED`; patient (even the one concerned) and staff 403, anonymous 401; two reads → two `RECORD_VIEWED` rows with the practitioner's id.
+- Mutation checks: any appointment instead of `BOOKED` → `expected: 403 but was: 200`; without the audit call → `Expected size: 2 but was: 0`.
+- Access matrix: one new line, `GET /api/patients/{id}/record` L,F,F,F.
+- `./mvnw -B clean verify`: **484 tests, 0 failures**; reverse class order: 484 tests, 0 failures. One earlier run had one error that did not come back in the next runs.
+- Postman folder 10 (access rules; the 200 needs a practitioner profile and an appointment, which no endpoint creates yet): 19 requests, 31 assertions, 0 failures. Whole collection: **151 requests, 345 assertions, 0 failures**, twice in a row, after `setup-dev.sh --reset`.
+
+**Found on the way:** after switching branches, `./mvnw verify` without `clean` kept another branch's `V15__agenda_reference_data.sql` in `target/classes`, and `AppointmentSchemaTest.outsideTheDevProfileThereIsNoSeedData` failed locally (3 clinics). Not a code issue (CI starts from an empty `target/`): use `./mvnw clean verify` after a branch switch when migrations differ.
 
 ## MLink-65 — setup scripts check the session and the staff code (2026-10-31, updated 2026-11-07, feat/ss3-setup-staff-code-check)
 
