@@ -22,6 +22,11 @@ import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.repository.SpecialtyRepository;
 import com.example.apimedlink.repository.UserRepository;
 import com.example.apimedlink.security.Roles;
+import com.example.apimedlink.model.Patient;
+import com.example.apimedlink.repository.PatientRepository;
+import com.example.apimedlink.repository.PractitionerRepository;
+import com.example.apimedlink.exception.KeycloakUnavailableException;
+import java.time.LocalDate;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.Set;
 import java.util.UUID;
@@ -45,6 +50,9 @@ class AdminUserServiceTest {
 
     @Autowired
     UserRepository users;
+
+    @Autowired
+    PatientRepository patients;
 
     @Autowired
     PractitionerRepository practitioners;
@@ -289,5 +297,63 @@ class AdminUserServiceTest {
 
         assertThat(revocations.revokedAt(keycloakId)).as("the API refuses the old sessions anyway").isPresent();
         verify(keycloak, never()).endSessions(keycloakId);
+    }
+
+    
+    private void savePatient() {
+        Patient patient = new Patient("Amel", "Ben Salah", LocalDate.of(1990, 1, 1), null, null);
+        patient.setId(keycloakId);
+        patient.setUsername(email);
+        patient.setEmail(email);
+        patients.save(patient);
+    }
+
+    @Test
+    void aPatientCannotBecomeAPractitioner() {
+        savePatient();
+
+        assertThatThrownBy(() -> admin.changeRole(keycloakId, Roles.PRACTITIONER, null, null))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getCode()).isEqualTo("PATIENT_ROLE_CHANGE_UNSUPPORTED");
+                });
+
+        assertThat(patients.existsById(keycloakId)).as("the patient row stays").isTrue();
+        assertThat(practitioners.existsById(keycloakId)).as("no second profile").isFalse();
+        verify(keycloak, never()).moveToGroup(keycloakId, "/practitioners");
+    }
+
+    @Test
+    void aPatientCannotBecomeStaff() {
+        savePatient();
+
+        assertThatThrownBy(() -> admin.changeRole(keycloakId, Roles.ADMINISTRATIVE_STAFF, null, null))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(e.getCode()).isEqualTo("PATIENT_ROLE_CHANGE_UNSUPPORTED");
+                });
+
+        assertThat(patients.existsById(keycloakId)).as("the patient row stays").isTrue();
+        verify(keycloak, never()).moveToGroup(keycloakId, "/administrative-staff");
+    }
+
+    @Test
+    void aDemotionKeepsTheProfileWhenKeycloakFailsAndSucceedsOnRetry() {
+        admin.create(email, "Salma", "Trabelsi", Roles.PRACTITIONER, specialtyId, Set.of(clinicId));
+        assertThat(practitioners.existsById(keycloakId)).isTrue();
+        doThrow(new KeycloakUnavailableException("move to group: down")).doNothing()
+                .when(keycloak).moveToGroup(keycloakId, "/administrative-staff");
+
+        assertThatThrownBy(() -> admin.changeRole(keycloakId, Roles.ADMINISTRATIVE_STAFF, null, null))
+                .isInstanceOf(KeycloakUnavailableException.class);
+
+        assertThat(practitioners.existsById(keycloakId)).as("profile kept: Keycloak still says PRACTITIONER").isTrue();
+        assertThat(revocations.revokedAt(keycloakId)).as("old sessions are already refused").isPresent();
+        verify(keycloak, never()).endSessions(keycloakId);
+
+        admin.changeRole(keycloakId, Roles.ADMINISTRATIVE_STAFF, null, null);
+
+        assertThat(practitioners.existsById(keycloakId)).as("deleted once Keycloak succeeded").isFalse();
+        verify(keycloak).endSessions(keycloakId);
     }
 }
