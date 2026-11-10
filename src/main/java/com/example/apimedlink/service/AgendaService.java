@@ -24,6 +24,7 @@ import java.util.UUID;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.dao.PessimisticLockingFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -97,16 +98,25 @@ public class AgendaService {
         Clinic clinic = clinics.findOfPractitioner(practitionerId).stream()
                 .filter(own -> own.getId().equals(clinicId)).findFirst()
                 .orElseThrow(AgendaService::clinicNotTheirs);
-        List<Slot> inTheWay = slots.findOverlapping(practitionerId, startsAt, endsAt);
-        if (!inTheWay.isEmpty()) {
-            throw overlap(inTheWay.get(0));
-        }
-        try {
-            return transaction.execute(status ->
+        for (int attempt = 1; ; attempt++) {
+            List<Slot> inTheWay = slots.findOverlapping(practitionerId, startsAt, endsAt);
+            if (!inTheWay.isEmpty()) {
+                throw overlap(inTheWay.get(0));
+            }
+            try {
+                return transaction.execute(status ->
                     slots.saveAndFlush(new Slot(practitioners.getReferenceById(practitionerId), clinic, startsAt, endsAt)));
-        } catch (DataIntegrityViolationException refused) {
-            // Outside the transaction that failed: the re-read below runs in a fresh one
-            throw translate(refused, practitionerId, startsAt, endsAt);
+            } catch (DataIntegrityViolationException refused) {
+                // Outside the transaction that failed: the re-read below runs in a fresh one
+                throw translate(refused, practitionerId, startsAt, endsAt);
+            } catch (PessimisticLockingFailureException deadlock) {
+                // Two overlapping openings at once: the exclusion constraint can make each insert wait for the
+                // other, and Postgres aborts one with a deadlock (40P01) instead of an exclusion violation. The
+                // other one won: try once more, the check above or the constraint then answers 409, never a 500.
+                if (attempt >= 2) {
+                    throw new ApiException(HttpStatus.CONFLICT, "SLOT_OVERLAP", "Vous avez déjà un créneau à ce moment.");
+                }
+            }
         }
     }
 
