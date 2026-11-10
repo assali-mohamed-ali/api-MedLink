@@ -5,7 +5,7 @@
 | Status | **Accepted and implemented** |
 | Date | 2026-11-02 |
 | Tracking | YouTrack epic MLink-9 (MLink-123 encrypted upload/storage, MLink-125 list/download) |
-| Scope | `document/` package, `V13__patient_documents.sql`, document tests |
+| Scope | `document/` package, `V14__patient_documents.sql`, document tests |
 
 ## Decision
 

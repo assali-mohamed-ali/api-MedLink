@@ -1,6 +1,6 @@
 # Patient documents (MLink-9 / MLink-123/125)
 
-Status: implemented by migration `V13__patient_documents.sql` and the `document/` package. This page is the
+Status: implemented by migration `V14__patient_documents.sql` and the `document/` package. This page is the
 reference for the endpoint contracts, storage format, audit rules, limits and tests.
 
 ## Purpose and access
