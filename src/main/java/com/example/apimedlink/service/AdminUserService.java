@@ -7,6 +7,7 @@ import com.example.apimedlink.model.Practitioner;
 import com.example.apimedlink.model.Specialty;
 import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.ClinicRepository;
+import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.repository.PractitionerRepository;
 import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.repository.SpecialtyRepository;
@@ -42,6 +43,7 @@ public class AdminUserService {
 
     private final KeycloakAdminService keycloak;
     private final UserRepository users;
+    private final PatientRepository patients;
     private final PractitionerRepository practitioners;
     private final SpecialtyRepository specialties;
     private final ClinicRepository clinics;
@@ -49,12 +51,12 @@ public class AdminUserService {
     private final SessionRevocationStore revocations;
     private final TransactionTemplate tx;
 
-    public AdminUserService(KeycloakAdminService keycloak, UserRepository users,
-                            PractitionerRepository practitioners, SpecialtyRepository specialties,
+    public AdminUserService(KeycloakAdminService keycloak, UserRepository users, PatientRepository patients,                            PractitionerRepository practitioners, SpecialtyRepository specialties,
                             ClinicRepository clinics, PractitionerProfiles profiles,
                             SessionRevocationStore revocations, TransactionTemplate tx) {
         this.keycloak = keycloak;
         this.users = users;
+        this.patients = patients;
         this.practitioners = practitioners;
         this.specialties = specialties;
         this.clinics = clinics;
@@ -99,20 +101,28 @@ public class AdminUserService {
 
     /**
      * Changes the role. Everything that can be refused is refused first, then the user's sessions are refused by
-     * the API (session_revocations) before anything is changed, so a failure half-way (the new group added, the old
-     * one not removed) never leaves an admin session valid: the user logs in again, the safe outcome. Then the
-     * practitioner profile is added or removed, the user moves to the role's Keycloak group, and Keycloak signs them
-     * out. A session keeps the roles it was opened with, so without this a demoted admin would stay admin. Every
-     * step is idempotent: after an error staff send the change again.
+     * the API (session_revocations) before anything is changed, so a failure half-way never leaves an admin
+     * session valid: the user logs in again, the safe outcome. A promotion adds the practitioner profile, then
+     * moves the user to the new Keycloak group. A demotion moves the group first and deletes the profile only
+     * after Keycloak succeeded, so a Keycloak failure never leaves a PRACTITIONER without their profile. Keycloak
+     * then signs the user out: a session keeps the roles it was opened with. Every step is idempotent: after an
+     * error staff send the change again.
      *
      * @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404)
-     * @throws ApiException 409 {@code PRACTITIONER_HAS_SLOTS} when a practitioner who holds slots would lose their
-     *     profile, 400 {@code VALIDATION_FAILED} when a new practitioner has no valid specialty or clinics
+     * @throws ApiException 409 {@code PATIENT_ROLE_CHANGE_UNSUPPORTED} for a patient (a person holds one role; the
+     *     history of a patient is not migrated), 409 {@code PRACTITIONER_HAS_SLOTS} when a practitioner who holds
+     *     slots would lose their profile, 400 {@code VALIDATION_FAILED} when a new practitioner has no valid
+     *     specialty or clinics
      */
     public void changeRole(UUID id, String role, UUID specialtyId, Set<UUID> clinicIds) {
         String groupPath = staffGroupOf(role);
+        if (patients.existsById(id)) {
+            throw new ApiException(HttpStatus.CONFLICT, "PATIENT_ROLE_CHANGE_UNSUPPORTED",
+                    "Le rôle d'un patient ne peut pas être changé : son dossier et ses rendez-vous ne sont pas migrés.");
+        }
         boolean hasProfile = practitioners.existsById(id);
         final Runnable profileChange;
+        final boolean demotion;
         if (Roles.PRACTITIONER.equals(role) && !hasProfile) {
             Profile profile = resolveProfile(specialtyId, clinicIds);
             if (!users.existsById(id)) {
@@ -127,21 +137,29 @@ public class AdminUserService {
             profile.clinics().forEach(clinic -> ids.add(clinic.getId()));
             profileChange = () -> profiles.create(id, account.firstName(), account.lastName(),
                     profile.specialty().getId(), ids);
+            demotion = false;
         } else if (!Roles.PRACTITIONER.equals(role) && hasProfile) {
             if (profiles.hasSlots(id)) {
                 throw new ApiException(HttpStatus.CONFLICT, "PRACTITIONER_HAS_SLOTS",
                         "Ce praticien a des créneaux : ils doivent être supprimés avant de changer son rôle.");
             }
             profileChange = () -> profiles.delete(id);
+            demotion = true;
         } else {
             profileChange = () -> { };
+            demotion = false;
         }
         revocations.revoke(id);
-        tx.executeWithoutResult(status -> profileChange.run());
-        keycloak.moveToGroup(id, groupPath);
+        if (demotion) {
+            keycloak.moveToGroup(id, groupPath);
+            tx.executeWithoutResult(status -> profileChange.run());
+        } else {
+            tx.executeWithoutResult(status -> profileChange.run());
+            keycloak.moveToGroup(id, groupPath);
+        }
         keycloak.endSessions(id);
     }
-
+    
     /** The specialty and clinics a practitioner needs, or a 400 naming what is missing or unknown. */
     private Profile resolveProfile(UUID specialtyId, Set<UUID> clinicIds) {
         Map<String, String> details = new LinkedHashMap<>();
