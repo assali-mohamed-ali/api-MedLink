@@ -168,7 +168,7 @@ public abstract class FunctionalTestBase {
     static class DocumentStorageConfig {
         @Bean
         @Primary
-        DocumentStorage documentStorage() {
+        DocumentStorage lazyDocumentStorage() {
             return new LazyMinioStorage();
         }
     }
