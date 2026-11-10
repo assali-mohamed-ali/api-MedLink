@@ -302,6 +302,28 @@ class AgendaFunctionalTest extends FunctionalTestBase {
     }
 
     @Test
+    void aClosedSlotCannotBeBookedEvenByItsIdAndNoAppointmentIsCreated() throws Exception {
+        Pro pro = practitioner(SOUSSE);
+        UUID closed = openAndGetId(pro, SOUSSE, DAY.plus(3, ChronoUnit.HOURS));
+        assertThat(patch(pro.browser(), closed, "{\"status\":\"CLOSED\"}").statusCode()).isEqualTo(200);
+        // A patient with a profile (the booking needs one), who knows the slot's id without the search
+        String email = uniqueEmail("agenda-patient");
+        UUID patientId = console.createUser(email, PASSWORD);
+        jdbc.update("insert into users (id, username, email) values (?, ?, ?) on conflict (id) do nothing", patientId, email, email);
+        jdbc.update("insert into patients (id, first_name, last_name, birth_date) values (?, 'Amel', 'Test', ?)",
+                patientId, Date.valueOf("1990-04-12"));
+        Browser patient = new Browser();
+        assertThat(patient.apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+
+        HttpResponse<String> booking = patient.postJson("/api/appointments", "{\"slotId\":\"" + closed + "\"}");
+
+        assertThat(booking.statusCode()).as(booking.body()).isEqualTo(409);
+        assertThat(body(booking).get("code")).isEqualTo("SLOT_TAKEN");
+        assertThat(jdbc.queryForObject("select count(*) from appointments where slot_id = ?", Integer.class, closed)).isZero();
+        assertThat(jdbc.queryForObject("select status from slots where id = ?", String.class, closed)).isEqualTo("CLOSED");
+    }
+
+    @Test
     void aBookedSlotCannotBeClosedAndStaysUnchanged() throws Exception {
         Pro pro = practitioner(SOUSSE);
         UUID patient = insertPatient("Amel", "Ben Salah");
