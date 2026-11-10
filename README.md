@@ -38,10 +38,10 @@ cd api-MedLink
 |---|---|
 | `powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1` | `./scripts/setup-dev.sh` |
 
-The script creates `.env` with random secrets, starts Postgres, Keycloak and Mailpit, checks the realm, runs
-the tests, starts the API and logs in as `patient.dev` to prove the whole chain works. Add `-SkipTests` /
-`--skip-tests` for a faster run. **Re-run it after every `git pull`**: it keeps your Keycloak in step with the
-team's realm file. All options: [§8](#8-dev-setup-in-detail).
+The script creates `.env` with random secrets, starts Postgres, Keycloak, Mailpit and MinIO (patient
+documents), checks the realm, runs the tests, starts the API and logs in as `patient.dev` to prove the whole
+chain works. Add `-SkipTests` / `--skip-tests` for a faster run. **Re-run it after every `git pull`**: it
+keeps your Keycloak in step with the team's realm file. All options: [§8](#8-dev-setup-in-detail).
 
 **What you get**
 
@@ -58,8 +58,8 @@ team's realm file. All options: [§8](#8-dev-setup-in-detail).
 `MedLink-Dev-2026!` (the value of `KC_DEV_USERS_PASSWORD`). `practitioner.dev` and `staff.dev` also need a code
 from an authenticator app (Google Authenticator, Aegis, …): their first login enrols it with a QR code.
 
-**Stack:** Spring Boot 4.1 · Java 17 · Keycloak 26 · PostgreSQL · Flyway · Testcontainers. Package
-`com.example.apimedlink`. Do not downgrade a version to make code compile.
+**Stack:** Spring Boot 4.1 · Java 17 · Keycloak 26 · PostgreSQL · Flyway · MinIO (S3) · Testcontainers.
+Package `com.example.apimedlink`. Do not downgrade a version to make code compile.
 
 ## 2. How auth works
 
@@ -105,10 +105,14 @@ sequenceDiagram
 | `POST /api/auth/logout` | logged in | 204 |
 | `GET /api/users` | staff | 200 |
 | `GET /api/users/{id}` | the user themself, or staff | 200 · 403 for anyone else, whether the id exists or not |
-| `DELETE /api/users/{id}` | staff | 204 |
+| `DELETE /api/users/{id}` | staff | 204 · 409 `DOCUMENTS_PRESENT` if the patient still has documents |
+| `POST /api/patients/{patientId}/documents` | staff, multipart `title` + `file` | 201 `DocumentDto` + `Location` · 400 · 404 · 413 · 415 |
+| `GET /api/patients/{patientId}/documents` | the patient owner, or staff | 200 page (`page`, `size` 1..50) · 403 · 404 |
+| `GET /api/patients/{patientId}/documents/{documentId}` | the patient owner, or staff | 200 bytes · 403 for a practitioner · 404 for another patient or unknown document |
 | `GET /api/users/_health` | logged in | 200 |
 
-Full contracts: [plan.md §4](docs/sprints/sprint-2/plan.md).
+Full contracts: [plan.md §4](docs/sprints/sprint-2/plan.md). Patient documents:
+[feature guide](docs/features/patient-documents.md) and [decision 0002](docs/decisions/0002-patient-documents-package.md).
 
 ### Security rules behind them
 
@@ -132,6 +136,7 @@ src/main/java/com/example/apimedlink/
 ├── repository/    Spring Data JPA
 ├── model/         JPA entities
 ├── dto/           API records (never a password hash or a token)
+├── document/      patient documents: controller, DTOs, AES-256-GCM cipher, MinIO storage
 ├── config/        SecurityConfig, CORS, OpenAPI, Keycloak clients, rate limits
 ├── security/      Roles, CurrentUser, OwnershipGuard, LoginSessions, session and rate-limit filters,
 │                  JSON 401/403 handlers, RouteWords (audit redaction)
@@ -142,9 +147,10 @@ src/main/resources/
 ├── application-dev.yml        local
 ├── application-staging.yml    pre-prod
 ├── application-prod.yml       prod
-└── db/migration/              Flyway V*__*.sql
+└── db/migration/              Flyway V*__*.sql (V13 = patient_documents)
 
-src/test/java/.../functional/  real API + Keycloak + Postgres + Mailpit, driven over HTTP like a browser
+src/test/java/.../functional/  real API + Keycloak + Postgres + Mailpit (+ MinIO for document tests),
+                               driven over HTTP like a browser
 keycloak/realm-medlink.json    the realm: roles, groups, clients, lockout, dev users
 scripts/setup-dev.ps1 / .sh    one-command dev setup (keep both in step)
 docs/                          sprint plan and report, decisions, Postman collection
@@ -185,8 +191,11 @@ Tasks live in YouTrack, project `MLink` (https://medlink.youtrack.cloud).
    ```bash
    ./mvnw -B verify                                           # needs Docker
    ./mvnw -B test -Dsurefire.runOrder=reversealphabetical
+   ./mvnw -B test -Dtest='PatientDocument*Test,AesDocumentCipherTest,DocumentPropertiesTest'  # documents
    ```
-   Changed an endpoint? Run the Postman collection in `docs/postman/` with `npx newman@6.2.1 run <file>`.
+   Changed an endpoint? Run the Postman collection in `docs/postman/` with `npx newman@6.2.1 run <file>`
+   from the repository root; its patient-documents folder uploads
+   `docs/postman/fixtures/patient-document.pdf`.
 5. **Open the product PR against `staging`** (after the release-pipeline migration described in
    [Deployment](docs/DEPLOYMENT.md)). Use a Conventional Commit title such as `feat: add appointment booking`.
    The pipeline tests and scans the PR, deploys merged `staging` commits, then runs post-deployment smoke tests.
@@ -280,8 +289,8 @@ Logs of the last run: `%TEMP%\medlink-setup` (Windows) or `$TMPDIR/medlink-setup
 
 | Setup | File | Command | Secrets |
 |---|---|---|---|
-| **A. Coding** (API on your machine) | `compose.yaml`: Postgres, Keycloak + its DB, Mailpit | `SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run` | fixed dev values, matching `application-dev.yml` |
-| **B. Full stack** (all in containers) | `docker-compose.yml`: the same + the API image + Prometheus | `docker compose -f docker-compose.yml up --build` | all from `.env`, required |
+| **A. Coding** (API on your machine) | `compose.yaml`: Postgres, Keycloak + its DB, Mailpit, MinIO | `SPRING_PROFILES_ACTIVE=dev ./mvnw spring-boot:run` | fixed dev values, matching `application-dev.yml` |
+| **B. Full stack** (all in containers) | `docker-compose.yml`: the same + the API image + Prometheus + MinIO | `docker compose -f docker-compose.yml up --build` | all from `.env`, required |
 
 The shared services must stay identical in both files (`ComposeFilesTest` fails when they drift).
 `compose.yaml` also defines the API under the `full` profile: `docker compose --profile full up --build`
@@ -293,7 +302,7 @@ prod use file B with `--env-file .env.staging` or `.env.prod`.
 <details>
 <summary><b>When dev data is kept or deleted</b></summary>
 
-Volumes: `pgdata` (app database) and `keycloak-db-data` (Keycloak).
+Volumes: `pgdata` (app database), `keycloak-db-data` (Keycloak) and `minio-data` (patient documents).
 
 | You run | Volumes |
 |---|---|
@@ -338,6 +347,8 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 | 401 with the right password | 5 wrong passwords lock the account for 15 minutes, answered like a wrong password: wait, or unlock it in the console |
 | `INVALID_CODE` with the code from the authenticator app | the phone's clock is off (a code lives 30 s, one step of tolerance): set the phone to automatic date and time. Also check you scanned the QR code of the last setup (a new setup replaces the secret) |
 | `MFA_LOCKED` | 5 wrong codes lock the code step for 15 minutes, even after a new login: wait |
+| `app.documents...` at startup (missing endpoint/bucket/key, or `http://` with TLS required) | `.env` is incomplete: set `APP_DOCUMENTS_STORAGE_*` and a base64 32-byte `APP_DOCUMENTS_ENCRYPTION_KEY`, or re-run the setup script |
+| a document call returns 503 `STORAGE_UNAVAILABLE` | MinIO is down or the bucket is missing: start the dev stack, and check the endpoint, credentials and bucket (`create-bucket=true` in dev) |
 | a file shows fully modified after pull | line endings, normalized by `.gitattributes`; a `chore: normalize` commit is fine |
 | `permission denied: ./scripts/setup-dev.sh` | `chmod +x scripts/setup-dev.sh` |
 | a Spring Boot test class "is missing" | Spring Boot 4 moved them (`AutoConfigureMockMvc` → `org.springframework.boot.webmvc.test.autoconfigure`); don't downgrade |
@@ -358,6 +369,7 @@ actuator exposes only `health,info,prometheus`: don't open more without a securi
 | [docs/sprints/sprint-2/report.md](docs/sprints/sprint-2/report.md) | **Status**: what is merged, open, next; decisions log |
 | [docs/sprints/sprint-2/README.md](docs/sprints/sprint-2/README.md) | how a working session runs |
 | [docs/sprints/sprint-2/plan.md](docs/sprints/sprint-2/plan.md) | design and endpoint contracts |
-| [docs/decisions/](docs/decisions/) | decision records |
+| [docs/features/patient-documents.md](docs/features/patient-documents.md) | patient documents: contracts, encryption, MinIO, audit, errors, tests |
+| [docs/decisions/](docs/decisions/) | decision records (0002 covers patient documents) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [security/threat-model.md](security/threat-model.md) | architecture, trust boundaries, threats and controls mapped to code and tests |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | staging/production host, GitHub Environment secrets, rollout, rollback and recovery |

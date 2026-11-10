@@ -1,9 +1,10 @@
 # Deployment (staging and production)
 
 CD deploys the **same image** that CI built to a Docker host over SSH. The host runs the
-`docker-compose.yml` stack (API, PostgreSQL, Keycloak, Keycloak database, Prometheus); GitHub Actions
-only builds the image, records its immutable digest, copies the compose inputs, and asks the host to
-pull that digest. The host never builds the application.
+`docker-compose.yml` stack (API, PostgreSQL, Keycloak, Keycloak database, Prometheus, and the local MinIO
+service or an external S3-compatible store); GitHub Actions only builds the image, records its immutable
+digest, copies the compose inputs, and asks the host to pull that digest. The host never builds the
+application.
 
 This is deliberate: Terraform local state on an ephemeral runner cannot safely own a production
 container. Terraform remains available for a single-container deployment (`terraform/`), while CD
@@ -77,6 +78,43 @@ per environment with `openssl rand -base64 32` (32 bytes, base64) and keep it wi
 does not start without a valid key. Never share it between staging and prod, and do not change it casually: a
 new key makes every enrolled code unreadable, so each practitioner and staff member would enrol again.
 
+### Patient document storage
+
+Patient documents need an S3-compatible object store. The compose stack contains a local MinIO for a
+self-hosted deployment; staging and prod should point the API at an **external MinIO/S3 endpoint over HTTPS**.
+Terraform does **not** create MinIO or its bucket: provisioning owns them.
+
+The environment file (or the GitHub Environment secret) must provide:
+
+| Variable | Staging/prod expectation |
+|---|---|
+| `APP_DOCUMENTS_STORAGE_ENDPOINT` | `https://...`; the API refuses a plain-HTTP endpoint when TLS is required |
+| `APP_DOCUMENTS_STORAGE_ACCESS_KEY`, `APP_DOCUMENTS_STORAGE_SECRET_KEY` | credentials scoped to the document bucket (bucket existence check, put, get, stat, delete) |
+| `APP_DOCUMENTS_STORAGE_BUCKET` | dedicated bucket per environment |
+| `APP_DOCUMENTS_STORAGE_CREATE_BUCKET` | `false`: the bucket is provisioned outside the API |
+| `APP_DOCUMENTS_STORAGE_REQUIRE_TLS` | `true` |
+| `APP_DOCUMENTS_ENCRYPTION_KEY` | 32 random bytes in base64 (`openssl rand -base64 32`), one value per environment |
+
+In the compose stack, `MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD` are passed to the API as
+`APP_DOCUMENTS_STORAGE_ACCESS_KEY` / `APP_DOCUMENTS_STORAGE_SECRET_KEY`; the `.env.*.example` files keep the
+two pairs aligned. The Terraform path passes the `APP_DOCUMENTS_*` values directly.
+
+For a private CA, add its certificate to the JVM truststore used by the API (for example
+`JAVA_TOOL_OPTIONS=-Djavax.net.ssl.trustStore=... -Djavax.net.ssl.trustStorePassword=...`). Never disable
+certificate or hostname verification. The API validates the endpoint, bucket, TLS rule and encryption keys
+during startup; a missing or malformed value stops the process instead of serving documents that cannot be
+read or written.
+
+`APP_DOCUMENTS_ENCRYPTION_KEY` seals document bytes, not just metadata. Keep all old key versions while
+documents reference them: rotation adds a new `app.documents.encryption.keys.<n>` entry and moves
+`app.documents.encryption.active-version`; there is no re-encryption job. Losing the key makes the affected
+documents permanently unreadable. Back up the bucket and Postgres together: a database restore without the
+matching objects is incomplete.
+
+MinIO is contacted lazily, on the first document operation; the bucket is checked then. `/readyz` covers the
+database, not the object store, so a MinIO outage leaves readiness `UP` but document endpoints answer
+`503 STORAGE_UNAVAILABLE`. A missing bucket with `create-bucket=false` behaves the same way.
+
 ## What the workflow does
 
 ### 1. Pull request into staging
@@ -135,7 +173,8 @@ branch can contain a feature, a fix, or a refactor, so it is not automatically a
 
 1. Create the `staging` and `production` environments and configure all variables/secrets in the table above.
 2. Add the repository secret `PROMOTION_TOKEN` and keep `ENABLE_AUTO_PROMOTION` false until the migration is complete.
-3. Prepare the hosts: Docker Engine, Compose v2, deploy user, `DEPLOY_PATH`, reverse proxy, DNS and persistent volumes.
+3. Prepare the hosts: Docker Engine, Compose v2, deploy user, `DEPLOY_PATH`, reverse proxy, DNS, persistent
+   volumes, and the external document store (HTTPS endpoint, bucket, credentials, private CA trust if needed).
 4. Confirm the release-pipeline workflows/configuration are present on `staging` and `prod`, not only on `master`.
 5. Configure branch rules for `staging` and `prod`:
    - Require PRs and successful CI/security checks (at minimum `CI / build-test`, `CD / Verify, build and scan exact image`,
@@ -181,6 +220,8 @@ same rule applies to Keycloak: keep the `keycloak-db-data` volume and its backup
 | `pull` fails | Old container still runs | Check GHCR visibility and the target's login |
 | `up` starts a bad image | New container may be unhealthy | Collect logs, restore the previous digest, `up` again |
 | Health check times out | New container is left in place; old one is gone | Roll back with the previous digest and check the DB/SMTP/Keycloak connectivity |
+| Document upload/download returns `503 STORAGE_UNAVAILABLE` | MinIO is unreachable or the bucket is missing | Check the object-store endpoint, TLS/CA trust, credentials and bucket; `/readyz` stays `UP` by design |
+| Startup fails on `app.documents.*` | Missing endpoint/bucket/encryption key, or an `http://` endpoint with TLS required | Fix the environment file; the message names the property, never the key value |
 | Host unreachable | Deployment job fails; the old stack keeps running | Restore SSH access, re-run |
 
 The deploy job prints the API logs on failure. Container logs are also available with:
@@ -199,6 +240,10 @@ docker compose --env-file .env -f docker-compose.yml ps
 - The environment file is copied with mode `600`; the GHCR token is piped to `docker login --password-stdin`
   and is never printed.
 - Secrets live in GitHub Environments, not in the repository or the compose file.
+- Store document credentials and `APP_DOCUMENTS_ENCRYPTION_KEY` only in the environment secret, never in
+  git or an image; use a dedicated bucket and a different key per environment.
+- The external object store must be reached over HTTPS with a trusted certificate; never disable TLS
+  verification to accommodate a private CA.
 - Production deployments are tag-only (`v*`); keep branch protections and required CI/security checks enabled even when the reviewer gate is disabled for full automation.
 - The GHCR package can stay private; the target logs in per deployment.
 - Staging and prod serve Actuator (metrics, `/actuator/health`) only on the management port **9000**. Never publish it

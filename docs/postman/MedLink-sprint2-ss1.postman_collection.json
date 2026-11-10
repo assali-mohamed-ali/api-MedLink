@@ -2,7 +2,7 @@
   "info": {
     "name": "MedLink API · Sprint 2 (registration, email verification, password changes, staff code)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases, then folder 6 for endpoints 10–11 (sub-sprint 4) and folder 8 for the staff code, endpoints 8–9 (sub-sprint 3). Practitioners and staff log in with a code: the collection's pre-request script computes it from `{{totpSecret}}` like an authenticator app.\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token; folder 6 reuses the account verified in folder 4). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created, the per-IP limits (429 `TOO_MANY_REQUESTS` with `Retry-After`, GitHub #51: the dev profile raises them to 1000 so this collection can be rerun; `RateLimitFunctionalTest` checks the real values).\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them."
+    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases, then folder 6 for endpoints 10–11 (sub-sprint 4) and folder 8 for the staff code, endpoints 8–9 (sub-sprint 3). Practitioners and staff log in with a code: the collection's pre-request script computes it from `{{totpSecret}}` like an authenticator app.\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token; folder 6 reuses the account verified in folder 4). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created, the per-IP limits (429 `TOO_MANY_REQUESTS` with `Retry-After`, GitHub #51: the dev profile raises them to 1000 so this collection can be rerun; `RateLimitFunctionalTest` checks the real values).\n\nFolder 9 adds patient documents (upload, list, download and the practical 401/403/404/409/415 cases). It creates its own patient and staff accounts each run; its multipart request reads `docs/postman/fixtures/patient-document.pdf`, so run Newman from the repository root.\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them."
   },
   "event": [
     {
@@ -3646,6 +3646,816 @@
           ]
         }
       ]
+    },
+    {
+      "name": "9 · Patient documents (MLink-123/125)",
+      "description": "Self-contained: it creates a patient and a disposable staff member, enrols the staff code, then uploads, lists and downloads a PDF. It closes any session left by an earlier folder, so it can run after folder 8 or alone. The multipart request reads docs/postman/fixtures/patient-document.pdf; in the Postman app, reselect the file if the path is not resolved. The practitioner refusal and the 10 MiB boundary are covered by the JUnit tests.",
+      "item": [
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN and new emails",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/auth/csrf" },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "const xsrf = pm.cookies.get(\"XSRF-TOKEN\");",
+                  "pm.test(\"XSRF-TOKEN cookie present\", () => pm.expect(xsrf).to.be.a(\"string\").and.not.empty);",
+                  "pm.collectionVariables.set(\"xsrf\", xsrf);",
+                  "const run = Date.now();",
+                  "pm.collectionVariables.set(\"docPatientEmail\", \"postman.doc.patient.\" + run + \"@example.com\");",
+                  "pm.collectionVariables.set(\"docStaffEmail\", \"postman.doc.staff.\" + run + \"@example.com\");",
+                  "pm.collectionVariables.unset(\"totpSecret\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "204 or 401 · close any session left by an earlier folder",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"204 if a session was closed, 401 when there was none\", () => pm.expect([204, 401]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · upload without a session",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "title", "value": "Titre", "type": "text" },
+                { "key": "file", "type": "file", "src": "docs/postman/fixtures/patient-document.pdf" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"UNAUTHENTICATED\", () => pm.expect(pm.response.json().code).to.eql(\"UNAUTHENTICATED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · list without a session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"UNAUTHENTICATED\", () => pm.expect(pm.response.json().code).to.eql(\"UNAUTHENTICATED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · download without a session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents/{{$guid}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"UNAUTHENTICATED\", () => pm.expect(pm.response.json().code).to.eql(\"UNAUTHENTICATED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "201 · register the document patient",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{docPatientEmail}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Doc\",\n  \"lastName\": \"Patient\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mailpit: the verification link for the document patient",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{docPatientEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const to = pm.collectionVariables.get(\"docPatientEmail\");",
+                  "const mails = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to) && x.Subject === \"Confirmez votre adresse e-mail MedLink\");",
+                  "pm.test(\"one verification mail\", () => pm.expect(mails).to.have.length(1));",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + mails[0].ID, (e, res) => {",
+                  "    const match = res.json().Text.match(/verifier-email\\?token=([A-Za-z0-9_-]+)/);",
+                  "    pm.test(\"the mail links to the React verification page\", () => pm.expect(match).to.not.be.null);",
+                  "    pm.collectionVariables.set(\"docVerifyToken\", match[1]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "204 · verify the document patient's email",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{docVerifyToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Keycloak (dev admin): admin token",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/x-www-form-urlencoded" }
+            ],
+            "url": "{{keycloakUrl}}/realms/master/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                { "key": "grant_type", "value": "password" },
+                { "key": "client_id", "value": "admin-cli" },
+                { "key": "username", "value": "{{kcAdminUser}}" },
+                { "key": "password", "value": "{{kcAdminPassword}}" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"kcToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Keycloak: find the document patient by email",
+          "request": {
+            "method": "GET",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{kcToken}}" }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users?email={{docPatientEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const to = pm.collectionVariables.get(\"docPatientEmail\");",
+                  "const found = pm.response.json().filter(u => u.email === to);",
+                  "pm.test(\"one Keycloak user with the document patient's email\", () => pm.expect(found).to.have.length(1));",
+                  "pm.collectionVariables.set(\"docPatientId\", found[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Keycloak: a disposable staff member (console, group /administrative-staff)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Authorization", "value": "Bearer {{kcToken}}" },
+              { "key": "Content-Type", "value": "application/json" }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{docStaffEmail}}\",\n  \"email\": \"{{docStaffEmail}}\",\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Document staff\",\n  \"enabled\": true,\n  \"emailVerified\": true,\n  \"groups\": [\n    \"/administrative-staff\"\n  ],\n  \"credentials\": [\n    {\n      \"type\": \"password\",\n      \"value\": \"{{password}}\",\n      \"temporary\": false\n    }\n  ]\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "const location = pm.response.headers.get(\"Location\");",
+                  "pm.collectionVariables.set(\"docStaffUserId\", location.substring(location.lastIndexOf(\"/\") + 1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the staff password alone asks for the code (mfaSetupRequired true)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{docStaffEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"code required\", () => pm.expect(body.mfaRequired).to.eql(true));",
+                  "pm.test(\"first login: setup required\", () => pm.expect(body.mfaSetupRequired).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mailpit: the code setup link mailed to the staff member",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{docStaffEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const to = pm.collectionVariables.get(\"docStaffEmail\");",
+                  "const mails = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to) && x.Subject === \"Configurez votre code de connexion MedLink\");",
+                  "pm.test(\"one setup mail\", () => pm.expect(mails).to.have.length(1));",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + mails[0].ID, (e, res) => {",
+                  "    const match = res.json().Text.match(/configurer-code\\?token=([A-Za-z0-9_-]+)/);",
+                  "    pm.test(\"the mail links to the React setup page\", () => pm.expect(match).to.not.be.null);",
+                  "    pm.collectionVariables.set(\"docStaffSetupToken\", match[1]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff code setup (first login of this staff member)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{docStaffSetupToken}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a Base32 secret\", () => pm.expect(body.secret).to.match(/^[A-Z2-7]{32}$/));",
+                  "pm.collectionVariables.set(\"docStaffSecret\", body.secret);",
+                  "pm.collectionVariables.set(\"totpSecret\", body.secret);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the current code opens the staff session (ADMINISTRATIVE_STAFF)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"ADMINISTRATIVE_STAFF\", () => pm.expect(pm.response.json().user.roles).to.eql([\"ADMINISTRATIVE_STAFF\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · list with size=51 is refused",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents?size=51"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 · staff list for an unknown patient",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"NOT_FOUND\", () => pm.expect(pm.response.json().code).to.eql(\"NOT_FOUND\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 · staff upload for an unknown patient",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "title", "value": "Titre", "type": "text" },
+                { "key": "file", "type": "file", "src": "docs/postman/fixtures/patient-document.pdf" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"NOT_FOUND\", () => pm.expect(pm.response.json().code).to.eql(\"NOT_FOUND\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · upload without a title is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "file", "type": "file", "src": "docs/postman/fixtures/patient-document.pdf" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "201 · staff uploads a PDF (title + file)",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "title", "value": "Compte rendu", "type": "text" },
+                { "key": "file", "type": "file", "src": "docs/postman/fixtures/patient-document.pdf" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"patientId\", () => pm.expect(body.patientId).to.eql(pm.collectionVariables.get(\"docPatientId\")));",
+                  "pm.test(\"uploadedBy is the staff member\", () => pm.expect(body.uploadedBy).to.eql(pm.collectionVariables.get(\"docStaffUserId\")));",
+                  "pm.test(\"title\", () => pm.expect(body.title).to.eql(\"Compte rendu\"));",
+                  "pm.test(\"original filename\", () => pm.expect(body.originalFilename).to.eql(\"patient-document.pdf\"));",
+                  "pm.test(\"canonical content type\", () => pm.expect(body.contentType).to.eql(\"application/pdf\"));",
+                  "pm.test(\"plaintext size\", () => pm.expect(body.sizeBytes).to.be.above(0));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/api/patients/\" + body.patientId + \"/documents/\" + body.id));",
+                  "pm.collectionVariables.set(\"docId\", body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff lists the patient's documents (newest first)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "pm.test(\"one document\", () => pm.expect(page.total).to.eql(1));",
+                  "pm.test(\"the uploaded id\", () => pm.expect(page.items[0].id).to.eql(pm.collectionVariables.get(\"docId\")));",
+                  "pm.test(\"default page and size\", () => pm.expect(page.page).to.eql(0) && pm.expect(page.size).to.eql(20));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff downloads the exact PDF with attachment headers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents/{{docId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"canonical content type\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.eql(\"application/pdf\"));",
+                  "pm.test(\"no-store\", () => pm.expect(pm.response.headers.get(\"Cache-Control\")).to.include(\"no-store\"));",
+                  "pm.test(\"nosniff\", () => pm.expect(pm.response.headers.get(\"X-Content-Type-Options\")).to.eql(\"nosniff\"));",
+                  "pm.test(\"attachment filename\", () => pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.include(\"attachment\").and.include(\"patient-document.pdf\"));",
+                  "pm.test(\"the PDF bytes\", () => pm.expect(pm.response.text()).to.include(\"%PDF-1.4\").and.include(\"MedLink patient document\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 · staff downloads an unknown document of this patient",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents/{{$guid}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"NOT_FOUND\", () => pm.expect(pm.response.json().code).to.eql(\"NOT_FOUND\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "415 · staff uploads a non-multipart body",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 415\", () => pm.response.to.have.status(415));",
+                  "pm.test(\"UNSUPPORTED_MEDIA_TYPE\", () => pm.expect(pm.response.json().code).to.eql(\"UNSUPPORTED_MEDIA_TYPE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "409 · deleting the patient with documents is refused (DOCUMENTS_PRESENT)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/users/{{docPatientId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"DOCUMENTS_PRESENT\", () => pm.expect(pm.response.json().code).to.eql(\"DOCUMENTS_PRESENT\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN before the patient login",
+          "request": { "method": "GET", "header": [], "url": "{{baseUrl}}/api/auth/csrf" },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "const xsrf = pm.cookies.get(\"XSRF-TOKEN\");",
+                  "pm.test(\"XSRF-TOKEN cookie present\", () => pm.expect(xsrf).to.be.a(\"string\").and.not.empty);",
+                  "pm.collectionVariables.set(\"xsrf\", xsrf);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the patient logs in",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "Content-Type", "value": "application/json" },
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{docPatientEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": { "raw": { "language": "json" } }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"the document patient\", () => pm.expect(body.user.id).to.eql(pm.collectionVariables.get(\"docPatientId\")));",
+                  "pm.test(\"PATIENT\", () => pm.expect(body.user.roles).to.eql([\"PATIENT\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · the patient cannot upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                { "key": "title", "value": "Titre", "type": "text" },
+                { "key": "file", "type": "file", "src": "docs/postman/fixtures/patient-document.pdf" }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"FORBIDDEN\", () => pm.expect(pm.response.json().code).to.eql(\"FORBIDDEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the patient lists their own documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "pm.test(\"one document\", () => pm.expect(page.total).to.eql(1));",
+                  "pm.test(\"the uploaded id\", () => pm.expect(page.items[0].id).to.eql(pm.collectionVariables.get(\"docId\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the patient downloads their own document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents/{{docId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"the PDF bytes\", () => pm.expect(pm.response.text()).to.include(\"%PDF-1.4\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · the patient lists another patient's documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"FORBIDDEN\", () => pm.expect(pm.response.json().code).to.eql(\"FORBIDDEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 · the patient downloads another patient's document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents/{{docId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"NOT_FOUND, never 403: the response cannot confirm the document exists\", () => pm.expect(pm.response.json().code).to.eql(\"NOT_FOUND\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
@@ -3787,6 +4597,38 @@
     },
     {
       "key": "usedTotpCode",
+      "value": ""
+    },
+    {
+      "key": "docPatientEmail",
+      "value": ""
+    },
+    {
+      "key": "docPatientId",
+      "value": ""
+    },
+    {
+      "key": "docVerifyToken",
+      "value": ""
+    },
+    {
+      "key": "docStaffEmail",
+      "value": ""
+    },
+    {
+      "key": "docStaffUserId",
+      "value": ""
+    },
+    {
+      "key": "docStaffSetupToken",
+      "value": ""
+    },
+    {
+      "key": "docStaffSecret",
+      "value": ""
+    },
+    {
+      "key": "docId",
       "value": ""
     }
   ]

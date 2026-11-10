@@ -28,8 +28,8 @@ it does not make the organisation certified on its own.
 
 ## Architecture
 
-Seven runtime components, two databases: identity lives in Keycloak, business data in the API's Postgres,
-and they never share storage.
+Eight runtime components, two databases and an object store: identity lives in Keycloak, business data in
+the API's Postgres, and encrypted document bytes in MinIO. They never share storage.
 
 ```mermaid
 flowchart LR
@@ -37,8 +37,9 @@ flowchart LR
   API["api-MedLink (BFF) :8080<br/>Spring Boot 4.1 · Java 17<br/>server session holds the tokens<br/>deny by default, JSON 401/403<br/>Flyway owns the schema"]
   KC["Keycloak :8180<br/>realm medlink<br/>passwords, policy, lockout,<br/>roles via groups, events"]
   KCDB[("keycloak-db<br/>own container and volume")]
-  APPDB[("Postgres · app data<br/>users, patients, email tokens,<br/>audit_entries, rate_limits,<br/>session_revocations")]
+  APPDB[("Postgres · app data<br/>users, patients, email tokens,<br/>audit_entries, rate_limits,<br/>session_revocations,<br/>patient_documents metadata")]
   MAIL["SMTP<br/>(Mailpit in dev)"]
+  MINIO["MinIO (S3 API)<br/>AES-256-GCM encrypted<br/>patient documents"]
   PROM["Prometheus :9090"]
   BR -- "1 every call: JSON + session cookie<br/>(login: email + password)" --> API
   API -- "2 password grant, token renewal, logout<br/>(client medlink-bff)" --> KC
@@ -46,7 +47,8 @@ flowchart LR
   API -- "4 JDBC" --> APPDB
   KC -- "JDBC" --> KCDB
   API -- "5 verification and warning mails" --> MAIL
-  PROM -- "6 /actuator/prometheus every 15 s<br/>(private management port 9000)" --> API
+  API -- "6 encrypted document objects<br/>(metadata stays in Postgres)" --> MINIO
+  PROM -- "7 /actuator/prometheus every 15 s<br/>(private management port 9000)" --> API
 ```
 
 1. The browser only ever calls the API. At login it sends the email and password to the API.
@@ -56,7 +58,9 @@ flowchart LR
 3. Account operations use a separate service account, `medlink-admin`.
 4. Keycloak and the API each have their own database and volume.
 5. Mails (verification links, "someone used your address") are the API's own, not Keycloak's.
-6. Prometheus scrapes the metrics. In staging and prod, Actuator is only on the private management port 9000
+6. Patient document bytes go to MinIO encrypted with AES-256-GCM; Postgres keeps only metadata. The API is
+   the only component that reaches the object store.
+7. Prometheus scrapes the metrics. In staging and prod, Actuator is only on the private management port 9000
    (`app:9000`, never published); the public port keeps `/livez` and `/readyz` (GitHub #49).
 
 The browser never needs to reach Keycloak. Its port 8180 is for admins in dev; the API reaches Keycloak
@@ -162,6 +166,23 @@ The realm file is imported **only when the realm does not exist yet**. In stagin
 source of truth after the first start; export the realm to update the file. In local dev the file is the
 source of truth: the setup script re-imports it whenever it changed.
 
+### Patient documents (MLink-9)
+
+Administrative staff upload PDF, PNG or JPEG files to a patient; the patient owner and staff list and
+download them. Practitioners have no access. The API identifies the type from the magic bytes, caps the file
+at 10 MiB, stores the bytes in MinIO under the key `{patientId}/{documentId}`, and keeps only metadata in
+Postgres (`V13__patient_documents.sql`).
+
+Each object is AES-256-GCM encrypted by the API as `[key version][12-byte IV][ciphertext + tag]`, with
+`documentId|patientId|keyVersion` as associated data. The row's `key_version` chooses the key, so rotation
+adds a version without rewriting old documents; download decrypts, verifies the AAD and compares the
+plaintext SHA-256 before returning bytes. Uploads and downloads are audited, a failed upload transaction
+deletes its object, and a patient with documents cannot be deleted (`409 DOCUMENTS_PRESENT`). There is no
+document delete endpoint.
+
+Full contracts, error table, configuration and tests: [patient documents](features/patient-documents.md).
+The design rationale: [decision record 0002](decisions/0002-patient-documents-package.md).
+
 ## The why behind each setup
 
 Every choice below trades a little simplicity for less attack surface or less custom security code. Check its
@@ -185,7 +206,7 @@ reason before changing one; the dated decisions are in the
 | Flyway owns the schema, `ddl-auto: validate` | Schema changes are reviewed as code | `ddl-auto: update` silently changes production tables |
 | Profiles `dev` / `staging` / `prod`, secrets from env only | The same image runs everywhere; a missing Keycloak secret stops startup outside dev | Defaults baked into config (the datasource still has some: GitHub #64) |
 | Pinned versions (Java 17, image tags) | Reproducible builds; Dependabot proposes bumps as reviewable PRs | `latest` tags change under your feet |
-| Functional tests against real Keycloak, Postgres, Mailpit (Testcontainers) | Prove behaviour end to end over HTTP, like a browser | Mocked Keycloak; H2 in-memory |
+| Functional tests against real Keycloak, Postgres, Mailpit and MinIO (Testcontainers) | Prove behaviour end to end over HTTP, like a browser | Mocked Keycloak; H2 in-memory |
 | Non-root container user + healthcheck | Least privilege at runtime; orchestrators restart an unhealthy app | |
 
 ## Codebase map
@@ -201,11 +222,12 @@ owner, and names the security-sensitive ones explicitly: the `config/` and `secu
 | `service/` | Business logic on entities, never a DTO. `KeycloakLoginClient` (password grant, logout) and `KeycloakAdminService` are the only Keycloak callers | Adding behaviour |
 | `repository/`, `model/` | Spring Data JPA and entities (`User`, `Patient extends User`, `AuditEntry`...) | Adding a table |
 | `dto/` | Records for API input/output; never a password hash or a token | Changing what the API exposes |
+| `document/` | Patient documents: controller, DTOs/mapper, AES-256-GCM cipher, MinIO storage, `V13` metadata entity | Changing document storage, encryption or limits |
 | `config/` | `SecurityConfig` (rules, CSRF, 401/403 handlers), CORS, OpenAPI, Keycloak clients, rate limits | Changing who can call what (code owner review) |
 | `security/` | `Roles`, `CurrentUser`, `OwnershipGuard`, `LoginSessions`, `SessionValidityFilter`, `RateLimitFilter`, JSON 401/403 handlers, `RouteWords` | Changing sessions or access checks |
 | `exception/` | `GlobalExceptionHandler`, `ErrorBody` (the one error shape) | Adding an error type |
 | `resources/application*.properties/yml` | Base config; per-profile DB, cookies, CORS, actuator, logging | Environment-specific settings |
-| `resources/db/migration/` | Flyway `V1`–`V8` on `master` | Any schema change: the next free `V<N>__...`, never edit a merged file |
+| `resources/db/migration/` | Flyway `V1`–`V13`; `V13__patient_documents.sql` adds the document metadata table | Any schema change: the next free `V<N>__...`, never edit a merged file |
 | `keycloak/realm-medlink.json` | Realm, roles, groups, clients, lockout, events, dev users | Changing identity settings (in a PR) |
 | `compose.yaml` / `docker-compose.yml` | Dev dependencies (plus the API under the `full` profile) / full stack with secrets (kept alike by `ComposeFilesTest`) | Adding a service |
 | `docker/` | Multi-stage `Dockerfile` (non-root), `Dockerfile.dev` | Changing the image |
@@ -214,8 +236,9 @@ owner, and names the security-sensitive ones explicitly: the `config/` and `secu
 | `monitoring/` | Prometheus config, 4 alert rules, Grafana dashboard | Adding metrics or alerts |
 | `terraform/` | Docker-provider IaC for the app container, aligned with the Keycloak BFF and the production profile (GitHub #53) | Changing deployment |
 
-Tests: `src/test/java/.../functional/` drives the real API over HTTP against Keycloak, Postgres and Mailpit
-(`FunctionalTestBase`); `integration/`, MockMvc and unit tests mirror the packages. Docker must be running.
+Tests: `src/test/java/.../functional/` drives the real API over HTTP against Keycloak, Postgres, Mailpit and
+MinIO (`FunctionalTestBase`; MinIO starts lazily on the first document operation); `integration/`, MockMvc and
+unit tests mirror the packages. Docker must be running.
 
 ## DevSecOps in the SDLC
 
@@ -308,7 +331,7 @@ treatment, Statement of Applicability, policies, awareness, internal audit, mana
 | 8.13 Information backup | Named volumes `pgdata` and `keycloak-db-data` | compose files | Gap | Backup and tested restore for both databases (GitHub #67) |
 | 8.15 Logging | Append-only audit trail of refusals; Keycloak login and admin events (30 days); per-profile application logs | `V7__audit_entries.sql`, `AuditService`, realm events | Partial | Logins and account operations in the trail (MLink-114, MLink-72); central log store |
 | 8.16 Monitoring activities | Prometheus metrics; 4 alert rules | `monitoring/` | Gap | Route alerts: Alertmanager has no target |
-| 8.24 Use of cryptography | Tokens signed by Keycloak, checked via JWKS with issuer and `azp`; email tokens stored as SHA-256 hashes | `KeycloakLoginClient`, `V5__email_tokens.sql` | Partial | Document TLS and encryption at rest for both databases |
+| 8.24 Use of cryptography | Tokens signed by Keycloak, checked via JWKS with issuer and `azp`; email tokens stored as SHA-256 hashes; patient documents AES-256-GCM encrypted with versioned keys, SHA-256 verified, TLS to the object store in staging/prod | `KeycloakLoginClient`, `V5__email_tokens.sql`, `AesDocumentCipher`, `application-staging.yml` | Partial | TLS termination and encryption at rest for both databases are outside the repository |
 | 8.25 Secure development life cycle | Controls at every SDLC stage; functional tests first | `.github/workflows/`, `.pre-commit-config.yaml` | Covered | |
 | 8.26 Application security requirements | Threat model controls mapped to tests; endpoint contracts | `security/threat-model.md`, `docs/sprints/sprint-2/plan.md` | Covered | |
 | 8.27 Secure architecture and engineering | BFF (no tokens in the browser, no Keycloak in the browser), least privilege, isolated identity DB, deny by default | this document, `SecurityConfig`, compose files | Covered | |
