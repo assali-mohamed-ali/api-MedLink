@@ -159,7 +159,7 @@ public class AdminUserService {
         }
         keycloak.endSessions(id);
     }
-    
+
     /** The specialty and clinics a practitioner needs, or a 400 naming what is missing or unknown. */
     private Profile resolveProfile(UUID specialtyId, Set<UUID> clinicIds) {
         Map<String, String> details = new LinkedHashMap<>();

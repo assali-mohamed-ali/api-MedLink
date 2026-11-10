@@ -299,7 +299,7 @@ class AdminUserServiceTest {
         verify(keycloak, never()).endSessions(keycloakId);
     }
 
-    
+
     private void savePatient() {
         Patient patient = new Patient("Amel", "Ben Salah", LocalDate.of(1990, 1, 1), null, null);
         patient.setId(keycloakId);
