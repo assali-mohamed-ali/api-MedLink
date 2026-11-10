@@ -42,6 +42,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("POST",   "/api/auth/verify-email",        O, O, O, O),
             new Rule("POST",   "/api/auth/verify-email/resend", O, O, O, O),
             new Rule("POST",   "/api/auth/login",               O, O, O, O),
+            new Rule("GET",    "/api/auth/me",                  L, O, O, O),
             new Rule("POST",   "/api/auth/logout",              L, O, O, O),
             new Rule("POST",   "/api/auth/password",            L, O, O, O),
             // Only a pending code step (staff login, password accepted) gets past these; a full session does not
@@ -53,6 +54,8 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("DELETE", "/api/users/{id}",               L, F, F, O),
             new Rule("GET",    "/api/users/_health",            L, O, O, O),
             new Rule("GET",    "/api/slots",                    L, O, F, F), // MLink-98: patients search slots
+            new Rule("GET",    "/api/slots/filters",            L, O, F, F), // MLink-163: the search form's lists
+            new Rule("POST",   "/api/appointments",             L, O, F, F), // MLink-102: patients book a slot
             // MLink-26: the practitioner's agenda. The matrix practitioner (practitioner.dev) has no practitioner
             // profile and sends no dates or an empty body: a 4xx that is not 403 is "open" here. {id} is a random
             // UUID that is nobody's slot: refused (403) even for a practitioner, like /api/users/{id}.

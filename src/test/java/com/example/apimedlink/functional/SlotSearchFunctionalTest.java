@@ -209,6 +209,28 @@ class SlotSearchFunctionalTest extends FunctionalTestBase {
         assertThat(staff.call(searchTomorrow()).statusCode()).isEqualTo(403);
     }
 
+    /**
+     * Review on #87: the role is checked before any parameter is read. A non-patient sending unreadable or missing
+     * parameters gets 403, never the patient's 400 (which would tell them how the endpoint validates).
+     */
+    @Test
+    void aPractitionerAndStaffAreRefusedEvenWithUnreadableParameters() throws Exception {
+        Browser practitioner = new Browser().login("practitioner.dev@medlink.local", DEV_USERS_PASSWORD);
+        Browser staff = new Browser().login("staff.dev@medlink.local", DEV_USERS_PASSWORD);
+        List<String> searches = List.of(
+                searchTomorrow() + "&clinicId=abc",
+                searchTomorrow() + "&practitionerId=abc",
+                "/api/slots?from=demain&to=" + DAY,
+                searchTomorrow() + "&page=x",
+                searchTomorrow() + "&size=51",
+                "/api/slots");
+
+        for (String search : searches) {
+            assertThat(practitioner.call(search).statusCode()).as("practitioner " + search).isEqualTo(403);
+            assertThat(staff.call(search).statusCode()).as("staff " + search).isEqualTo(403);
+        }
+    }
+
     private static String searchTomorrow() {
         return "/api/slots?from=" + DAY + "&to=" + DAY.plus(1, ChronoUnit.DAYS);
     }

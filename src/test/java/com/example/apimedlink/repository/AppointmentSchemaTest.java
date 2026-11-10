@@ -207,7 +207,7 @@ class AppointmentSchemaTest {
     }
 
     /**
-     * V14 (MLink-26) holds the three reference clinics, in every environment: no endpoint creates a clinic. The dev
+     * V15 (MLink-26) holds the three reference clinics, in every environment: no endpoint creates a clinic. The dev
      * practitioners and slots still come from the dev seed only.
      */
     @Test

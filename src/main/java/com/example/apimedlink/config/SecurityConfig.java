@@ -57,8 +57,8 @@ public class SecurityConfig {
                                 "/actuator/health",
                                 "/actuator/info",
                                 "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html")
+                                "/scalar",
+                                "/scalar/**")
                         .permitAll()
                         // Staging/prod: Actuator exists only on the private management port, where Prometheus
                         // scrapes without a login; dev serves it on the main port (GitHub #49)
