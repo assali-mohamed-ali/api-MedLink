@@ -3,6 +3,7 @@ package com.example.apimedlink.config;
 import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.security.JsonAccessDeniedHandler;
 import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
+import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.security.RouteWords;
 import com.example.apimedlink.security.SessionValidityFilter;
 import com.example.apimedlink.service.AuditService;
@@ -80,6 +81,9 @@ public class SecurityConfig {
                                 "/api/auth/mfa/setup",
                                 "/api/auth/mfa/verify")
                         .permitAll()
+                        // The role before Spring reads the request, so a patient never gets a 400 (MLink-31, as #116)
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/record")
+                        .hasRole(Roles.PRACTITIONER)
                         .anyRequest()
                         .authenticated())
                 // Every logged-in call checks Keycloak still accepts the account (GitHub #28)
