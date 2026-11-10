@@ -84,6 +84,12 @@ variable "mfa_encryption_key" {
   sensitive   = true
 }
 
+variable "report_encryption_key" {
+  description = "Clé AES-256 des comptes-rendus de consultation (MLink-32), différente de la clé MFA : 32 octets en base64 (openssl rand -base64 32)"
+  type        = string
+  sensitive   = true
+}
+
 variable "mail_host" {
   description = "Serveur SMTP de production"
   type        = string
