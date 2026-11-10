@@ -18,7 +18,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 - V15 inserts the three reference clinics (no endpoint creates a clinic) and adds the `CLOSED` slot status.
 - The overlap is enforced by the database (`slots_no_overlap`); the application check only names the slot in the way, and a lost race is translated to the same 409 (never a 500).
 - A closed slot keeps its time range: reopening it frees the time (decision D4, to confirm).
-- Closing is one conditional `UPDATE` (free and no active appointment): a concurrent booking cannot end on a closed slot. The booking flow (MLink-8) needs the same guard.
+- Closing is one conditional `UPDATE` (free and no active appointment): a concurrent booking cannot end on a closed slot. The booking (MLink-102, merged with #87) locks the slot (`SELECT … FOR UPDATE`) and refuses any slot that is not `FREE`, so a closed slot answers 409 `SLOT_TAKEN`; in a race, Postgres's row lock makes one side see the other's status.
 - Spring validates before `@PreAuthorize`, so nothing is `@Valid` or required: a patient gets 403, never 400.
 - The agenda is not audited per read (it is not the medical record); slot changes are (`SLOT_OPENED`, `SLOT_CLOSED`); refusals are (`ACCESS_DENIED`).
 - Duration 10 min to 8 h and horizon 180 days are assumptions (constants in `AgendaService`), not in the cahier des charges.
@@ -26,8 +26,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 **Proofs**
 - Repository queries: `SlotRepositoryAgendaTest` (9 tests) with `AppointmentSchemaTest`, `AppointmentDomainRepositoryTest` and `SlotSearchFunctionalTest` still green (39 tests).
 - Access matrix: 3 new lines, 73 cases green.
-- `AgendaFunctionalTest`: 20 tests green.
+- `AgendaFunctionalTest`: 21 tests green, including `aClosedSlotCannotBeBookedEvenByItsIdAndNoAppointmentIsCreated` (added after the merge of `master`): checked once that it turns red when the booking refuses only `BOOKED` slots.
+- Postman: new folder 9 "Practitioner agenda (MLink-26)", 25 requests: anonymous 401 and patient 403 on every route (403, never 400, even without dates or body); a disposable practitioner through the code step gets 400 without dates, 409 `PRACTITIONER_PROFILE_MISSING` and 403 on a slot that is not theirs. Folder alone: 26 requests, 41 assertions, 0 failures. Whole collection, `npx newman@6.2.1 run`: **158 requests, 355 assertions, 0 failures**, twice in a row. The full flow (three clinics, overlap, close, reopen) needs a practitioner profile, which no endpoint creates yet (SS5): it stays proven by `AgendaFunctionalTest`.
 - Full suite `./mvnw -B verify`: 476 tests, 0 failures; reverse class order (`-Dsurefire.runOrder=reversealphabetical`): 476 tests, 0 failures.
+- After merging `master` (2026-11-10, booking and slot search index included): `./mvnw -B verify` 517 tests, 0 failures; reverse class order 517 tests, 0 failures (before the closed-slot booking test was added).
 - `pre-commit run --all-files`: all 14 hooks passed (gitleaks, checkov, detect-private-key included).
 - One isolated failure of `QrCodesTest` (MLink-62) was seen once in a full run; not reproduced in 10 separate runs nor in the next full runs; unrelated to this PR.
 
@@ -43,6 +45,8 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 3 | Staff code, TOTP (endpoints 8–9) | **Done** (MLink-62/63): #97, review round 1 in #99; see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), [#99](https://github.com/assali-mohamed-ali/api-MedLink/pull/99) | 2026-10-29 |
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
+
+**2026-11-10:** MLink-26 (`feat/MLink-26-agenda`): `master` merged after #87 and #113, so the agenda migration is renumbered **V15** (`V15__agenda_reference_data.sql`; V14 is MLink-99's slot search index). Dev databases that ran the branch's old V14 need the setup script with `--reset` (`-Reset`) once. Conflicts kept both sides (`SlotRepository`, access matrix). New test: a closed slot cannot be booked. See the MLink-26 section.
 
 **2026-10-31, updated 2026-11-08:** MLink-65 (sub-sprint 3 part, `feat/ss3-setup-staff-code-check`): both setup
 scripts check the session with `GET /api/auth/me` (#107): `patient.dev` gets 200 with exactly the roles `["PATIENT"]`, and
