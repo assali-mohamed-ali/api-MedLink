@@ -13,6 +13,11 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-11:** MLink-164 (GitHub #64) on `fix/db-hardening`: staging and prod refuse to start without real database
+credentials, and `docker-compose.yml` requires `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`. No migration, no
+endpoint. **Before the next deploy:** the deploy secret (`DEPLOY_ENV_FILE`) must hold those three keys with real
+values. One PR with #57 (MLink-165, next). See the MLink-164 section.
+
 **2026-10-31, updated 2026-11-08:** MLink-65 (sub-sprint 3 part, `feat/ss3-setup-staff-code-check`): both setup
 scripts check the session with `GET /api/auth/me` (#107): `patient.dev` gets 200 with exactly the roles `["PATIENT"]`, and
 `practitioner.dev`'s password alone opens no session (login 200 with `mfaRequired`, then 401). Scripts and README
@@ -162,6 +167,37 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-164 — no default database credentials outside dev, GitHub #64 (2026-11-11, fix/db-hardening)
+
+Plan and step-by-step history: [db-hardening.md](db-hardening.md) (Part A).
+
+**Built:**
+- `application-prod.yml`, `application-staging.yml`: `SPRING_DATASOURCE_USERNAME` / `_PASSWORD` with no default.
+- `config/DatabaseCredentialsCheck` (staging and prod): a `BeanFactoryPostProcessor`, so it runs before Flyway and
+  nothing connects with guessable credentials. It refuses a missing, empty or unresolved value, the dev values
+  `myuser` / `secret`, and anything starting with `change-me` (any case: every placeholder of `.env*.example` and
+  `terraform.tfvars*.example`). The message names the variable, never the value.
+- `docker-compose.yml`: `${POSTGRES_DB|USER|PASSWORD:?...}`, so `docker compose` stops when one is missing. Dev keeps
+  its fixed values (`compose.yaml`, `application-dev.yml`). It also passes `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`
+  and `KEYCLOAK_ADMIN_CLIENT_ID` to the API container, which it did not before (`ComposeFilesTest`).
+- Examples (`.env*.example`, `terraform.tfvars*.example`) say the placeholders are refused.
+
+**Why the check is needed:** removing the yml default alone does not fail closed. `spring.datasource.*` is bound as
+configuration properties, and the binder keeps an unresolved `${SPRING_DATASOURCE_USERNAME}` as plain text: the API
+would try to log in as that literal user and fail later with a misleading error.
+
+**Proof:** `DatabaseCredentialsStartupTest` starts the real API under prod and staging with a fake process
+environment and a closed database port (no Docker): 28 cases, committed red first each time (18 then 8 failures).
+Mutation checks: a default back in prod's yml, and a case-sensitive prefix, each turn cases red.
+`scripts/compose-credentials.test.sh` (CI step): 7 cases with an empty `--env-file`, so the developer's `.env` cannot
+make it pass. Both setup scripts pass in full-stack mode (2026-11-11).
+
+**For whoever deploys:** the deploy secret must hold `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` with real
+values, or the deploy stops at `docker compose` (on purpose). Staging and prod tests that start a staging/prod
+profile must pass `TestcontainersConfiguration.UNUSED_DB_CREDENTIAL`.
+
+**Limits:** Flyway and the API still share one database user, the owner of every table: GitHub #57 (MLink-165).
 
 ## MLink-65 — setup scripts check the session and the staff code (2026-10-31, updated 2026-11-07, feat/ss3-setup-staff-code-check)
 

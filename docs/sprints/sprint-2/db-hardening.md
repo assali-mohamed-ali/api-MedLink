@@ -97,8 +97,11 @@ Tasks:
   Seen once: Docker Compose v5.5.1 created `keycloak-db` twice in one `up --build` (name conflict, `[ABORT]`);
   the next run passed. A Compose race, not the `:?` change (the compose file lists each service once).
   The full stack needs about 3 GB of free RAM: a first try was killed by low memory with Chrome open.
-- [ ] **A5** Docs: `.env.example`, `terraform/terraform.tfvars*.example` (say the placeholders are refused),
+- [x] **A5** Docs: `.env.example`, `terraform/terraform.tfvars*.example` (say the placeholders are refused),
   `report.md`, the threat model line. Comment on #64 with the commits.
+  **Found in A5:** the examples' longer placeholders (`change-me-staging`, `change-me-prod-use-vault-or-gh-secrets`,
+  `change-me-in-local-env`) were let through: the check matched exact values only. Red (8 cases) then green: any
+  value starting with `change-me`, in any case, is refused. Mutation: a case-sensitive prefix turns 2 cases red.
 
 ## Part B: #57, two database roles
 
@@ -208,5 +211,6 @@ Critical findings, to put in front of the reviewers, not only in the commits:
 - [x] A3 red + green committed (2026-11-09), not pushed.
 - [x] A3b red + green committed (2026-11-09), not pushed: compose passes CORS, proxies, admin client id (PR note 6).
 - [x] `master` merged in (2026-11-11, `4203c2d`, no conflict), then A4 checked: both setup scripts pass in full-stack mode.
-- Next step: **A5** (docs: `.env.example`, tfvars examples, `report.md`, threat model; comment on #64).
-- Last commit: the A4 docs commit.
+- [x] A5 red + green + docs committed (2026-11-11). Part A done; push and the #64 comment wait for Mohamed's go.
+- Next step: **Part B** (the 30-minute `@ServiceConnection` spike, then **B1**).
+- Last commit: the A5 docs commit.

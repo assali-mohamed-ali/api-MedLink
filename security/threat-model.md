@@ -99,7 +99,7 @@ flowchart LR
 | I4 | Metrics and API documentation public in production | actuator limited to `health,info,prometheus`; in staging and prod it is served only on the private management port 9000, which no compose file publishes, and the public port keeps `/livez` and `/readyz` (`{"status":"UP"}` only) (`ManagementPortIntegrationTest`, `ManagementPortConfigTest`, GitHub #49); the Scalar UI (`/scalar`, `scalar.enabled: false`) and `/v3/api-docs` are off in staging and prod, dev only (`ApiDocsExposureIntegrationTest`, GitHub #65) | ✅ | |
 | I5 | Personal data in logs or the audit trail | no request body, query string, password or token is logged; the audit path keeps only route words and UUIDs (`security/RouteWords`) | ✅ | |
 | I6 | Internal errors leak details | one error shape, `500 INTERNAL_ERROR` without SQL or stack (`exception/GlobalExceptionHandler`, `ErrorBody`) | ✅ | |
-| I7 | Secrets in git or defaults in production | secrets from the environment only; gitleaks before commit and in CI (`secrets-scan.yml`); Keycloak client secrets have no default outside dev | 🟡 | the datasource still falls back to `myuser` / `secret` in staging and prod: GitHub #64 |
+| I7 | Secrets in git or defaults in production | secrets from the environment only; gitleaks before commit and in CI (`secrets-scan.yml`); Keycloak client secrets have no default outside dev; in staging and prod the database credentials have no default, and the dev values and placeholders (`myuser`, `secret`, `change-me...`) stop the start before anything connects (`config/DatabaseCredentialsCheck`, `DatabaseCredentialsStartupTest`); `docker-compose.yml` requires them (`scripts/compose-credentials.test.sh`) (GitHub #64) | ✅ | |
 
 ### Denial of service
 
@@ -142,7 +142,6 @@ be triggered by someone else (D2).
 | Priority | Item | Tracked |
 |---|---|---|
 | 1 | MFA for admin identities (E4); the staff and practitioner second factor (S2) is in place (MLink-62/63) | GitHub #68 |
-| 1 | No default database credentials outside dev (I7) | GitHub #64 |
 | 2 | Separate database roles for the audit trail (T2) | GitHub #57 |
 | 2 | Logins and account operations in the audit trail (R2) | MLink-114, MLink-72 |
 | 2 | Backups with a tested restore (O3) | GitHub #67 |
