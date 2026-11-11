@@ -2,7 +2,10 @@ package com.example.apimedlink.service;
 
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.EmailTakenException;
+import com.example.apimedlink.model.AuditAction;
+import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Clinic;
+import com.example.apimedlink.model.EmailToken.Purpose;
 import com.example.apimedlink.model.Practitioner;
 import com.example.apimedlink.model.Specialty;
 import com.example.apimedlink.model.User;
@@ -23,20 +26,25 @@ import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
+import org.springframework.mail.MailException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Account management by staff (MLink-69): list, create a practitioner or staff account, change a role. A
- * practitioner is a user with a profile (specialty and clinics, V13): it is created with the account, and a role
- * change adds or removes it, so no practitioner account exists without its profile. The Keycloak user and our rows
- * are created in the same request; when ours fail, the Keycloak user is deleted, so no account is left half made.
- * Patients are never created here: they register.
+ * Account management by staff (MLink-69, MLink-70, MLink-71, MLink-72): list, create a practitioner or staff
+ * account, change a role, enable or disable an account. A practitioner is a user with a profile (specialty and
+ * clinics, V13): it is created with the account, and a role change adds or removes it, so no practitioner account
+ * exists without its profile. The Keycloak user and our rows are created in the same request, then the activation
+ * mail goes out; when our rows fail, the Keycloak user is deleted, so no account is left half made. Patients are
+ * never created here: they register. Every account operation, done or refused, leaves an audit entry.
  */
 @Service
 public class AdminUserService {
 
     private static final Logger log = LoggerFactory.getLogger(AdminUserService.class);
+
+    /** The resource id of an audit entry for an account that was never created. */
+    private static final String NEW_ACCOUNT = "NEW_ACCOUNT";
 
     /** What a practitioner needs besides their account: a specialty and at least one clinic. */
     private record Profile(Specialty specialty, Set<Clinic> clinics) {}
@@ -49,11 +57,16 @@ public class AdminUserService {
     private final ClinicRepository clinics;
     private final PractitionerProfiles profiles;
     private final SessionRevocationStore revocations;
+    private final EmailTokenService tokens;
+    private final MailService mail;
+    private final AuditService audit;
     private final TransactionTemplate tx;
 
-    public AdminUserService(KeycloakAdminService keycloak, UserRepository users, PatientRepository patients,                            PractitionerRepository practitioners, SpecialtyRepository specialties,
+    public AdminUserService(KeycloakAdminService keycloak, UserRepository users, PatientRepository patients,
+                            PractitionerRepository practitioners, SpecialtyRepository specialties,
                             ClinicRepository clinics, PractitionerProfiles profiles,
-                            SessionRevocationStore revocations, TransactionTemplate tx) {
+                            SessionRevocationStore revocations, EmailTokenService tokens,
+                            MailService mail, AuditService audit, TransactionTemplate tx) {
         this.keycloak = keycloak;
         this.users = users;
         this.patients = patients;
@@ -62,6 +75,9 @@ public class AdminUserService {
         this.clinics = clinics;
         this.profiles = profiles;
         this.revocations = revocations;
+        this.tokens = tokens;
+        this.mail = mail;
+        this.audit = audit;
         this.tx = tx;
     }
 
@@ -75,6 +91,18 @@ public class AdminUserService {
      */
     public KeycloakUserPage.Entry create(String email, String firstName, String lastName, String role,
                                          UUID specialtyId, Set<UUID> clinicIds) {
+        try {
+            KeycloakUserPage.Entry created = createAccount(email, firstName, lastName, role, specialtyId, clinicIds);
+            record(AuditAction.ACCOUNT_CREATED, created.user().id().toString(), AuditOutcome.SUCCESS);
+            return created;
+        } catch (RuntimeException e) {
+            record(AuditAction.ACCOUNT_CREATED, NEW_ACCOUNT, AuditOutcome.FAILURE);
+            throw e;
+        }
+    }
+
+    private KeycloakUserPage.Entry createAccount(String email, String firstName, String lastName, String role,
+                                                 UUID specialtyId, Set<UUID> clinicIds) {
         String groupPath = staffGroupOf(role);
         // Everything we can refuse is refused before Keycloak is touched
         Profile profile = Roles.PRACTITIONER.equals(role) ? resolveProfile(specialtyId, clinicIds) : null;
@@ -89,12 +117,18 @@ public class AdminUserService {
         } catch (EmailTakenException knownToKeycloakOnly) {
             throw emailTaken();
         }
+        String token;
         try {
-            tx.executeWithoutResult(status -> saveAccount(id, normalized, firstName, lastName, profile));
+            // The account and its activation token are saved together: both or neither
+            token = tx.execute(status -> {
+                saveAccount(id, normalized, firstName, lastName, profile);
+                return tokens.issue(id, Purpose.ACTIVATE_ACCOUNT);
+            });
         } catch (RuntimeException e) {
             deleteKeycloakUser(id);
             throw e;
         }
+        sendActivationMail(normalized, firstName, token);
         return new KeycloakUserPage.Entry(
                 new KeycloakUser(id, normalized, firstName, lastName, true, false), groupPath);
     }
@@ -115,6 +149,16 @@ public class AdminUserService {
      *     specialty or clinics
      */
     public void changeRole(UUID id, String role, UUID specialtyId, Set<UUID> clinicIds) {
+        try {
+            applyRoleChange(id, role, specialtyId, clinicIds);
+            record(AuditAction.ROLE_CHANGED, id.toString(), AuditOutcome.SUCCESS);
+        } catch (RuntimeException e) {
+            record(AuditAction.ROLE_CHANGED, id.toString(), AuditOutcome.FAILURE);
+            throw e;
+        }
+    }
+
+    private void applyRoleChange(UUID id, String role, UUID specialtyId, Set<UUID> clinicIds) {
         String groupPath = staffGroupOf(role);
         if (patients.existsById(id)) {
             throw new ApiException(HttpStatus.CONFLICT, "PATIENT_ROLE_CHANGE_UNSUPPORTED",
@@ -158,6 +202,43 @@ public class AdminUserService {
             keycloak.moveToGroup(id, groupPath);
         }
         keycloak.endSessions(id);
+    }
+
+    /**
+     * Enables or disables an account. Disabling signs the user out at once (the API's own mark, then Keycloak).
+     *
+     * @throws ApiException 409 {@code CANNOT_DISABLE_SELF} when staff disable their own account
+     */
+    public void setEnabled(UUID id, boolean enabled, UUID actingUser) {
+        AuditAction action = enabled ? AuditAction.ACCOUNT_ENABLED : AuditAction.ACCOUNT_DISABLED;
+        try {
+            applyEnabled(id, enabled, actingUser);
+            record(action, id.toString(), AuditOutcome.SUCCESS);
+        } catch (RuntimeException e) {
+            record(action, id.toString(), AuditOutcome.FAILURE);
+            throw e;
+        }
+    }
+
+    private void applyEnabled(UUID id, boolean enabled, UUID actingUser) {
+        if (!enabled && id.equals(actingUser)) {
+            throw new ApiException(HttpStatus.CONFLICT, "CANNOT_DISABLE_SELF",
+                    "Vous ne pouvez pas désactiver votre propre compte.");
+        }
+        keycloak.setEnabled(id, enabled);
+        if (!enabled) {
+            revocations.revoke(id);
+            keycloak.endSessions(id);
+        }
+    }
+
+    /** The audit trail never turns a finished operation into an error: a failed write is logged. */
+    private void record(AuditAction action, String resourceId, AuditOutcome outcome) {
+        try {
+            audit.record(action, "USER", resourceId, outcome);
+        } catch (RuntimeException e) {
+            log.error("Audit entry {} {} could not be written ({})", action, outcome, e.getClass().getSimpleName());
+        }
     }
 
     /** The specialty and clinics a practitioner needs, or a 400 naming what is missing or unknown. */
@@ -220,6 +301,15 @@ public class AdminUserService {
 
     private static boolean isBlank(String value) {
         return value == null || value.isBlank();
+    }
+
+    /** A mail failure is only logged: the account exists, and a new link can be sent later. */
+    private void sendActivationMail(String email, String firstName, String token) {
+        try {
+            mail.sendAccountActivation(email, firstName, token);
+        } catch (MailException e) {
+            log.warn("Activation mail could not be sent ({})", e.getClass().getSimpleName());
+        }
     }
 
     private void deleteKeycloakUser(UUID id) {
