@@ -61,6 +61,11 @@ class DatabaseCredentialsStartupTest {
                 Arguments.of(profile, PASSWORD, "secret"),
                 Arguments.of(profile, PASSWORD, "change-me"),
                 Arguments.of(profile, PASSWORD, "change-me-prod"),
+                // The longer placeholders of .env*.example and terraform.tfvars*.example: anything "change-me..."
+                Arguments.of(profile, PASSWORD, "change-me-staging"),
+                Arguments.of(profile, PASSWORD, "change-me-prod-use-vault-or-gh-secrets"),
+                Arguments.of(profile, PASSWORD, "change-me-in-local-env"),
+                Arguments.of(profile, USERNAME, "CHANGE-ME-user"),
                 Arguments.of(profile, PASSWORD, "")));
     }
 
