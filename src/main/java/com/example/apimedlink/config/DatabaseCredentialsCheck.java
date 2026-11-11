@@ -24,6 +24,12 @@ public class DatabaseCredentialsCheck implements BeanFactoryPostProcessor {
     /** The dev values ({@code compose.yaml}, {@code application-dev.yml}) and the placeholders of the examples. */
     static final Set<String> PLACEHOLDERS = Set.of("myuser", "secret", "change-me", "change-me-prod");
 
+    /**
+     * Every placeholder of {@code .env*.example} and {@code terraform.tfvars*.example} starts with it
+     * ({@code change-me-staging}, {@code change-me-prod-use-vault-or-gh-secrets}...), in any case.
+     */
+    static final String PLACEHOLDER_PREFIX = "change-me";
+
     @Override
     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
         Environment environment = beanFactory.getBean(Environment.class);
@@ -46,6 +52,11 @@ public class DatabaseCredentialsCheck implements BeanFactoryPostProcessor {
             // ${VARIABLE} with no such variable: the same as no value
             return true;
         }
-        return value == null || value.isBlank() || value.contains("${") || PLACEHOLDERS.contains(value.trim());
+        if (value == null || value.isBlank() || value.contains("${")) {
+            return true;
+        }
+        String trimmed = value.trim();
+        return PLACEHOLDERS.contains(trimmed) || trimmed.regionMatches(true, 0, PLACEHOLDER_PREFIX, 0,
+                PLACEHOLDER_PREFIX.length());
     }
 }
