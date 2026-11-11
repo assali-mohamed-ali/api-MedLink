@@ -452,7 +452,7 @@ class RestKeycloakAdminServiceTest {
         assertThat(page.items().get(0).groupPath()).as("no single group").isNull();
     }
 
-    
+
     @Test
     void setEnabledPutsTheEnabledFlagOnTheUser() {
         expectToken("t", 300);
