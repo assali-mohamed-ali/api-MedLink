@@ -106,6 +106,7 @@ class UserProvisioningServiceTest {
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any());
 
         UserProvisioningService withFailingAudit = new UserProvisioningService(users, tx, failingAudit);
@@ -120,7 +121,7 @@ class UserProvisioningServiceTest {
         assertThat(reloaded.getEmail()).isEqualTo(originalEmail);
     }
 
-        @Test
+    @Test
     void anIntegrityFailureOfTheAuditIsNotTakenForALostRace() {
         UUID id = UUID.randomUUID();
         String originalEmail = "original-" + id + "@example.com";
@@ -133,6 +134,7 @@ class UserProvisioningServiceTest {
                         org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.anyString(),
                         org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any(),
                         org.mockito.ArgumentMatchers.any());
 
         UserProvisioningService withFailingAudit = new UserProvisioningService(users, tx, failingAudit);
@@ -161,6 +163,25 @@ class UserProvisioningServiceTest {
 
         assertThat(users.findById(id).orElseThrow().getEmail()).isEqualTo(originalEmail);
         assertThat(countUpdatedAudits()).isEqualTo(updatedBefore);
+    }
+
+    @Test
+    void theAccountUpdateAuditKeepsTheKnownUserIdBeforeAnySessionExists() {
+        UUID id = UUID.randomUUID();
+        String originalEmail = "original-" + id + "@example.com";
+        provisioning.provision(id, originalEmail, originalEmail);
+
+        // A login: no session yet, so no current user, but the account being synced is known
+        String newEmail = "updated-" + id + "@example.com";
+        provisioning.provision(id, newEmail, newEmail);
+
+        UUID audited = jdbc.queryForObject(
+                "select user_id from audit_entries where action = ? and resource_type = 'USER' "
+                        + "and resource_id = ? order by timestamp desc limit 1",
+                UUID.class,
+                AuditAction.ACCOUNT_UPDATED.name(),
+                id.toString());
+        assertThat(audited).isEqualTo(id);
     }
 
     private long countUpdatedAudits() {

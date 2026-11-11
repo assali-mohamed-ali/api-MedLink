@@ -73,7 +73,8 @@ public class UserProvisioningService {
                             AuditAction.ACCOUNT_UPDATED,
                             "USER",
                             id.toString(),
-                            AuditOutcome.SUCCESS);
+                            AuditOutcome.SUCCESS,
+                            id);
                 }
                 return result;
             });

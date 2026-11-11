@@ -1108,7 +1108,7 @@ added.
 **Proof:** `SensitiveActionsAuditFunctionalTest` checks read events, successful login events and
 failed attempts without storing the submitted email. `ConsoleUserProvisioningFunctionalTest` checks
 that an email synchronized from Keycloak creates an `ACCOUNT_UPDATED` / `SUCCESS` audit entry.
-`.\mvnw.cmd -B test "-Dsurefire.runOrder=reversealphabetical"`: **247 tests, 0 failures, 0 errors**.
+`.\mvnw.cmd -B test "-Dsurefire.runOrder=reversealphabetical"`: **546 tests, 0 failures, 0 errors**.
 
 **Scope:** the existing API has no general account-edit endpoint; the update event covers the
 existing account synchronization path. A user deletion is not mislabeled as an account update.

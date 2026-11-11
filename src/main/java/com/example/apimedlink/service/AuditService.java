@@ -51,7 +51,7 @@ public class AuditService {
     }
 
     /**
-     * Writes an audit entry in the caller's transaction.
+     * Writes an audit entry in the caller's transaction, for the signed-in caller.
      * The entry is rolled back if the business transaction fails.
      */
     @Transactional(propagation = Propagation.MANDATORY)
@@ -60,13 +60,21 @@ public class AuditService {
             String resourceType,
             String resourceId,
             AuditOutcome outcome) {
-        entries.save(new AuditEntry(
-                currentUser.idOrNull(),
-                action,
-                resourceType,
-                resourceId,
-                clientIp(),
-                outcome));
+        recordInCurrentTransaction(action, resourceType, resourceId, outcome, currentUser.idOrNull());
+    }
+
+    /**
+     * Same, with the user given by the caller: for the moments no session exists yet (a login
+     * provisions the account before it opens one), so the known user id is not lost.
+     */
+    @Transactional(propagation = Propagation.MANDATORY)
+    public void recordInCurrentTransaction(
+            AuditAction action,
+            String resourceType,
+            String resourceId,
+            AuditOutcome outcome,
+            UUID userId) {
+        entries.save(new AuditEntry(userId, action, resourceType, resourceId, clientIp(), outcome));
     }
 
     private static String clientIp() {
