@@ -89,8 +89,14 @@ Tasks:
   it); back on every password reference turns 2 cases red.
   **To check with the lead:** the deploy action writes the staging/prod `.env` from a GitHub secret; that secret
   must hold `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`, or the next deploy stops at compose (on purpose).
-- [ ] **A4** Setup scripts (both, same behaviour, `.sh` bash 3.2 safe): `--full-stack` still works, since `.env`
+- [x] **A4** Setup scripts (both, same behaviour, `.sh` bash 3.2 safe): `--full-stack` still works, since `.env`
   already holds the values. Run both scripts once: 0 failures.
+  Done 2026-11-11 (after merging `master`), no script change needed: `setup-dev.sh --full-stack` and
+  `setup-dev.ps1 -FullStack` both pass all 7 steps (realm checks, health, `patient.dev` login, staff code asked,
+  signup through Mailpit). `--stop` / `-Stop` still work, since `.env` gives `down` the required variables.
+  Seen once: Docker Compose v5.5.1 created `keycloak-db` twice in one `up --build` (name conflict, `[ABORT]`);
+  the next run passed. A Compose race, not the `:?` change (the compose file lists each service once).
+  The full stack needs about 3 GB of free RAM: a first try was killed by low memory with Chrome open.
 - [ ] **A5** Docs: `.env.example`, `terraform/terraform.tfvars*.example` (say the placeholders are refused),
   `report.md`, the threat model line. Comment on #64 with the commits.
 
@@ -201,5 +207,6 @@ Critical findings, to put in front of the reviewers, not only in the commits:
 - [x] A2 green committed (2026-11-09), not pushed yet (push waits for Mohamed's go). MLink-164 is In Progress.
 - [x] A3 red + green committed (2026-11-09), not pushed.
 - [x] A3b red + green committed (2026-11-09), not pushed: compose passes CORS, proxies, admin client id (PR note 6).
-- Next step: **A4** (both setup scripts, `--full-stack` included: 0 failures). Needs about 3 GB of free RAM.
-- Last commit: the A3b green commit.
+- [x] `master` merged in (2026-11-11, `4203c2d`, no conflict), then A4 checked: both setup scripts pass in full-stack mode.
+- Next step: **A5** (docs: `.env.example`, tfvars examples, `report.md`, threat model; comment on #64).
+- Last commit: the A4 docs commit.
