@@ -37,6 +37,10 @@ public class LoginService {
         this.audit = audit;
     }
 
+    /**
+     * Checks the credentials and our rules. It does not audit a success: the caller records it with
+     * {@link #recordLoginSuccess} once the session (or the pending password change) really exists.
+     */
     public LoginResult login(String email, String password) {
         KeycloakTokens tokens = null;
 
@@ -45,23 +49,12 @@ public class LoginService {
         } catch (PasswordChangeRequiredException pending) {
             KeycloakUser user = admin.findByEmail(email.trim()).orElseThrow(LoginService::invalidCredentials);
             if (user.requiredActions().equals(List.of(UPDATE_PASSWORD))) {
-                // Mot de passe OK, changement requis — utilisateur identifié
-                try {
-                    audit.record(AuditAction.LOGIN, "USER", user.id().toString(),
-                            AuditOutcome.SUCCESS, user.id());
-                } catch (Exception auditEx) {
-                    log.warn("Failed to audit LOGIN SUCCESS (password-change) for {}", user.id(), auditEx);
-                }
+                // Password is right, a change is required: the caller starts it, then records the success.
                 return new LoginResult.PasswordChange(user.id());
             }
             log.warn("Login refused for user {}: not fully set up in Keycloak (required actions {})",
                     user.id(), user.requiredActions());
-            try {
-                audit.record(AuditAction.LOGIN, "USER", user.id().toString(),
-                        AuditOutcome.FAILURE, user.id());
-            } catch (Exception auditEx) {
-                log.warn("Failed to audit LOGIN FAILURE (setup incomplete) for {}", user.id(), auditEx);
-            }
+            recordLogin(user.id(), AuditOutcome.FAILURE);
             throw new ApiException(HttpStatus.FORBIDDEN, "ACCOUNT_SETUP_INCOMPLETE",
                     "Votre compte n'est pas encore prêt. Contactez l'administration.");
         } catch (RuntimeException refused) {
@@ -86,13 +79,6 @@ public class LoginService {
                     token.getClaimAsString("email"),
                     token.getClaimAsString("preferred_username"));
 
-            try {
-                audit.record(AuditAction.LOGIN, "USER", user.getId().toString(),
-                        AuditOutcome.SUCCESS, user.getId());
-            } catch (Exception auditEx) {
-                log.warn("Failed to audit LOGIN SUCCESS for subject={}", subject, auditEx);
-            }
-
             return new LoginResult.Success(new Login(
                     user,
                     token.getClaimAsString("given_name"),
@@ -102,12 +88,7 @@ public class LoginService {
 
         } catch (RuntimeException refused) {
             // Utilisateur identifié (token OK) mais login refusé après
-            try {
-                audit.record(AuditAction.LOGIN, "USER", subject,
-                        AuditOutcome.FAILURE, subjectId);
-            } catch (Exception auditEx) {
-                log.warn("Failed to audit LOGIN FAILURE for subject={}", subject, auditEx);
-            }
+            recordLogin(subjectId, AuditOutcome.FAILURE);
 
             try {
                 keycloak.endSession(tokens.refreshToken());
@@ -116,6 +97,24 @@ public class LoginService {
             }
 
             throw refused;
+        }
+    }
+
+    /** The session (or the pending password change) exists: only now is the login a success. */
+    public void recordLoginSuccess(UUID userId) {
+        recordLogin(userId, AuditOutcome.SUCCESS);
+    }
+
+    /** The credentials were right but the session could not be established. */
+    public void recordLoginFailure(UUID userId) {
+        recordLogin(userId, AuditOutcome.FAILURE);
+    }
+
+    private void recordLogin(UUID userId, AuditOutcome outcome) {
+        try {
+            audit.record(AuditAction.LOGIN, "USER", userId.toString(), outcome, userId);
+        } catch (Exception auditEx) {
+            log.warn("Failed to audit LOGIN {} for {}", outcome, userId, auditEx);
         }
     }
 
