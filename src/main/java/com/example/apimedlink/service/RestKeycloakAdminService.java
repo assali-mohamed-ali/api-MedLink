@@ -13,6 +13,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Function;
@@ -41,6 +42,7 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
     private final RestClient http;
     private final KeycloakProperties keycloak;
     private final String users;
+    private final String groupByPath;
 
     private String token;
     private Instant tokenValidUntil = Instant.MIN;
@@ -49,6 +51,7 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
         this.http = keycloakRestClient;
         this.keycloak = keycloak;
         this.users = "/admin/realms/" + keycloak.realm() + "/users";
+        this.groupByPath = "/admin/realms/" + keycloak.realm() + "/group-by-path/";
     }
 
     @Override
@@ -167,6 +170,101 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
                 }));
     }
 
+    @Override
+    public KeycloakUserPage searchUsers(String search, int page, int size) {
+        // Only characters that cannot add a parameter to the Keycloak URL
+        String text = search == null ? "" : search.trim().replaceAll("[^\\p{L}\\p{N} @._-]", "");
+        String filter = text.isEmpty() ? "" : "search={search}&";
+        Map<String, Object> vars = Map.of("search", text, "first", (long) page * size, "max", size);
+        Long total = call("count users", bearer -> http.get()
+                .uri(users + "/count" + (text.isEmpty() ? "" : "?search={search}"), vars)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange((request, response) -> {
+                    expectSuccess(response.getStatusCode(), "count users");
+                    return response.bodyTo(Long.class);
+                }));
+        UserRepresentation[] found = call("search users", bearer -> http.get()
+                .uri(users + "?" + filter + "first={first}&max={max}&briefRepresentation=false", vars)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange((request, response) -> {
+                    expectSuccess(response.getStatusCode(), "search users");
+                    return response.bodyTo(UserRepresentation[].class);
+                }));
+        List<KeycloakUserPage.Entry> items = new ArrayList<>();
+        if (found != null) {
+            for (UserRepresentation user : found) {
+                UUID id = UUID.fromString(user.id());
+                List<String> groupPaths = groupsOf(id).stream().map(GroupRepresentation::path).toList();
+                items.add(new KeycloakUserPage.Entry(toUser(id, user), groupPaths));
+            }
+        }
+        return new KeycloakUserPage(items, total == null ? 0 : total);
+    }
+
+    @Override
+    public void moveToGroup(UUID id, String groupPath) {
+        String target = groupId(groupPath);
+        List<GroupRepresentation> current = groupsOf(id); // 404 here when the user does not exist
+        if (current.stream().noneMatch(group -> target.equals(group.id()))) {
+            addToGroup(id, target);
+        }
+        // Added first: a failure in between leaves two roles (login refuses it), never none
+        for (GroupRepresentation group : current) {
+            if (!target.equals(group.id())) {
+                removeFromGroup(id, group.id());
+            }
+        }
+    }
+
+    private List<GroupRepresentation> groupsOf(UUID id) {
+        GroupRepresentation[] groups = call("get user groups", bearer -> http.get().uri(users + "/{id}/groups", id)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange((request, response) -> {
+                    expectFound(response.getStatusCode(), id);
+                    expectSuccess(response.getStatusCode(), "get user groups");
+                    return response.bodyTo(GroupRepresentation[].class);
+                }));
+        return groups == null ? List.of() : List.of(groups);
+    }
+
+    private String groupId(String groupPath) {
+        String path = groupPath.startsWith("/") ? groupPath.substring(1) : groupPath;
+        GroupRepresentation group = call("get group", bearer -> http.get().uri(groupByPath + "{path}", path)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .accept(MediaType.APPLICATION_JSON)
+                .exchange((request, response) -> {
+                    expectSuccess(response.getStatusCode(), "get group");
+                    return response.bodyTo(GroupRepresentation.class);
+                }));
+        if (group == null || group.id() == null) {
+            throw new KeycloakUnavailableException("get group: " + groupPath + " not found");
+        }
+        return group.id();
+    }
+
+    private void addToGroup(UUID id, String groupId) {
+        call("add to group", bearer -> http.put().uri(users + "/{id}/groups/{groupId}", id, groupId)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .exchange((request, response) -> {
+                    expectFound(response.getStatusCode(), id);
+                    expectSuccess(response.getStatusCode(), "add to group");
+                    return null;
+                }));
+    }
+
+    private void removeFromGroup(UUID id, String groupId) {
+        call("remove from group", bearer -> http.delete().uri(users + "/{id}/groups/{groupId}", id, groupId)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .exchange((request, response) -> {
+                    expectFound(response.getStatusCode(), id);
+                    expectSuccess(response.getStatusCode(), "remove from group");
+                    return null;
+                }));
+    }
+
     private static KeycloakUser toUser(UUID id, UserRepresentation user) {
         List<String> actions = user.requiredActions() == null ? List.of() : user.requiredActions();
         return new KeycloakUser(id, user.email(), user.firstName(), user.lastName(),
@@ -279,4 +377,7 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     record TokenResponse(@JsonProperty("access_token") String accessToken, @JsonProperty("expires_in") long expiresIn) {}
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    record GroupRepresentation(String id, String path) {}
 }
