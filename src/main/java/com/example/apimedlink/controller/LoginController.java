@@ -12,6 +12,7 @@ import com.example.apimedlink.service.MfaEnrolmentLinks;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
+import java.util.UUID;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -20,6 +21,9 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * Endpoint 5 (MLink-55): React posts the email and the password here, never to Keycloak.
  * Contract: docs/sprints/sprint-2/plan.md §4.
+ *
+ * <p>The audit says LOGIN/SUCCESS only once a session exists. A forced password change is recorded as
+ * a challenge (PASSWORD_CHANGE_REQUIRED), and the staff code step records nothing yet.
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -45,7 +49,14 @@ public class LoginController {
             @Valid @RequestBody LoginRequest body, HttpServletRequest request, HttpServletResponse response) {
         LoginResult result = logins.login(body.email(), body.password());
         if (result instanceof LoginResult.Success success) {
-            sessions.open(success.login(), request, response);
+            UUID userId = success.login().user().getId();
+            try {
+                sessions.open(success.login(), request, response);
+            } catch (RuntimeException notOpened) {
+                logins.recordLoginFailure(userId);
+                throw notOpened;
+            }
+            logins.recordLoginSuccess(userId);
             return LoginMapper.toResponse(success.login());
         }
         if (result instanceof LoginResult.MfaRequired code) {
@@ -57,7 +68,14 @@ public class LoginController {
             return LoginResponse.mfaRequired(code.setupRequired());
         }
         LoginResult.PasswordChange change = (LoginResult.PasswordChange) result;
-        passwordChange.start(change.userId(), request);
+        try {
+            passwordChange.start(change.userId(), request);
+        } catch (RuntimeException notStarted) {
+            logins.recordLoginFailure(change.userId());
+            throw notStarted;
+        }
+        // A challenge, not a login: no session exists until the password is changed
+        logins.recordPasswordChangeRequired(change.userId());
         return LoginResponse.forcedPasswordChange();
     }
 }

@@ -16,6 +16,7 @@ import com.example.apimedlink.service.MfaService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.Map;
+import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -27,6 +28,8 @@ import org.springframework.web.bind.annotation.RestController;
  * Only the pending code step that login started gets past them; a full session does not. The first setup also
  * needs the link mailed at that login (review of #97), so a stolen password alone enrols nothing.
  * Contract: docs/sprints/sprint-2/plan.md §4.
+ *
+ * <p>LOGIN/SUCCESS is audited here, once the session really opens (review of #90).
  */
 @RestController
 @RequestMapping("/api/auth/mfa")
@@ -79,7 +82,14 @@ public class MfaController {
             throw refused;
         }
         enrolmentLinks.close(login.user().getId()); // set up now (or long ago): the setup link stops working
-        sessions.open(login, request, response);
+        UUID userId = login.user().getId();
+        try {
+            sessions.open(login, request, response);
+        } catch (RuntimeException notOpened) {
+            logins.recordLoginFailure(userId);
+            throw notOpened;
+        }
+        logins.recordLoginSuccess(userId);
         return LoginMapper.toResponse(login);
     }
 

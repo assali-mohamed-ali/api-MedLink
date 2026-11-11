@@ -1,0 +1,128 @@
+package com.example.apimedlink.functional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+
+import java.util.UUID;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
+
+class SensitiveActionsAuditFunctionalTest extends FunctionalTestBase {
+
+    static final String PASSWORD = "Audit-Read-2026!";
+    static final String STAFF_EMAIL = "staff.dev@medlink.local";
+
+    final KeycloakConsole console = new KeycloakConsole();
+
+    @Autowired
+    JdbcTemplate db;
+
+    @Test
+    void readingTheUserListIsAudited() throws Exception {
+        Browser staff = loggedInStaff();
+        int before = auditCount("ALL");
+
+        assertThat(staff.call("/api/users").statusCode()).isEqualTo(200);
+
+        assertThat(auditCount("ALL")).isEqualTo(before + 1);
+        assertAudited("ALL");
+    }
+
+    @Test
+    void readingAUserIsAuditedByItsId() throws Exception {
+        String email = uniqueEmail("audit-read");
+        UUID id = console.createUser(email, PASSWORD);
+        Browser patient = new Browser();
+        assertThat(patient.apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+        Browser staff = loggedInStaff();
+
+        assertThat(staff.call("/api/users/" + id).statusCode()).isEqualTo(200);
+
+        assertThat(auditCount(id.toString())).isEqualTo(1);
+        assertAudited(id.toString());
+    }
+
+    @Test
+    void successfulLoginIsAuditedByTheKeycloakUserId() throws Exception {
+        String email = uniqueEmail("audit-login-success");
+        UUID id = console.createUser(email, PASSWORD);
+        Browser browser = new Browser();
+
+        assertThat(browser.apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+
+        assertThat(db.queryForObject(
+                "select outcome from audit_entries where action = 'LOGIN' "
+                        + "and resource_type = 'USER' and resource_id = ?",
+                String.class, id.toString())).isEqualTo("SUCCESS");
+    }
+
+    @Test
+    void aStaffLoginIsAuditedOnlyOnceTheCodeOpenedTheSession() throws Exception {
+        Browser passwordOnly = new Browser();
+        assertThat(passwordOnly.apiLogin(STAFF_EMAIL, DEV_USERS_PASSWORD).statusCode()).isEqualTo(200);
+        String id = db.queryForObject("select cast(id as text) from users where email = ?", String.class, STAFF_EMAIL);
+        int afterPasswordStep = loginSuccessRows(id);
+
+        // The password alone opens no session: nothing may say the login succeeded
+        assertThat(passwordOnly.call("/api/users").statusCode()).isEqualTo(401);
+        assertThat(loginSuccessRows(id)).isEqualTo(afterPasswordStep);
+
+        // The password step of this login and the code step together add exactly one success
+        new Browser().login(STAFF_EMAIL, DEV_USERS_PASSWORD);
+
+        assertThat(loginSuccessRows(id)).isEqualTo(afterPasswordStep + 1);
+    }
+
+    @Test
+    void failedLoginIsAuditedWithoutStoringTheSubmittedEmail() throws Exception {
+        String email = uniqueEmail("audit-login-failure");
+        String unknownEmail = uniqueEmail("audit-login-unknown");
+        console.createUser(email, PASSWORD);
+        int before = loginFailureAuditRows();
+
+        assertThat(new Browser().apiLogin(email, "Wrong-Pass-2026!").statusCode()).isEqualTo(401);
+        assertThat(new Browser().apiLogin(unknownEmail, PASSWORD).statusCode()).isEqualTo(401);
+
+        assertThat(loginFailureAuditRows()).isEqualTo(before + 2);
+        assertThat(db.queryForObject(
+                "select count(*) from audit_entries where resource_id in (?, ?)",
+                Integer.class, email, unknownEmail)).isZero();
+    }
+
+    private Browser loggedInStaff() throws Exception {
+        // Staff do the code step after the password: login(...) does both, as React does
+        return new Browser().login(STAFF_EMAIL, DEV_USERS_PASSWORD);
+    }
+
+    private int loginSuccessRows(String resourceId) {
+        return db.queryForObject(
+                "select count(*) from audit_entries where action = 'LOGIN' "
+                        + "and resource_type = 'USER' and resource_id = ? and outcome = 'SUCCESS'",
+                Integer.class, resourceId);
+    }
+
+    private int auditCount(String resourceId) {
+        return db.queryForObject(
+                "select count(*) from audit_entries where action = 'DATA_READ' "
+                        + "and resource_type = 'USER' and resource_id = ?",
+                Integer.class, resourceId);
+    }
+
+    private int loginFailureAuditRows() {
+        return db.queryForObject(
+                "select count(*) from audit_entries where action = 'LOGIN' "
+                        + "and resource_type = 'USER' and resource_id = 'UNKNOWN' and outcome = 'FAILURE'",
+                Integer.class);
+    }
+
+    private void assertAudited(String resourceId) {
+        assertThat(db.queryForObject(
+                "select outcome from audit_entries where action = 'DATA_READ' "
+                        + "and resource_type = 'USER' and resource_id = ? order by timestamp desc limit 1",
+                String.class, resourceId)).isEqualTo("SUCCESS");
+        assertThat(db.queryForObject(
+                "select user_id from audit_entries where action = 'DATA_READ' "
+                        + "and resource_type = 'USER' and resource_id = ? order by timestamp desc limit 1",
+                UUID.class, resourceId)).isNotNull();
+    }
+}

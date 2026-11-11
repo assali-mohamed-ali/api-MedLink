@@ -1,11 +1,10 @@
 package com.example.apimedlink.security;
 
-import static org.assertj.core.api.Assertions.assertThat;
-import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
-import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
-import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.status;
+import static org.assertj.core.api.Assertions.*;
+import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.*;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
+import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.*;
 
-import com.example.apimedlink.TestcontainersConfiguration;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
@@ -14,9 +13,13 @@ import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.web.servlet.MockMvc;
 
+import com.example.apimedlink.TestcontainersConfiguration;
+
 /**
- * MLink-59, review on PR #56: a refusal is recorded even when the caller's identity cannot be read as
- * a Keycloak id. A real login always gives a UUID, so only a fake principal reaches this branch:
+ * MLink-59, review on PR #56: a refusal is recorded even when the caller's
+ * identity cannot be read as
+ * a Keycloak id. A real login always gives a UUID, so only a fake principal
+ * reaches this branch:
  * MockMvc, not a functional test.
  */
 @SpringBootTest
@@ -42,6 +45,7 @@ class AuditIdentityTest {
 
     private int rowsWithoutUser(String resource) {
         return db.queryForObject(
-                "select count(*) from audit_entries where user_id is null and resource_id = ?", Integer.class, resource);
+                "select count(*) from audit_entries where user_id is null and resource_id = ?", Integer.class,
+                resource);
     }
 }
