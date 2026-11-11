@@ -77,9 +77,9 @@ public class UserProvisioningService {
                 }
                 return result;
             });
-        } catch (DataIntegrityViolationException raced) {
-            // Two first logins at once: the primary key let the other one insert. Read its
-            // row.
+        } catch (InsertRaced raced) {
+            // Two first logins at once: the other one inserted the row first. Only a lost insert is
+            // read back; any other integrity failure (the audit entry, the commit) is thrown.
             return users.findById(id).orElseThrow(() -> conflict(id));
         }
     }
@@ -88,7 +88,11 @@ public class UserProvisioningService {
         if (users.existsByEmail(email) || users.existsByUsername(username)) {
             return users.findById(id).orElseThrow(() -> conflict(id));
         }
-        return users.saveAndFlush(User.builder().id(id).username(username).email(email).build());
+        try {
+            return users.saveAndFlush(User.builder().id(id).username(username).email(email).build());
+        } catch (DataIntegrityViolationException lostTheRace) {
+            throw new InsertRaced(lostTheRace);
+        }
     }
 
     /**
@@ -125,4 +129,10 @@ public class UserProvisioningService {
                         + "Contactez l'administration.");
     }
 
+    /** The insert of a first login lost its race: the row now exists. Only this failure is read back. */
+    private static final class InsertRaced extends RuntimeException {
+        InsertRaced(Throwable cause) {
+            super(null, cause, false, false);
+        }
+    }
 }

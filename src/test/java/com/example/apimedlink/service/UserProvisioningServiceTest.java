@@ -120,6 +120,32 @@ class UserProvisioningServiceTest {
         assertThat(reloaded.getEmail()).isEqualTo(originalEmail);
     }
 
+        @Test
+    void anIntegrityFailureOfTheAuditIsNotTakenForALostRace() {
+        UUID id = UUID.randomUUID();
+        String originalEmail = "original-" + id + "@example.com";
+        provisioning.provision(id, originalEmail, originalEmail);
+
+        AuditService failingAudit = org.mockito.Mockito.mock(AuditService.class);
+        org.mockito.Mockito.doThrow(new org.springframework.dao.DataIntegrityViolationException("audit constraint"))
+                .when(failingAudit)
+                .recordInCurrentTransaction(
+                        org.mockito.ArgumentMatchers.any(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.anyString(),
+                        org.mockito.ArgumentMatchers.any());
+
+        UserProvisioningService withFailingAudit = new UserProvisioningService(users, tx, failingAudit);
+
+        String newEmail = "updated-" + id + "@example.com";
+
+        assertThatThrownBy(() -> withFailingAudit.provision(id, newEmail, newEmail))
+                .isInstanceOf(org.springframework.dao.DataIntegrityViolationException.class)
+                .hasMessageContaining("audit constraint");
+
+        assertThat(users.findById(id).orElseThrow().getEmail()).isEqualTo(originalEmail);
+    }
+
     @Test
     void noSuccessAuditSurvivesWhenTheOuterTransactionRollsBack() {
         UUID id = UUID.randomUUID();
