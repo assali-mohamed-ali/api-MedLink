@@ -12,7 +12,7 @@ inputs:
     description: Absolute directory that holds the compose file and .env
     required: true
   health_url:
-    description: URL of the deployed /actuator/health endpoint
+    description: URL of the deployed /readyz endpoint (public port; Actuator itself is on the private management port)
     required: true
   ssh_key:
     description: Private SSH key allowed to deploy

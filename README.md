@@ -39,7 +39,8 @@ cd api-MedLink
 | `powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1` | `./scripts/setup-dev.sh` |
 
 The script creates `.env` with random secrets, starts Postgres, Keycloak and Mailpit, checks the realm, runs
-the tests, starts the API and logs in as `patient.dev` to prove the whole chain works. Add `-SkipTests` /
+the tests, starts the API and logs in as `patient.dev` to prove the whole chain works (`/api/auth/me` answers with the
+roles exactly `["PATIENT"]`); it also checks that `practitioner.dev` is asked for the staff code (no session on the password alone). Add `-SkipTests` /
 `--skip-tests` for a faster run. **Re-run it after every `git pull`**: it keeps your Keycloak in step with the
 team's realm file. All options: [§8](#8-dev-setup-in-detail).
 
@@ -48,14 +49,15 @@ team's realm file. All options: [§8](#8-dev-setup-in-detail).
 | Service | URL |
 |---|---|
 | API | http://localhost:8080 |
-| Swagger UI | http://localhost:8080/swagger-ui.html |
+| Scalar API Reference | http://localhost:8080/scalar |
 | Health | http://localhost:8080/actuator/health |
 | Mailpit (every mail the API sends in dev) | http://localhost:8025 |
 | Keycloak admin console (`admin` / `admin`) | http://localhost:8180 |
 | Prometheus (full-stack mode only) | http://localhost:9090 |
 
 **Test users** (dev only): `patient.dev`, `practitioner.dev`, `staff.dev`, all `@medlink.local`, password
-`MedLink-Dev-2026!` (the value of `KC_DEV_USERS_PASSWORD`).
+`MedLink-Dev-2026!` (the value of `KC_DEV_USERS_PASSWORD`). `practitioner.dev` and `staff.dev` also need a code
+from an authenticator app (Google Authenticator, Aegis, …): their first login enrols it with a QR code.
 
 **Stack:** Spring Boot 4.1 · Java 17 · Keycloak 26 · PostgreSQL · Flyway · Testcontainers. Package
 `com.example.apimedlink`. Do not downgrade a version to make code compile.
@@ -82,6 +84,10 @@ sequenceDiagram
 
 - **Session:** a new HttpOnly cookie at login (`SameSite=Strict`, `Secure` in staging/prod). It ends after
   **15 idle minutes**, or as soon as Keycloak refuses to renew the token (account disabled, signed out).
+- **Staff code:** for practitioners and staff, the login answers `{ "mfaRequired": true, "mfaSetupRequired": … }`
+  and no session yet; the browser then calls `/api/auth/mfa/setup` (first time only, with the token of the link the
+  API mails to the account's own address: a QR code for an authenticator app; the password alone enrols nothing) and `/api/auth/mfa/verify` with the 6-digit code, which opens the session. 5 wrong codes lock the code step
+  for 15 minutes. The secrets are encrypted with `APP_MFA_ENCRYPTION_KEY` (the API does not start without it).
 - **CSRF:** every write (`POST`, `PUT`, `DELETE`) echoes the `XSRF-TOKEN` cookie in `X-XSRF-TOKEN`, or gets 403.
 - **Password grant:** a consciously accepted exception to the OAuth best practice, so the login stays a
   MedLink page. Why, and what it still needs: [decision record 0001](docs/decisions/0001-login-password-grant.md).
@@ -94,7 +100,10 @@ sequenceDiagram
 | `POST /api/auth/register` | anyone | 201, the same whether or not the email is taken (the owner gets a mail) |
 | `POST /api/auth/verify-email` | anyone | 204 · 400 `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
 | `POST /api/auth/verify-email/resend` | anyone | 202, the same whether or not the account exists |
-| `POST /api/auth/login` | anyone | 200 · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
+| `POST /api/auth/login` | anyone | 200 (`user`, or `mfaRequired` for practitioners and staff) · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
+| `POST /api/auth/mfa/setup` | at the code step, `{token}` from the mailed link | 200 QR code, otpauth URL, secret · 401 · 409 `MFA_ALREADY_ENROLLED` · 400 `VALIDATION_FAILED` / `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
+| `POST /api/auth/mfa/verify` | at the code step | 200 `user` + session · 400 · 401 `INVALID_CODE` · 423 `MFA_LOCKED` |
+| `GET /api/auth/me` | logged in | 200 `user` (the login's user object, from the session) · 401 `UNAUTHENTICATED` |
 | `POST /api/auth/logout` | logged in | 204 |
 | `GET /api/users` | staff | 200 |
 | `GET /api/users/{id}` | the user themself, or staff | 200 · 403 for anyone else, whether the id exists or not |
@@ -162,30 +171,35 @@ Tasks live in YouTrack, project `MLink` (https://medlink.youtrack.cloud).
 
 1. **Start:** move the task to *In Progress*. Shared file (`SecurityConfig`, `AuthBffController`,
    `FunctionalTestBase`, the realm file, the setup scripts)? Say on the teammates' tickets what you change.
-2. **Branch from `master`:**
-   ```bash
-   git checkout master && git pull
-   git checkout -b feat/short-description        # or fix/, docs/, chore/
+2. **Branch for a change:** use `feat/<short-description>`, `fix/<short-description>`, `core/<short-description>`,
+   `docs/<short-description>`, or `chore/<short-description>`. The branch name is for organization; it does not
+   control the version number.
+3. **Use Conventional Commit titles/messages** so release automation can determine the version:
+   ```text
+   feat: add appointment booking       # minor version
+   fix(auth): reject expired sessions  # patch version
+   feat!: replace the public API       # major version
+   chore: update dependencies          # no release by itself
    ```
-   Work on an epic shares one branch, `epic/MLink-<n>`: `git pull` before you start and before you push,
-   never force-push.
-3. **Commit**, one per task, with the YouTrack id:
-   ```bash
-   git commit -m "feat: what changed" -m "MLink-79"   # feat: fix: docs: chore: refactor: test:
-   ```
+   A `BREAKING CHANGE:` footer also causes a major version bump. A branch called `core/*` does not automatically
+   mean major; choose the commit type based on what changed.
 4. **Check before the PR:**
    ```bash
    ./mvnw -B verify                                           # needs Docker
-   ./mvnw -B test -Dsurefire.runOrder=reversealphabetical     # CI does not run your class order
+   ./mvnw -B test -Dsurefire.runOrder=reversealphabetical
    ```
    Changed an endpoint? Run the Postman collection in `docs/postman/` with `npx newman@6.2.1 run <file>`.
-5. **Open the PR against `master`**, never on another branch (a stacked PR may never reach `master`).
-   Fill the template honestly, update `docs/sprints/sprint-2/report.md`, and move the task to *To Verify*
-   with the PR link.
-6. **AI disclosure:** if an AI tool helped, tick *"J'ai utilisé des outils d'IA générative…"*; tick
-   *"Je confirme avoir relu…"* yourself once you have reviewed the changes. Both must be in the same state.
-7. **Review:** `master` needs the code owner's approval (@assali-mohamed-ali) and CodeQL. You cannot merge
-   your own PR. Merged → the task goes to *Done*.
+5. **Open the product PR against `staging`** (after the release-pipeline migration described in
+   [Deployment](docs/DEPLOYMENT.md)). Use a Conventional Commit title such as `feat: add appointment booking`.
+   The pipeline tests and scans the PR, deploys merged `staging` commits, then runs post-deployment smoke tests.
+6. **Promotion:** when staging smoke tests pass, automation opens a `staging -> prod` PR, runs its checks, and
+   merges it automatically. Release Please then opens a Maven release PR, bumps `pom.xml` and `CHANGELOG.md`,
+   and merges it after checks pass. The resulting `vX.Y.Z` tag builds/scans/signs the release image and deploys it
+   to production. A failed gate blocks the next step.
+7. **AI disclosure and review:** if an AI tool helped, tick *"J'ai utilisé des outils d'IA générative…"* and
+   tick *"Je confirme avoir relu…"* yourself only after reviewing the changes. Both must be in the same state.
+   Keep code-owner review and CodeQL on the setup/configuration PRs; fully automatic product promotion requires
+   that `prod` does not mandate a human review.
 
 ## 6. CI checks
 
@@ -208,20 +222,39 @@ them like any PR: compose images are not what the tests use, so a green CI prove
 **Never merge a Java jump** (`pom.xml` `java.version=17` moves first), and keep the Maven wrapper on 3.9.x
 (IntelliJ cannot import the project with 3.10, MLink-118).
 
-## 7. Environments
+## 7. Environments and release flow
 
-| Branch | Environment | Profile | Env file |
-|---|---|---|---|
-| `master` | integration | `dev` locally | `.env` (made by the setup script) |
-| `staging` | pre-prod | `staging` | `.env.staging` |
-| `prod` (or a `v*` tag) | production | `prod` | `.env.prod` |
+| Ref / event | Result |
+|---|---|
+| PR to `staging` | CI, PR-title validation, and CD build/image security scan run; nothing is deployed from the PR |
+| Push to `staging` | Verify, build, scan, publish by commit SHA, attest/sign, deploy by immutable digest, smoke-test |
+| Staging smoke-test success | Open `staging -> prod` PR; wait for checks; merge automatically |
+| Push to `prod` | Release Please determines the next SemVer version from Conventional Commits and opens/updates a release PR |
+| Release PR merged | Create `vX.Y.Z` tag and GitHub Release; sync release metadata back to staging |
+| Push of `vX.Y.Z` | Build/test/scan the release, publish SBOM/provenance, sign image digest, deploy production by immutable digest |
 
-Maintainers promote `master` → `staging` → `prod` with `--no-ff` merges. Production secrets live in GitHub
-Environments, never in git. CD builds one image per run and deploys its immutable digest to the target
-host with Docker Compose over SSH; setup, secrets, rollback and recovery are in
-[`docs/DEPLOYMENT.md`](docs/DEPLOYMENT.md).
+Production secrets live in GitHub Environments, never in git. Configure the `staging` and `production` environments,
+the repository secret `PROMOTION_TOKEN`, and branch/ruleset checks as described in
+[Deployment](docs/DEPLOYMENT.md). Production deploys only from lowercase `v*` tags; the legacy uppercase
+`V1.0.0` / `V1.0.1` tags are historical and are not used for new automated releases.
+
+**One-time migration warning:** the current `master`, `staging`, and `prod` branches have diverged. Keep repository variable `ENABLE_AUTO_PROMOTION` unset/false until the workflow files are carried across and branch baselines are deliberately reconciled in reviewed PRs. This PR adds
+the workflow/configuration on `master` only. Do not expect automation to run on `staging` or `prod` until these
+files are carried there and the branch baselines are reconciled in reviewed PRs. Do not blindly auto-merge the full
+legacy branch difference into production. See the migration checklist in [Deployment](docs/DEPLOYMENT.md).
 
 ## 8. Dev setup in detail
+
+### Local pre-commit hooks
+
+Install the local Git hook once by following [CONTRIBUTING.md](CONTRIBUTING.md) and running:
+
+```bash
+bash scripts/setup-pre-commit.sh
+```
+
+The hook checks staged files before each commit. CI also runs the complete pre-commit configuration across the repository.
+
 
 <details>
 <summary><b>Setup script options</b></summary>
@@ -301,9 +334,13 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 | `mvnw` not recognized in PowerShell | type `.\mvnw` |
 | `Could not find a valid Docker environment` | start Docker Desktop (the tests use Testcontainers) |
 | `keycloak-db-1 exited (1)`, log says `in 18+, these Docker images…` | the compose files run PostgreSQL 18 with a PostgreSQL 16 volume path; `-Reset` does not help. Tracked on #74 |
-| `... must be set` from compose | `.env` is missing or incomplete: run the setup script, or copy `.env.example` |
+| `... must be set` from compose | `.env` is missing or incomplete: run the setup script, or copy `.env.example` and replace every `change-me` value (the setup script generates them for you) |
+| `app.mfa.encryption-key must be base64` or `must be 32 bytes` at startup | `APP_MFA_ENCRYPTION_KEY` still holds the `.env.example` placeholder: replace it with `openssl rand -base64 32` (32 random bytes in base64), or run the setup script |
 | roles look wrong, or `staff.dev` cannot log in | your Keycloak holds an old realm: re-run the setup script, or `-Reset` |
 | 401 with the right password | 5 wrong passwords lock the account for 15 minutes, answered like a wrong password: wait, or unlock it in the console |
+| does the lockout work? | `scripts/check-lockout.sh` on the running dev stack: 5 wrong passwords, then the right one must be refused; prints `PASS`/`FAIL` and unlocks `patient.dev` at the end, failing (exit 1, never `PASS`) if Keycloak refuses the unlock (full stack: pass `KC_ADMIN_PASS` and `USERS_PASSWORD` from `.env`). Refuses any non-local `APP_URL`/`KEYCLOAK_URL` (exit 2) unless `ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack`; guard and unlock tested offline by `scripts/check-lockout.test.sh` (CI) |
+| `INVALID_CODE` with the code from the authenticator app | the phone's clock is off (a code lives 30 s, one step of tolerance): set the phone to automatic date and time. Also check you scanned the QR code of the last setup (a new setup replaces the secret) |
+| `MFA_LOCKED` | 5 wrong codes lock the code step for 15 minutes, even after a new login: wait |
 | a file shows fully modified after pull | line endings, normalized by `.gitattributes`; a `chore: normalize` commit is fine |
 | `permission denied: ./scripts/setup-dev.sh` | `chmod +x scripts/setup-dev.sh` |
 | a Spring Boot test class "is missing" | Spring Boot 4 moved them (`AutoConfigureMockMvc` → `org.springframework.boot.webmvc.test.autoconfigure`); don't downgrade |
@@ -313,7 +350,9 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 **Report a vulnerability privately**, never in a public issue: see [SECURITY.md](SECURITY.md)
 (`security@medlink.example.com`, or a DM to @assali-mohamed-ali starting with `[SECURITY]`).
 
-Known open items: `/actuator/prometheus` and Swagger are public in production (GitHub #49, #65). The
+Scalar and `/v3/api-docs` exist in dev only: staging and prod answer 404 (GitHub #65). In staging and prod the
+actuator (metrics, `/actuator/health`) is only on the private management port 9000, never published; the public
+port keeps `/livez` and `/readyz` (GitHub #49). The
 actuator exposes only `health,info,prometheus`: don't open more without a security review.
 
 | Document | What is in it |

@@ -10,6 +10,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 class SensitiveActionsAuditFunctionalTest extends FunctionalTestBase {
 
     static final String PASSWORD = "Audit-Read-2026!";
+    static final String STAFF_EMAIL = "staff.dev@medlink.local";
 
     final KeycloakConsole console = new KeycloakConsole();
 
@@ -56,6 +57,23 @@ class SensitiveActionsAuditFunctionalTest extends FunctionalTestBase {
     }
 
     @Test
+    void aStaffLoginIsAuditedOnlyOnceTheCodeOpenedTheSession() throws Exception {
+        Browser passwordOnly = new Browser();
+        assertThat(passwordOnly.apiLogin(STAFF_EMAIL, DEV_USERS_PASSWORD).statusCode()).isEqualTo(200);
+        String id = db.queryForObject("select cast(id as text) from users where email = ?", String.class, STAFF_EMAIL);
+        int afterPasswordStep = loginSuccessRows(id);
+
+        // The password alone opens no session: nothing may say the login succeeded
+        assertThat(passwordOnly.call("/api/users").statusCode()).isEqualTo(401);
+        assertThat(loginSuccessRows(id)).isEqualTo(afterPasswordStep);
+
+        // The password step of this login and the code step together add exactly one success
+        new Browser().login(STAFF_EMAIL, DEV_USERS_PASSWORD);
+
+        assertThat(loginSuccessRows(id)).isEqualTo(afterPasswordStep + 1);
+    }
+
+    @Test
     void failedLoginIsAuditedWithoutStoringTheSubmittedEmail() throws Exception {
         String email = uniqueEmail("audit-login-failure");
         String unknownEmail = uniqueEmail("audit-login-unknown");
@@ -72,9 +90,15 @@ class SensitiveActionsAuditFunctionalTest extends FunctionalTestBase {
     }
 
     private Browser loggedInStaff() throws Exception {
-        Browser staff = new Browser();
-        assertThat(staff.apiLogin("staff.dev@medlink.local", DEV_USERS_PASSWORD).statusCode()).isEqualTo(200);
-        return staff;
+        // Staff do the code step after the password: login(...) does both, as React does
+        return new Browser().login(STAFF_EMAIL, DEV_USERS_PASSWORD);
+    }
+
+    private int loginSuccessRows(String resourceId) {
+        return db.queryForObject(
+                "select count(*) from audit_entries where action = 'LOGIN' "
+                        + "and resource_type = 'USER' and resource_id = ? and outcome = 'SUCCESS'",
+                Integer.class, resourceId);
     }
 
     private int auditCount(String resourceId) {

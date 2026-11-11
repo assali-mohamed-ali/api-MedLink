@@ -78,6 +78,12 @@ variable "keycloak_admin_client_secret" {
   sensitive   = true
 }
 
+variable "mfa_encryption_key" {
+  description = "Clé AES-256 des codes du personnel (MLink-62) : 32 octets en base64 (openssl rand -base64 32)"
+  type        = string
+  sensitive   = true
+}
+
 variable "mail_host" {
   description = "Serveur SMTP de production"
   type        = string

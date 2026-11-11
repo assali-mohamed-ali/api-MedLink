@@ -48,7 +48,7 @@ flowchart LR
 | Personal and health data (PII/PHI) | app database (`users`, `patients`, later appointments and records) | confidentiality, GDPR, health-data rules |
 | Audit trail | `audit_entries` (append-only) | proof of who was refused what (MLink-17) |
 | Email tokens | `email_tokens` (SHA-256 hash only, 24 h, single use) | verify someone else's email |
-| Secrets | environment variables, GitHub Environments: `KC_BFF_CLIENT_SECRET`, `KC_ADMIN_CLIENT_SECRET`, DB and Keycloak admin passwords | full access to identity or data |
+| Secrets | environment variables, GitHub Environments: `KC_BFF_CLIENT_SECRET`, `KC_ADMIN_CLIENT_SECRET`, `APP_MFA_ENCRYPTION_KEY` (staff code secrets), DB and Keycloak admin passwords | full access to identity or data |
 
 ## 3. Assumptions
 
@@ -64,7 +64,8 @@ flowchart LR
 | # | Threat | Controls (where) | Status | Open work |
 |---|---|---|---|---|
 | S1 | Brute force or credential stuffing on login | Keycloak lockout: 5 failures → 15 min (realm `bruteForceProtected`, `LoginLockoutFunctionalTest`); per-IP limit 30 / 5 min → 429 (`security/RateLimitFilter`, `RateLimitFunctionalTest`); password policy: 12+ characters, mixed, not the email (realm) | ✅ | |
-| S2 | A password alone opens a staff or practitioner account | none yet: one factor for every role | ⏳ | staff code (TOTP): MLink-62/63; admin identities: GitHub #68 |
+| S2 | A password alone opens a staff or practitioner account | staff code (TOTP, RFC 6238): the password alone opens no session; secret AES-256-GCM encrypted; each code works once; 5 wrong codes → 15-minute lock across logins, Keycloak session ended (`MfaService`, `MfaController`, `MfaFunctionalTest`, MLink-62/63) | ✅ | admin identities: GitHub #68 |
+| S5 | A stolen staff password used to enrol the thief's own app before the owner (first-enrolment takeover) | the first setup needs a single-use link mailed to the account's own address at login: 30 minutes, bound to the account, closed by the first good code, at most one mail per 15 minutes, with a "someone knows your password" warning (`MfaEnrolmentLinks`, `MfaController.setup`, `MfaEnrolmentLinkFunctionalTest`; code owner's review of #97) | ✅ | a stolen mailbox **and** password still enrol: an admin reset of a code (later ticket) |
 | S3 | Session stolen by a script (XSS) | session cookie HttpOnly, tokens never sent to the browser (`security/LoginSessions`, `LoginFunctionalTest`) | ✅ | a Content-Security-Policy is not set (proxy or API) ❌ |
 | S4 | Session fixation | a new session id at every login (`LoginSessions.open`, `SessionCookieFunctionalTest`) | ✅ | |
 | S5 | Cross-site request forgery | session cookie `SameSite=Strict`; CSRF token on every write (`config/SecurityConfig`, SPA cookie mode; `OwnershipFunctionalTest`) | ✅ | |
@@ -95,7 +96,7 @@ flowchart LR
 | I1 | **The password passes through the API** (password grant) | sent to Keycloak at once and never stored; never logged (`LoginRequest.toString` hides it); TLS on B1 (assumption) | 🟡 accepted | the risk accepted in decision 0001; revisit if passkeys are wanted |
 | I2 | Tokens leak | kept in the server session; `KeycloakTokens.toString` hides them; ID tokens checked: signature (JWKS), issuer, `azp` (`service/KeycloakLoginClient`, `KeycloakLoginClientTest`) | ✅ | |
 | I3 | A user reads another user's data (IDOR) | `security/OwnershipGuard` checks before the lookup, the same 403 whether the id exists or not (`OwnershipFunctionalTest`) | ✅ | practitioner ↔ own patients only: with the appointment domain (MLink-97 onward) |
-| I4 | Metrics and API documentation public in production | actuator limited to `health,info,prometheus` | ❌ | `/actuator/prometheus`: GitHub #49; Swagger and `/v3/api-docs`: GitHub #65 |
+| I4 | Metrics and API documentation public in production | actuator limited to `health,info,prometheus`; in staging and prod it is served only on the private management port 9000, which no compose file publishes, and the public port keeps `/livez` and `/readyz` (`{"status":"UP"}` only) (`ManagementPortIntegrationTest`, `ManagementPortConfigTest`, GitHub #49); the Scalar UI (`/scalar`, `scalar.enabled: false`) and `/v3/api-docs` are off in staging and prod, dev only (`ApiDocsExposureIntegrationTest`, GitHub #65) | ✅ | |
 | I5 | Personal data in logs or the audit trail | no request body, query string, password or token is logged; the audit path keeps only route words and UUIDs (`security/RouteWords`) | ✅ | |
 | I6 | Internal errors leak details | one error shape, `500 INTERNAL_ERROR` without SQL or stack (`exception/GlobalExceptionHandler`, `ErrorBody`) | ✅ | |
 | I7 | Secrets in git or defaults in production | secrets from the environment only; gitleaks before commit and in CI (`secrets-scan.yml`); Keycloak client secrets have no default outside dev | 🟡 | the datasource still falls back to `myuser` / `secret` in staging and prod: GitHub #64 |
@@ -116,6 +117,7 @@ flowchart LR
 | E2 | A new endpoint without an access rule | deny by default (`SecurityConfig`), `@PreAuthorize`; the role × route matrix fails the build on a route without a line (`functional/AccessMatrixFunctionalTest`, MLink-60, #77; `OPEN` cells also reject 5xx and redirects) | ✅ | |
 | E3 | **Staff use Keycloak's admin rights directly** | the realm role `ADMINISTRATIVE_STAFF` holds no `realm-management` right; only the API's service account `medlink-admin` does (`keycloak/realm-medlink.json`, `StaffKeycloakRightsFunctionalTest`: staff get 403 from Keycloak's admin API; GitHub #80, fixed in #81) | ✅ | staging and prod: remove the five old role mappings by hand (the realm is imported only into an empty database) |
 | E4 | The Keycloak console or bootstrap admin taken over | the bootstrap admin is separate from the realm | ❌ | MFA for admin identities (GitHub #68); the browser no longer needs Keycloak, so its port can be closed to the public in production |
+| E5 | A console-made practitioner or staff member also holds `PATIENT` (a default group) | the realm adds no default group (`keycloak/realm-medlink.json`, `RealmFileTest`, `ConsoleStaffAccountFunctionalTest`); fail closed: a token with more than one MedLink role opens no session, 403 `ACCOUNT_SETUP_INCOMPLETE`, logged (`LoginService`; code owner's review of #97) | ✅ | staging and prod: remove the default group and `/patients` from existing staff by hand (`docs/DEPLOYMENT.md`) |
 
 ### Supply chain and operations
 
@@ -139,9 +141,8 @@ be triggered by someone else (D2).
 
 | Priority | Item | Tracked |
 |---|---|---|
-| 1 | Staff and practitioner second factor (S2); MFA for admin identities (E4) | MLink-62/63, GitHub #68 |
+| 1 | MFA for admin identities (E4); the staff and practitioner second factor (S2) is in place (MLink-62/63) | GitHub #68 |
 | 1 | No default database credentials outside dev (I7) | GitHub #64 |
-| 2 | Metrics and API docs not public in production (I4) | GitHub #49, #65 |
 | 2 | Separate database roles for the audit trail (T2) | GitHub #57 |
 | 2 | Logins and account operations in the audit trail (R2) | MLink-114, MLink-72 |
 | 2 | Backups with a tested restore (O3) | GitHub #67 |

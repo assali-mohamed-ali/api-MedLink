@@ -17,8 +17,9 @@ codes, password changes and account management will too.
   page reaches the browser: [decision record 0001](decisions/0001-login-password-grant.md) (GitHub #50).
 - **Authorization:** deny by default, roles from the signed token, "own data only" checks, and a role × route
   matrix that fails the build when a route has no rule.
-- **Delivery:** security checks at every stage (local hooks, six scans in CI, owner review), promotion
-  `master` → `staging` → `prod`.
+- **Delivery:** CI/security checks on PRs to `staging`, deploy + smoke-test on merge, automatic checked
+  `staging` → `prod` promotion, Release Please SemVer release PR, lowercase `vX.Y.Z` tag and tag-only production deploy.
+  The release flow is being introduced by a reviewed migration PR; do not enable it on diverged branches until reconciled.
 - **Where we are:** sprint 2 builds the identity features; plan, contracts and progress are in
   [`docs/sprints/sprint-2/`](sprints/sprint-2/README.md).
 
@@ -45,7 +46,7 @@ flowchart LR
   API -- "4 JDBC" --> APPDB
   KC -- "JDBC" --> KCDB
   API -- "5 verification and warning mails" --> MAIL
-  PROM -- "6 /actuator/prometheus every 15 s" --> API
+  PROM -- "6 /actuator/prometheus every 15 s<br/>(private management port 9000)" --> API
 ```
 
 1. The browser only ever calls the API. At login it sends the email and password to the API.
@@ -55,7 +56,8 @@ flowchart LR
 3. Account operations use a separate service account, `medlink-admin`.
 4. Keycloak and the API each have their own database and volume.
 5. Mails (verification links, "someone used your address") are the API's own, not Keycloak's.
-6. Prometheus scrapes the metrics (public in production for now: GitHub #49).
+6. Prometheus scrapes the metrics. In staging and prod, Actuator is only on the private management port 9000
+   (`app:9000`, never published); the public port keeps `/livez` and `/readyz` (GitHub #49).
 
 The browser never needs to reach Keycloak. Its port 8180 is for admins in dev; the API reaches Keycloak
 internally at `http://keycloak:8080`. Staging and prod run the same images with different `.env` values and
@@ -98,8 +100,15 @@ sequenceDiagram
   ends with 401 `SESSION_EXPIRED`.
 - **Logout:** `POST /api/auth/logout` ends Keycloak's session (refresh token, server to server) and ours,
   and expires the cookie: 204.
-- **Planned:** a second factor (TOTP) for practitioners and staff, handled by the API (MLink-62/63), forced
-  password change and history (MLink-87/88/91).
+- **Staff code (MLink-62/63):** for practitioners and staff, the password alone answers
+  `{ "mfaRequired": true, "mfaSetupRequired": … }` and opens no session; the accepted login (tokens included)
+  waits 5 minutes in the server session (`MfaPending`). The first time, the API mails a 30-minute link to the
+  account's own address (`MfaEnrolmentLinks`), and `POST /api/auth/mfa/setup` with its token gives a QR
+  code for an authenticator app (TOTP, RFC 6238, our own code plus ZXing for the image); the secret is stored
+  AES-256-GCM encrypted (`user_mfa`, key `APP_MFA_ENCRYPTION_KEY`). `POST /api/auth/mfa/verify` checks the code
+  (each works once) and opens the session; 5 wrong codes lock the code step for 15 minutes across logins and
+  end the Keycloak session. Never logged: the secret, the codes. The forced password change and the password
+  history (MLink-87/88/91) use the same kind of pending step (`PendingStep`).
 
 Why the password grant, its costs and the plan should it be revisited:
 [decision record 0001](decisions/0001-login-password-grant.md).
@@ -228,7 +237,7 @@ flowchart LR
 | --- | --- | --- | --- |
 | Threat model | STRIDE with controls mapped to code, `security/threat-model.md` | At design time, updated with the code | Guides reviews |
 | Decisions | `docs/decisions/`, the report's decisions log | Per decision | Reasons kept with the code |
-| Review gate | ruleset on `master`, `.github/CODEOWNERS`, PR template | Every PR | Code-owner approval and CodeQL required; merge commits only |
+| Review gate | existing ruleset on `master`, `.github/CODEOWNERS`, PR template; staged branch rules are part of migration | PRs | `master` currently requires code-owner approval and CodeQL; configure `staging`/`prod` to require checks and PRs, while allowing automatic merge without human approval on bot promotion/release PRs |
 | AI disclosure | `ai-disclosure.yml`, `.github/scripts/validate-ai-disclosure.mjs` | Every PR | Fails unless exactly one usage choice is checked; AI use also requires the human review acknowledgment |
 | Local hooks | `.pre-commit-config.yaml`: whitespace, YAML, large files, merge markers, gitleaks, checkov | Every commit once `pre-commit install` ran | Blocks the commit |
 | Build + tests | `ci.yml`: `./mvnw -B verify`, JaCoCo | Push/PR on `master`, `staging`, `prod` | Fails the run |
@@ -238,7 +247,7 @@ flowchart LR
 | Container + IaC | `container-scan.yml`: Trivy config and image | Push/PR | Fails on HIGH/CRITICAL |
 | DAST | `dast-zap.yml`: ZAP baseline against the running app | PRs, pushes to `master`/`staging`, Mondays | Fails on FAIL rules; unauthenticated only |
 | Dependency updates | `dependabot.yml`: Maven, Actions, Dockerfile and compose images, 7-day cooldown | Mondays | Opens grouped PRs, reviewed like any PR |
-| Release + deploy | `cd.yml`: image to GHCR, immutable digest, compose over SSH; GitHub Environments `staging` / `production` | Push to `staging`, `prod`, tags `v*`, manual dispatch | API rolled out and health-checked; rollback/recovery in `docs/DEPLOYMENT.md` |
+| Release + deploy | `cd.yml` + `release-please.yml`: image digest, SBOM/provenance, Cosign, Compose over SSH, staging smoke tests, SemVer release | PR to `staging`, push to `staging`, lowercase tags `v*` | Stage deployment is smoke-tested; checked promotion/release PRs; only release tags deploy production |
 | Monitoring | `monitoring/`: alerts AppDown, 5xx > 5 %, p95 > 1 s, heap > 90 % | Continuous | Alerts reach no one: Alertmanager has no target |
 | Audit | `audit_entries` (every 403), Keycloak events (logins, lockouts) | Continuous | Stored; reading the trail: MLink-115 |
 | Vulnerability intake | `SECURITY.md` | On report | Private disclosure path |
@@ -247,30 +256,35 @@ SonarQube settings exist (`sonar-project.properties`), but no workflow runs Sona
 
 ## Environments & branching
 
-Code moves one way, feature branch → `master` → `staging` → `prod`, and each environment gets the same image
-with its own profile and secrets.
+After the release-pipeline migration, product changes flow from a topic branch into `staging`. The merge deploys
+the candidate, and only a successful post-deployment smoke gate can trigger a checked PR from `staging` to `prod`.
+Release Please calculates the SemVer version from Conventional Commits and opens a version/changelog PR; the
+resulting lowercase `vX.Y.Z` tag triggers the production image build, scan, signature verification, and deploy.
 
 ```mermaid
 flowchart LR
-  F[feat/*, fix/*, docs/*, epic/*] -- PR + checks + owner review --> M[master]
-  M -- merge, no fast-forward --> S[staging]
-  S -- validated: app, ZAP, Prometheus --> P[prod]
-  P -. tag v* .-> T[release v1.x.y]
-  S -. CD .-> E2[(staging env)]
-  P -. CD .-> E1[(production env)]
-  T -. CD .-> E1
+  F[feat/*, fix/*, core/*, docs/*] -->|PR + CI/security checks| S[staging]
+  S -->|deploy immutable digest| SE[staging environment]
+  SE -->|smoke tests pass| PR[PR staging -> prod]
+  PR -->|checks pass, auto-merge| P[prod]
+  P -->|Release Please PR + version bump| R[release commit]
+  R -->|tag vX.Y.Z| T[GHCR image + attestations + signature]
+  T -->|verify signature, deploy by digest| PE[production environment]
 ```
 
-| Environment | Branch | Spring profile | Env file | Keycloak mode | Where secrets live |
-| --- | --- | --- | --- | --- | --- |
-| Local dev | any | `dev` | `.env` (made by the setup script) | `start-dev` | Your `.env` (git-ignored) |
-| Staging | `staging` | `staging` (port 8081) | `.env.staging` | `start` behind an HTTPS proxy | GitHub Environment `staging` |
-| Production | `prod`, tags `v*` | `prod` | `.env.prod` | `start` behind an HTTPS proxy | GitHub Environment `production` |
+| Environment/ref | Role | Spring profile | Env file | Keycloak mode | Where secrets live |
+|---|---|---|---|---|---|
+| Local dev | Any topic branch | `dev` | `.env` (made by setup script) | `start-dev` | `.env` (git-ignored) |
+| `staging` branch | Integration and candidate release | `staging` | `.env.staging` | `start` behind HTTPS proxy | GitHub Environment `staging` |
+| `prod` branch | Release history and versioned release PRs; **does not deploy directly** | `prod` | `.env.prod` | `start` behind HTTPS proxy | GitHub Environment `production` |
+| `vX.Y.Z` tag | Production build/deploy trigger | `prod` | `.env.prod` | `start` behind HTTPS proxy | GitHub Environment `production` |
+| `master` | Repository default and one-time workflow bootstrap during migration | existing | — | — | — |
 
-- **Never push directly** to `master`, `staging` or `prod`; never base a PR on another branch than `master`.
-- **Secrets never enter git.** `.env*` files are ignored except the `*.example` templates.
-- **Fail fast:** the Keycloak client secrets have no default outside dev, so a missing secret stops startup.
-  The datasource credentials still have defaults (GitHub #64).
+- **Never push directly** to `master`, `staging`, or `prod`.
+- Keep PR/check-required protections on `staging` and `prod`. In this PAT-based full-automation design, don't require reviewers on those branches or on the production environment: that would block the bot's `staging -> prod` promotion and `prod -> staging` version-sync PRs. All configured CI/security checks must still pass before merge. If review requirements must stay enforced, use a dedicated GitHub App with narrowly scoped ruleset bypass for automation PRs.
+- **One-time migration warning:** the current `master`, `staging`, and `prod` branches have different/diverged history. This design is not active on staging/prod until workflows and release configuration are carried over by deliberately reviewed PRs and branch baselines are reconciled. Keep repository variable `ENABLE_AUTO_PROMOTION` false until then; do not merge the historical branch differences blindly.
+- **Secrets never enter git.** `.env*` files are ignored except `*.example` templates.
+- **Fail fast:** Keycloak client secrets have no default outside dev, so a missing secret stops startup. Datasource credentials still have defaults (GitHub #64).
 
 ## ISO/IEC 27001:2022 mapping
 
@@ -281,13 +295,13 @@ treatment, Statement of Applicability, policies, awareness, internal audit, mana
 | Annex A control | How api-MedLink implements it | Evidence in the repo | Coverage | Gap / next action |
 | --- | --- | --- | --- | --- |
 | 5.8 Information security in project management | Threat model mapped to code; decision records; security checklist on every PR | `security/threat-model.md`, `docs/decisions/`, PR template | Covered | Review the threat model with each feature |
-| 5.15 Access control | Deny by default; roles; ownership checks; role × route matrix | `config/SecurityConfig.java`, `security/OwnershipGuard.java`, `AccessMatrixFunctionalTest` | Covered | Metrics and API docs public in production (GitHub #49, #65) |
+| 5.15 Access control | Deny by default; roles; ownership checks; role × route matrix | `config/SecurityConfig.java`, `security/OwnershipGuard.java`, `AccessMatrixFunctionalTest` | Covered | API docs (Scalar `/scalar`, `/v3/api-docs`) dev only (#65); metrics only on the private management port (#49) |
 | 5.16 Identity management | One identity store (Keycloak); `users.id` = Keycloak id; one role per person | realm, `V3__users_keycloak_id_as_pk.sql` | Covered | |
 | 5.17 Authentication information | Passwords only in Keycloak; policy 12+ characters, mixed, not the email; never logged by the API | realm `passwordPolicy`, `LoginRequest.toString` | Covered | Password history and forced change: MLink-87/88 |
-| 5.18 Access rights | Roles through groups; new users in `/patients`; no role accepted from requests | realm `groups`, `defaultGroups`, `security/Roles` | Partial | Periodic review of group membership |
-| 8.2 Privileged access rights | Admin calls only through a dedicated service account (staff hold no Keycloak admin rights, #81); actuator limited to health/info/prometheus | realm, `application-*.yml` | Partial | MFA for staff and the bootstrap admin (MLink-62/63, GitHub #68) |
+| 5.18 Access rights | Roles through groups; new users in `/patients`; no role accepted from requests | realm `groups`, `defaultGroups`, `security/Roles` | Partial | Periodic review of group membership; a practitioner or staff member made in the console also lands in `/patients` (`defaultGroups`) and must be taken out by hand |
+| 8.2 Privileged access rights | Admin calls only through a dedicated service account (staff hold no Keycloak admin rights, #81); actuator limited to health/info/prometheus | realm, `application-*.yml` | Partial | MFA for the bootstrap admin (GitHub #68); staff log in with a code (MLink-62/63) |
 | 8.4 Access to source code | CODEOWNERS on security paths; ruleset on `master` (owner review, CodeQL) | `.github/CODEOWNERS`, README | Covered | Same protection for `staging`/`prod` |
-| 8.5 Secure authentication | Password grant server to server (accepted exception, decision 0001); lockout after 5 failures for 15 min; per-IP limits; 15-minute idle session; HttpOnly, Strict, Secure cookies; new session id at login | realm, `RateLimitFilter`, `LoginSessions`, `application*.yml` | Partial | No second factor yet; TLS ends at a proxy not in the repo |
+| 8.5 Secure authentication | Password grant server to server (accepted exception, decision 0001); lockout after 5 failures for 15 min; per-IP limits; 15-minute idle session; HttpOnly, Strict, Secure cookies; new session id at login; second factor (TOTP) for practitioners and staff, 5 wrong codes → 15-minute lock | realm, `RateLimitFilter`, `LoginSessions`, `MfaService`, `application*.yml` | Partial | No second factor for patients (not planned); TLS ends at a proxy not in the repo |
 | 8.8 Management of technical vulnerabilities | Dependabot; Dependency-Check, Trivy and CodeQL blocking; private disclosure | `.github/dependabot.yml`, workflows, `SECURITY.md` | Covered | |
 | 8.9 Configuration management | Infrastructure and config as code; pinned versions; checkov and Trivy config scans; compose files kept alike by a test | `docker/`, compose files, `terraform/`, `ComposeFilesTest` | Covered | |
 | 8.12 Data leakage prevention | gitleaks before commit, in CI and daily; tokens never in the browser; no body or token in logs; audit paths redacted | `security/.gitleaks.toml`, `secrets-scan.yml`, `security/RouteWords.java` | Covered | |
@@ -311,9 +325,10 @@ treatment, Statement of Applicability, policies, awareness, internal audit, mana
 The prioritised list, with the threat behind each item, is in
 [the threat model, §6](../security/threat-model.md#6-open-work-by-priority). In short:
 
-- [ ] Second factor for practitioners and staff (MLink-62/63); MFA for admin identities (GitHub #68)
+- [x] Second factor for practitioners and staff (MLink-62/63)
+- [ ] MFA for admin identities (GitHub #68)
 - [ ] No default database credentials outside dev (GitHub #64)
-- [ ] Metrics and API docs not public in production (GitHub #49, #65)
+- [x] API docs (Scalar `/scalar`, `/v3/api-docs`) not public in production (GitHub #65)
 - [ ] Separate database roles for the audit trail (GitHub #57)
 - [ ] Logins and account operations in the audit trail (MLink-114, MLink-72)
 - [ ] Backup and tested restore of both databases (GitHub #67)
@@ -330,8 +345,7 @@ blocking SCA and Trivy, cookie hardening, `postgres:latest` pinned, staff withou
 
 ### Rules
 
-1. One YouTrack task per change; branch from `master` (`feat/`, `fix/`, `docs/`, `chore/`, or the shared
-   `epic/MLink-<n>`); PR to `master`, never stacked; fill the template honestly, including the AI disclosure.
+1. One YouTrack task per change. After the staged-release migration, branch from `staging` (`feat/`, `fix/`, `core/`, `docs/`, `chore/`) and PR to `staging`; workflow/config bootstrap changes may first PR to `master`. Fill the template honestly, including AI disclosure.
 2. Never store or accept a password or a role in the API, and never take the caller's role or id from a request body.
 3. New endpoint = DTO + mapper + service + controller + a line in the access matrix + a test for the right role
    and one for the wrong role. Services never return a DTO.

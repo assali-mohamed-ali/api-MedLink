@@ -14,6 +14,7 @@ keycloak_client_id           = "medlink-bff"
 keycloak_client_secret       = "change-me-staging"
 keycloak_admin_client_id     = "medlink-admin"
 keycloak_admin_client_secret = "change-me-staging"
+mfa_encryption_key         = "change-me-staging"
 mail_host                    = "smtp.example.com"
 mail_port                    = 587
 mail_username                = "change-me-staging"

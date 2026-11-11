@@ -51,6 +51,36 @@ public class MailService {
     }
 
     /**
+     * A practitioner's or staff member's first staff-code setup (MLink-62): only the owner of the mailbox gets
+     * past it, so a stolen password alone cannot enrol a code. Throws like {@link #sendEmailVerification}.
+     */
+    public void sendMfaEnrolmentLink(String to, String firstName, String token) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl)
+                .path("/configurer-code")
+                .queryParam("token", token)
+                .build()
+                .toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        String text = hello + "\n\n"
+                + "Vous venez de vous connecter à MedLink pour la première fois. Pour protéger votre compte, "
+                + "configurez votre code de connexion (application d'authentification) en ouvrant ce lien :\n\n"
+                + link + "\n\n"
+                + "Ce lien est valable 30 minutes et sert jusqu'à ce que votre code soit configuré.\n"
+                + "Si ce n'était pas vous, quelqu'un connaît votre mot de passe : changez-le et prévenez "
+                + "l'administration.\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Vous venez de vous connecter à MedLink pour la première fois. Pour protéger votre compte, "
+                + "configurez votre code de connexion (application d'authentification) :</p>"
+                + "<p><a href=\"" + HtmlUtils.htmlEscape(link) + "\">Configurer mon code de connexion</a></p>"
+                + "<p>Ce lien est valable 30 minutes et sert jusqu'à ce que votre code soit configuré.<br>"
+                + "Si ce n'était pas vous, quelqu'un connaît votre mot de passe : changez-le et prévenez "
+                + "l'administration.</p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Configurez votre code de connexion MedLink", text, html);
+    }
+
+    /**
      * Someone tried to sign up with an address that already has an account. Only the owner learns
      * it; the person who tried sees the usual "check your mailbox" answer.
      */
