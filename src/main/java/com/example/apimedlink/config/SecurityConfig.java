@@ -3,6 +3,7 @@ package com.example.apimedlink.config;
 import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.security.JsonAccessDeniedHandler;
 import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
+import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.security.RouteWords;
 import com.example.apimedlink.security.SessionValidityFilter;
 import com.example.apimedlink.service.AuditService;
@@ -57,8 +58,8 @@ public class SecurityConfig {
                                 "/actuator/health",
                                 "/actuator/info",
                                 "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html")
+                                "/scalar",
+                                "/scalar/**")
                         .permitAll()
                         // Staging/prod: Actuator exists only on the private management port, where Prometheus
                         // scrapes without a login; dev serves it on the main port (GitHub #49)
@@ -80,6 +81,9 @@ public class SecurityConfig {
                                 "/api/auth/mfa/setup",
                                 "/api/auth/mfa/verify")
                         .permitAll()
+                        // Staff only, decided before any body is read: a patient sending a bad body gets 403, not 400
+                        .requestMatchers("/api/admin/**")
+                        .hasRole(Roles.ADMINISTRATIVE_STAFF)
                         .anyRequest()
                         .authenticated())
                 // Every logged-in call checks Keycloak still accepts the account (GitHub #28)

@@ -1,0 +1,23 @@
+name: PR title
+
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+    branches: [staging, prod]
+
+permissions:
+  contents: read
+
+jobs:
+  conventional-title:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Enforce Conventional Commit title
+        env:
+          TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          set -euo pipefail
+          if [[ ! "$TITLE" =~ ^(feat|fix|perf|refactor|revert|docs|test|build|ci|chore|style)(\([[:alnum:]./_-]+\))?(!)?:[[:space:]]+[^[:space:]].* ]]; then
+            echo "::error::Use a Conventional Commit PR title, for example 'feat: add appointment booking', 'fix(auth): reject expired sessions', or 'feat!: change the public API'."
+            exit 1
+          fi

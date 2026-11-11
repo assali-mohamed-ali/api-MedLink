@@ -14,7 +14,9 @@
 #      Before any wipe, the current realm is saved to .dev/realm-backups/ (no users, no secrets).
 #   5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
 #   6. Runs ./mvnw verify (unless --skip-tests).
-#   7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login.
+#   7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login
+#      (GET /api/auth/me then answers with the PATIENT role), and a practitioner.dev login that stops at the
+#      staff code step (no session without the code).
 #
 # Usage: ./scripts/setup-dev.sh [--skip-tests] [--full-stack] [--reset] [--keep-data] [--stop]
 #
@@ -523,10 +525,10 @@ esac
 STATUS="$(http_status "$APP_URL/api/users")"
 if [ "$STATUS" = 401 ]; then ok '/api/users without a session returns 401'; else bad "/api/users without a session returned $STATUS, expected 401"; fi
 
-SWAGGER="$(http_status "$APP_URL/swagger-ui.html")"
-case "$SWAGGER" in
-    200 | 302) ok 'Swagger UI reachable' ;;
-    *) warn "Swagger UI returned $SWAGGER" ;;
+SCALAR="$(http_status "$APP_URL/scalar")"
+case "$SCALAR" in
+    200 | 302) ok 'Scalar API docs reachable' ;;
+    *) warn "Scalar API docs returned $SCALAR" ;;
 esac
 
 # End-to-end: log in as patient.dev through our login endpoint, as React does (CSRF cookie, then
@@ -545,13 +547,37 @@ api_login() { # $1 = password -> HTTP status of POST /api/auth/login as patient.
 STATUS="$(api_login 'Not-The-Password-1!')"
 if [ "$STATUS" = 401 ]; then ok 'login with a wrong password returns 401'; else bad "login with a wrong password returned $STATUS, expected 401"; fi
 STATUS="$(api_login "$USERS_PASSWORD")"
-API_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/users/_health")"
-if [ "$STATUS" = 200 ] && [ "$API_STATUS" = 200 ]; then
-    ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/users/_health 200 with the session'
+ME_ANSWER="$LOG_DIR/me-answer.json"
+API_STATUS="$(curl -s -o "$ME_ANSWER" -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/auth/me")"
+# The roles array must be exactly ["PATIENT"]: an extra role (a privileged one) or none at all fails.
+ROLES="$(tr -d ' \t\r\n' < "$ME_ANSWER" 2>/dev/null | sed -n 's/.*"roles":\[\([^]]*\)\].*/\1/p')"
+if [ "$STATUS" = 200 ] && [ "$API_STATUS" = 200 ] && [ "$ROLES" = '"PATIENT"' ]; then
+    ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/auth/me 200 with roles exactly ["PATIENT"]'
 else
-    bad "login as patient.dev: POST /api/auth/login returned $STATUS (expected 200), then /api/users/_health $API_STATUS (expected 200)"
+    bad "login as patient.dev: POST /api/auth/login returned $STATUS (expected 200), then /api/auth/me $API_STATUS with roles [$ROLES] (expected 200 with roles exactly [\"PATIENT\"])"
 fi
-rm -f "$COOKIES"
+rm -f "$COOKIES" "$ME_ANSWER"
+
+# Staff code (MLink-65): a practitioner's right password alone opens no session. The login answers 200
+# {"mfaRequired":true} and the code step comes next; until then /api/auth/me answers 401 (no session).
+STAFF_COOKIES="$LOG_DIR/staff-cookies.txt"
+STAFF_ANSWER="$LOG_DIR/staff-login-answer.json"
+rm -f "$STAFF_COOKIES" "$STAFF_ANSWER"
+curl -s -o /dev/null --max-time 10 -c "$STAFF_COOKIES" -b "$STAFF_COOKIES" "$APP_URL/api/auth/csrf"
+STAFF_XSRF="$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$STAFF_COOKIES" | head -n 1)"
+STATUS="$(curl -s -o "$STAFF_ANSWER" -w '%{http_code}' --max-time 30 -c "$STAFF_COOKIES" -b "$STAFF_COOKIES" \
+    -H "X-XSRF-TOKEN: $STAFF_XSRF" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"practitioner.dev@medlink.local\",\"password\":\"$USERS_PASSWORD\"}" \
+    "$APP_URL/api/auth/login")"
+MFA_REQUIRED=false
+grep -q '"mfaRequired" *: *true' "$STAFF_ANSWER" 2>/dev/null && MFA_REQUIRED=true
+API_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$STAFF_COOKIES" "$APP_URL/api/auth/me")"
+if [ "$STATUS" = 200 ] && [ "$MFA_REQUIRED" = true ] && [ "$API_STATUS" = 401 ]; then
+    ok 'staff code asked: practitioner.dev login 200 with mfaRequired, and no session before the code (/api/auth/me 401)'
+else
+    bad "login as practitioner.dev: POST /api/auth/login returned $STATUS (expected 200 with mfaRequired: $MFA_REQUIRED), then /api/auth/me $API_STATUS (expected 401, no session)"
+fi
+rm -f "$STAFF_COOKIES" "$STAFF_ANSWER"
 
 # Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
 # The smoke account is deleted afterwards (Keycloak user, then our rows).
@@ -610,7 +636,7 @@ cat <<EOF
 
   API             $APP_URL
   Login           POST $APP_URL/api/auth/login   (JSON email + password, X-XSRF-TOKEN header)
-  Swagger UI      $APP_URL/swagger-ui.html
+  Scalar API docs $APP_URL/scalar
   Mail inbox      http://localhost:8025   (every mail the API sends, Mailpit)
   Keycloak admin  $KEYCLOAK_URL   (user: $KC_ADMIN_USER, password: $ADMIN_PASSWORD_HINT)
   Test users      staff.dev / practitioner.dev / patient.dev   (password: $USERS_PASSWORD_HINT)

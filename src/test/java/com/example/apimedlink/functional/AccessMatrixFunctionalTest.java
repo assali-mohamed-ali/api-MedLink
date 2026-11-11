@@ -24,7 +24,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
  */
 class AccessMatrixFunctionalTest extends FunctionalTestBase {
 
-    enum Expect { OPEN, LOGIN, FORBIDDEN } // OPEN: past security, no server error (2xx-4xx but 401/403) Â· LOGIN: 401 Â· FORBIDDEN: 403
+    enum Expect { OPEN, LOGIN, FORBIDDEN } // OPEN: past security, no server error (2xx-4xx but 401/403) | LOGIN: 401 | FORBIDDEN: 403
 
     record Rule(String method, String path, Expect anonymous, Expect patient, Expect practitioner, Expect staff) {
         @Override
@@ -42,17 +42,24 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("POST",   "/api/auth/verify-email",        O, O, O, O),
             new Rule("POST",   "/api/auth/verify-email/resend", O, O, O, O),
             new Rule("POST",   "/api/auth/login",               O, O, O, O),
+            new Rule("GET",    "/api/auth/me",                  L, O, O, O),
             new Rule("POST",   "/api/auth/logout",              L, O, O, O),
             new Rule("POST",   "/api/auth/password",            L, O, O, O),
             // Only a pending code step (staff login, password accepted) gets past these; a full session does not
             new Rule("POST",   "/api/auth/mfa/setup",           L, L, L, L),
             new Rule("POST",   "/api/auth/mfa/verify",          L, L, L, L),
             new Rule("POST",   "/api/admin/users/{id}/force-password-reset", L, F, F, O),
+            new Rule("GET",    "/api/admin/users",              L, F, F, O),
+            new Rule("POST",   "/api/admin/users",              L, F, F, O),
+            new Rule("PUT",    "/api/admin/users/{id}/role",    L, F, F, O),
             new Rule("GET",    "/api/admin/audit-entries",      L, F, F, O),
             new Rule("GET",    "/api/users",                    L, F, F, O),
             new Rule("GET",    "/api/users/{id}",               L, F, F, O),
             new Rule("DELETE", "/api/users/{id}",               L, F, F, O),
-            new Rule("GET",    "/api/users/_health",            L, O, O, O));
+            new Rule("GET",    "/api/users/_health",            L, O, O, O),
+            new Rule("GET",    "/api/slots",                    L, O, F, F), // MLink-98: patients search slots
+            new Rule("GET",    "/api/slots/filters",            L, O, F, F), // MLink-163: the search form's lists
+            new Rule("POST",   "/api/appointments",             L, O, F, F)); // MLink-102: patients book a slot
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")
@@ -83,7 +90,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
                 Arguments.of(rule, Who.STAFF, rule.staff())));
     }
 
-    @ParameterizedTest(name = "{1} {0} â†’ {2}")
+    @ParameterizedTest(name = "{1} {0} -> {2}")
     @MethodSource("cells")
     void eachCallerGetsWhatTheMatrixSays(Rule rule, Who who, Expect expect) throws Exception {
         HttpResponse<String> response = send(as(who), rule.method(), rule.path());
