@@ -79,6 +79,28 @@ class DevSeedTest {
         }
     }
 
+    /**
+     * MLink-102: booking needs a patient profile, which only registration makes; patient.dev has none (no fixed id,
+     * so no seeded row). The demo patient is a dev Keycloak user with a fixed id and its seeded patients row.
+     */
+    @Test
+    void theDemoPatientIsTheDevKeycloakUserWithAPatientProfile() throws Exception {
+        Map<String, Object> devUser = devUsersByUsername().get("patient.demo");
+        assertThat(devUser).as("dev user patient.demo").isNotNull();
+        assertThat(devUser.get("groups")).isEqualTo(List.of("/patients"));
+        UUID id = UUID.fromString((String) devUser.get("id"));
+
+        Map<String, Object> row = jdbc.queryForMap("""
+                select u.username, u.email, p.first_name, p.last_name, p.birth_date
+                from patients p join users u on u.id = p.id
+                where p.id = ?""", id);
+        assertThat(row.get("username")).isEqualTo("patient.demo");
+        assertThat(row.get("email")).isEqualTo(devUser.get("email"));
+        assertThat(row.get("first_name")).isEqualTo(devUser.get("firstName"));
+        assertThat(row.get("last_name")).isEqualTo(devUser.get("lastName"));
+        assertThat(row.get("birth_date")).isNotNull();
+    }
+
     @Test
     void theExistingPractitionerDevIsLeftAsItWas() throws Exception {
         Map<String, Object> practitionerDev = realmUsersByUsername().get("practitioner.dev");

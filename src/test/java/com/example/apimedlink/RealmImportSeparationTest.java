@@ -29,15 +29,17 @@ class RealmImportSeparationTest {
     private static final Path REALM = Path.of("keycloak", "realm-medlink.json");
     private static final Path DEV_USERS = Path.of("keycloak", "dev", "dev-practitioners.json");
 
+    /** The three dev practitioners, and the demo patient that can book (MLink-102): all with fixed ids. */
     @Test
-    void theDevUsersFileHoldsTheThreeDevPractitionersWithFixedIds() {
+    void theDevUsersFileHoldsTheDevPractitionersAndTheDemoPatientWithFixedIds() {
         List<Map<String, Object>> users = users(DEV_USERS);
 
         assertThat(users).extracting(user -> user.get("username"))
-                .containsExactlyInAnyOrder("generalist.dev", "cardiologist.dev", "pediatrician.dev");
+                .containsExactlyInAnyOrder("generalist.dev", "cardiologist.dev", "pediatrician.dev", "patient.demo");
         assertThat(users).allSatisfy(user -> {
             assertThat(user.get("id")).as("fixed id of %s", user.get("username")).isNotNull();
-            assertThat(user.get("groups")).isEqualTo(List.of("/practitioners"));
+            assertThat(user.get("groups")).isEqualTo(List.of(
+                    "patient.demo".equals(user.get("username")) ? "/patients" : "/practitioners"));
         });
         // The password stays a placeholder, filled in by the dev container from its environment.
         assertThat(read(DEV_USERS)).contains("${KC_DEV_USERS_PASSWORD}").doesNotContain("MedLink-Dev-2026!");

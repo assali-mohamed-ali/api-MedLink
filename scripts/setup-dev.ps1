@@ -15,7 +15,9 @@
        Before any wipe, the current realm is saved to .dev\realm-backups\ (no users, no secrets).
     5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
     6. Runs ./mvnw verify (unless -SkipTests).
-    7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login.
+    7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login
+       (GET /api/auth/me then answers with the PATIENT role), and a practitioner.dev login that stops at the
+       staff code step (no session without the code).
 
     Run from PowerShell (5.1 or 7):
         powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1
@@ -502,8 +504,8 @@ if ($health -match '"status":"UP"') { Write-Ok "health: $health" } else { Write-
 $status = Get-HttpStatus "$AppUrl/api/users"
 if ($status -eq 401) { Write-Ok '/api/users without a session returns 401' } else { Write-Bad "/api/users without a session returned $status, expected 401" }
 
-$swagger = Get-HttpStatus "$AppUrl/swagger-ui.html"
-if ($swagger -in 200, 302) { Write-Ok 'Swagger UI reachable' } else { Write-Warn "Swagger UI returned $swagger" }
+$scalar = Get-HttpStatus "$AppUrl/scalar"
+if ($scalar -in 200, 302) { Write-Ok 'Scalar API docs reachable' } else { Write-Warn "Scalar API docs returned $scalar" }
 
 # End-to-end: log in as patient.dev through our login endpoint, as React does (CSRF cookie, then
 # the JSON post), then call the API with the session. A wrong password first: a successful login
@@ -524,10 +526,29 @@ if ($status -eq 401) { Write-Ok 'login with a wrong password returns 401' } else
 [System.IO.File]::WriteAllText($loginFile, (@{ email = 'patient.dev@medlink.local'; password = $usersPassword } | ConvertTo-Json -Compress), $utf8)
 $status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $cookies -b $cookies -H "X-XSRF-TOKEN: $loginXsrf" `
     -H 'Content-Type: application/json' --data-binary "@$loginFile" "$AppUrl/api/auth/login")
-$apiStatus = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -b $cookies "$AppUrl/api/users/_health")
-if ($status -eq 200 -and $apiStatus -eq 200) { Write-Ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/users/_health 200 with the session' }
-else { Write-Bad "login as patient.dev: POST /api/auth/login returned $status (expected 200), then /api/users/_health $apiStatus (expected 200)" }
-Remove-Item $cookies, $loginFile -Force -ErrorAction SilentlyContinue
+$meAnswer = Join-Path $LogDir 'me-answer.json'
+$apiStatus = [int](& curl.exe -s -o $meAnswer -w '%{http_code}' --max-time 10 -b $cookies "$AppUrl/api/auth/me")
+# The roles array must be exactly ["PATIENT"]: an extra role (a privileged one) or none at all fails.
+$roles = ''
+try { $roles = (@((Get-Content $meAnswer -Raw -ErrorAction Stop | ConvertFrom-Json).user.roles) | ForEach-Object { "`"$_`"" }) -join ',' } catch { }
+if ($status -eq 200 -and $apiStatus -eq 200 -and $roles -ceq '"PATIENT"') { Write-Ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/auth/me 200 with roles exactly ["PATIENT"]' }
+else { Write-Bad "login as patient.dev: POST /api/auth/login returned $status (expected 200), then /api/auth/me $apiStatus with roles [$roles] (expected 200 with roles exactly [`"PATIENT`"])" }
+
+# Staff code (MLink-65): a practitioner's right password alone opens no session. The login answers 200
+# {"mfaRequired":true} and the code step comes next; until then /api/auth/me answers 401 (no session).
+$staffCookies = Join-Path $LogDir 'staff-cookies.txt'
+$staffAnswer = Join-Path $LogDir 'staff-login-answer.json'
+Remove-Item $staffCookies, $staffAnswer -Force -ErrorAction SilentlyContinue
+& curl.exe -s -o NUL --max-time 10 -c $staffCookies -b $staffCookies "$AppUrl/api/auth/csrf"
+$staffXsrf = Get-Content $staffCookies | Where-Object { $_ -match "`tXSRF-TOKEN`t" } | ForEach-Object { ($_ -split "`t")[6] } | Select-Object -First 1
+[System.IO.File]::WriteAllText($loginFile, (@{ email = 'practitioner.dev@medlink.local'; password = $usersPassword } | ConvertTo-Json -Compress), $utf8)
+$status = [int](& curl.exe -s -o $staffAnswer -w '%{http_code}' --max-time 30 -c $staffCookies -b $staffCookies -H "X-XSRF-TOKEN: $staffXsrf" `
+    -H 'Content-Type: application/json' --data-binary "@$loginFile" "$AppUrl/api/auth/login")
+$mfaRequired = (Test-Path $staffAnswer) -and ((Get-Content $staffAnswer -Raw) -match '"mfaRequired"\s*:\s*true')
+$apiStatus = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -b $staffCookies "$AppUrl/api/auth/me")
+if ($status -eq 200 -and $mfaRequired -and $apiStatus -eq 401) { Write-Ok 'staff code asked: practitioner.dev login 200 with mfaRequired, and no session before the code (/api/auth/me 401)' }
+else { Write-Bad "login as practitioner.dev: POST /api/auth/login returned $status (expected 200 with mfaRequired: $mfaRequired), then /api/auth/me $apiStatus (expected 401, no session)" }
+Remove-Item $cookies, $loginFile, $meAnswer, $staffCookies, $staffAnswer -Force -ErrorAction SilentlyContinue
 
 # Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
 # The smoke account is deleted afterwards (Keycloak user, then our rows). JSON bodies go through
@@ -596,7 +617,7 @@ Write-Host @"
 
   API             $AppUrl
   Login           POST $AppUrl/api/auth/login   (JSON email + password, X-XSRF-TOKEN header)
-  Swagger UI      $AppUrl/swagger-ui.html
+  Scalar API docs $AppUrl/scalar
   Mail inbox      http://localhost:8025   (every mail the API sends, Mailpit)
   Keycloak admin  $KeycloakUrl   (user: $kcAdminUser, password: $(if ($FullStack) { 'KEYCLOAK_ADMIN_PASSWORD in .env' } else { 'admin' }))
   Test users      staff.dev / practitioner.dev / patient.dev   (password: $(if ($FullStack) { 'KC_DEV_USERS_PASSWORD in .env' } else { $DevUsersPassword }))

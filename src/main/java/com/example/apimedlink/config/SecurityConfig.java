@@ -3,6 +3,7 @@ package com.example.apimedlink.config;
 import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.security.JsonAccessDeniedHandler;
 import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
+import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.security.RouteWords;
 import com.example.apimedlink.security.SessionValidityFilter;
 import com.example.apimedlink.service.AuditService;
@@ -57,8 +58,8 @@ public class SecurityConfig {
                                 "/actuator/health",
                                 "/actuator/info",
                                 "/v3/api-docs/**",
-                                "/swagger-ui/**",
-                                "/swagger-ui.html")
+                                "/scalar",
+                                "/scalar/**")
                         .permitAll()
                         // Staging/prod: Actuator exists only on the private management port, where Prometheus
                         // scrapes without a login; dev serves it on the main port (GitHub #49)
@@ -80,6 +81,10 @@ public class SecurityConfig {
                                 "/api/auth/mfa/setup",
                                 "/api/auth/mfa/verify")
                         .permitAll()
+                        // The role before anything reads the request: Spring converts query dates and the JSON body before
+                        // @PreAuthorize, so without this rule a patient would get 400, not 403 (MLink-26, review on #116)
+                        .requestMatchers("/api/practitioner/**")
+                        .hasRole(Roles.PRACTITIONER)
                         .anyRequest()
                         .authenticated())
                 // Every logged-in call checks Keycloak still accepts the account (GitHub #28)

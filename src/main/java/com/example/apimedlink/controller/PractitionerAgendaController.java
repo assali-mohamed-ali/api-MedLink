@@ -37,12 +37,12 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 
 /**
  * The practitioner's agenda across the three clinics, and the opening and closing of their slots (MLink-26).
- * The whole class is for practitioners, so a route added later is protected too ({@code SecurityConfig} only
- * says "logged in"). The practitioner is always the caller: no route takes a practitioner id.
+ * The whole class is for practitioners, so a route added later is protected too; {@code SecurityConfig}
+ * also limits {@code /api/practitioner/**} to practitioners (review on #116). The practitioner is always the caller: no route takes a practitioner id.
  *
- * <p>Spring checks a required parameter, a path variable's type and a {@code @Valid} body before
- * {@code @PreAuthorize}: a patient would get 400 instead of 403 and learn our validation rules. So nothing
- * here is required or validated by Spring; every rule is checked by hand, after the role check.
+ * <p>Spring converts the query parameters and the JSON body (dates, ids) before {@code @PreAuthorize} runs, so the
+ * role is checked first by the URL rule in {@code SecurityConfig}: a patient gets 403, never 400, and never learns
+ * our validation rules. Nothing here is required or validated by Spring either; every rule is checked by hand.
  */
 @RestController
 @RequestMapping("/api/practitioner")

@@ -302,6 +302,28 @@ class AgendaFunctionalTest extends FunctionalTestBase {
     }
 
     @Test
+    void aClosedSlotCannotBeBookedEvenByItsIdAndNoAppointmentIsCreated() throws Exception {
+        Pro pro = practitioner(SOUSSE);
+        UUID closed = openAndGetId(pro, SOUSSE, DAY.plus(3, ChronoUnit.HOURS));
+        assertThat(patch(pro.browser(), closed, "{\"status\":\"CLOSED\"}").statusCode()).isEqualTo(200);
+        // A patient with a profile (the booking needs one), who knows the slot's id without the search
+        String email = uniqueEmail("agenda-patient");
+        UUID patientId = console.createUser(email, PASSWORD);
+        jdbc.update("insert into users (id, username, email) values (?, ?, ?) on conflict (id) do nothing", patientId, email, email);
+        jdbc.update("insert into patients (id, first_name, last_name, birth_date) values (?, 'Amel', 'Test', ?)",
+                patientId, Date.valueOf("1990-04-12"));
+        Browser patient = new Browser();
+        assertThat(patient.apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+
+        HttpResponse<String> booking = patient.postJson("/api/appointments", "{\"slotId\":\"" + closed + "\"}");
+
+        assertThat(booking.statusCode()).as(booking.body()).isEqualTo(409);
+        assertThat(body(booking).get("code")).isEqualTo("SLOT_TAKEN");
+        assertThat(jdbc.queryForObject("select count(*) from appointments where slot_id = ?", Integer.class, closed)).isZero();
+        assertThat(jdbc.queryForObject("select status from slots where id = ?", String.class, closed)).isEqualTo("CLOSED");
+    }
+
+    @Test
     void aBookedSlotCannotBeClosedAndStaysUnchanged() throws Exception {
         Pro pro = practitioner(SOUSSE);
         UUID patient = insertPatient("Amel", "Ben Salah");
@@ -368,6 +390,35 @@ class AgendaFunctionalTest extends FunctionalTestBase {
         // The refusal is in the audit trail, for the intruder
         assertThat(audit(intruder.id())).contains("ACCESS_DENIED/DENIED");
         assertThat(audit(owner.id())).isEmpty();
+    }
+
+    /**
+     * Review on #116: Spring converts the dates of the query and the JSON body before {@code @PreAuthorize} runs, so a
+     * malformed value must still meet the role check first. 403 for every caller who is not a practitioner, never 400.
+     */
+    @Test
+    void patientsAndStaffGet403EvenWithMalformedDatesOrJson() throws Exception {
+        String patientEmail = uniqueEmail("agenda-patient");
+        console.createUser(patientEmail, PASSWORD);
+        Browser patient = new Browser();
+        assertThat(patient.apiLogin(patientEmail, PASSWORD).statusCode()).isEqualTo(200);
+        String staffEmail = uniqueEmail("agenda-staff");
+        console.createUser(staffEmail, PASSWORD, "/administrative-staff");
+        Browser staff = new Browser().login(staffEmail, PASSWORD);
+
+        for (Browser who : List.of(patient, staff)) {
+            assertThat(who.call("/api/practitioner/agenda?from=not-a-date&to=not-a-date").statusCode())
+                    .as("agenda, malformed dates").isEqualTo(403);
+            assertThat(who.postJson("/api/practitioner/slots",
+                    "{\"clinicId\":\"abc\",\"startsAt\":\"not-a-date\",\"endsAt\":\"not-a-date\"}").statusCode())
+                    .as("open, malformed dates").isEqualTo(403);
+            assertThat(who.postJson("/api/practitioner/slots", "{not json").statusCode())
+                    .as("open, malformed JSON").isEqualTo(403);
+            assertThat(patch(who, UUID.randomUUID(), "{not json").statusCode())
+                    .as("close, malformed JSON").isEqualTo(403);
+            assertThat(who.http.send(rawPatch(who, "not-a-uuid", "{}"), HttpResponse.BodyHandlers.ofString()).statusCode())
+                    .as("close, id that is not a UUID").isEqualTo(403);
+        }
     }
 
     @Test

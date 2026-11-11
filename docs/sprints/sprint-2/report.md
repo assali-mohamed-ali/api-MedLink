@@ -18,16 +18,20 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 - V15 inserts the three reference clinics (no endpoint creates a clinic) and adds the `CLOSED` slot status.
 - The overlap is enforced by the database (`slots_no_overlap`); the application check only names the slot in the way, and a lost race is translated to the same 409 (never a 500).
 - A closed slot keeps its time range: reopening it frees the time (decision D4, to confirm).
-- Closing is one conditional `UPDATE` (free and no active appointment): a concurrent booking cannot end on a closed slot. The booking flow (MLink-8) needs the same guard.
-- Spring validates before `@PreAuthorize`, so nothing is `@Valid` or required: a patient gets 403, never 400.
+- Closing is one conditional `UPDATE` (free and no active appointment): a concurrent booking cannot end on a closed slot. The booking (MLink-102, merged with #87) locks the slot (`SELECT … FOR UPDATE`) and refuses any slot that is not `FREE`, so a closed slot answers 409 `SLOT_TAKEN`; in a race, Postgres's row lock makes one side see the other's status.
+- Spring converts query parameters and the JSON body before `@PreAuthorize` runs, so a patient sending `from=not-a-date` got 400 instead of 403 (code owner's review on #116). **`SecurityConfig` now limits `/api/practitioner/**` to `PRACTITIONER`** in the filter chain, before any conversion (shared file, changed at the code owner's request); the class-level `@PreAuthorize` stays as a second check. Nothing is `@Valid` or required either: a patient or staff member gets 403, never 400, whatever they send.
+- Two overlapping openings at once: the exclusion constraint can make each insert wait for the other, and Postgres aborts one with a deadlock (40P01), which reached the client as 500. `AgendaService.open` retries once after a `PessimisticLockingFailureException`: the overlap check or the constraint then answers 409 `SLOT_OVERLAP`; a second deadlock also answers 409. Found while revalidating the review fix.
 - The agenda is not audited per read (it is not the medical record); slot changes are (`SLOT_OPENED`, `SLOT_CLOSED`); refusals are (`ACCESS_DENIED`).
 - Duration 10 min to 8 h and horizon 180 days are assumptions (constants in `AgendaService`), not in the cahier des charges.
 
 **Proofs**
 - Repository queries: `SlotRepositoryAgendaTest` (9 tests) with `AppointmentSchemaTest`, `AppointmentDomainRepositoryTest` and `SlotSearchFunctionalTest` still green (39 tests).
 - Access matrix: 3 new lines, 73 cases green.
-- `AgendaFunctionalTest`: 20 tests green.
+- `AgendaFunctionalTest`: 21 tests green, including `aClosedSlotCannotBeBookedEvenByItsIdAndNoAppointmentIsCreated` (added after the merge of `master`): checked once that it turns red when the booking refuses only `BOOKED` slots.
+- Postman: new folder 9 "Practitioner agenda (MLink-26)", 25 requests: anonymous 401 and patient 403 on every route (403, never 400, even without dates or body); a disposable practitioner through the code step gets 400 without dates, 409 `PRACTITIONER_PROFILE_MISSING` and 403 on a slot that is not theirs. Folder alone: 26 requests, 41 assertions, 0 failures. Whole collection, `npx newman@6.2.1 run`: **158 requests, 355 assertions, 0 failures**, twice in a row. The full flow (three clinics, overlap, close, reopen) needs a practitioner profile, which no endpoint creates yet (SS5): it stays proven by `AgendaFunctionalTest`.
+- Review on #116 (2026-11-10): `patientsAndStaffGet403EvenWithMalformedDatesOrJson` (malformed dates, malformed JSON, an id that is not a UUID, on the three routes, for a patient and a staff member) committed red first: `expected: 403 but was: 400`; green with the `SecurityConfig` rule. `twoSimultaneousOverlappingOpeningsLeaveExactlyOneSlotAndNoServerError` was red 4 runs out of 5 (201 + 500, SQLSTATE 40P01), green 10 runs out of 10 with the retry. Full suite `./mvnw -B verify`: **519 tests, 0 failures**; reverse class order: 519 tests, 0 failures. Postman folder 9 on the rebuilt dev stack: 26 requests, 41 assertions, 0 failures.
 - Full suite `./mvnw -B verify`: 476 tests, 0 failures; reverse class order (`-Dsurefire.runOrder=reversealphabetical`): 476 tests, 0 failures.
+- After merging `master` (2026-11-10, booking and slot search index included): `./mvnw -B verify` 517 tests, 0 failures; reverse class order 517 tests, 0 failures (before the closed-slot booking test was added).
 - `pre-commit run --all-files`: all 14 hooks passed (gitleaks, checkov, detect-private-key included).
 - One isolated failure of `QrCodesTest` (MLink-62) was seen once in a full run; not reproduced in 10 separate runs nor in the next full runs; unrelated to this PR.
 
@@ -40,9 +44,74 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
-| 3 | Staff code, TOTP (endpoints 8–9) | **Merged** (#97, MLink-62/63); review round 1 **in review** on `fix/ss3-review-round-1`: see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) | 2026-10-29 |
+| 3 | Staff code, TOTP (endpoints 8–9) | **Done** (MLink-62/63): #97, review round 1 in #99; see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), [#99](https://github.com/assali-mohamed-ali/api-MedLink/pull/99) | 2026-10-29 |
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
+
+**2026-11-10:** MLink-26, code owner's review on #116: `SecurityConfig` gains a role rule for `/api/practitioner/**` (the role is checked before Spring converts dates and JSON: 403, never 400, for a patient). Shared file: no other route changes. Also fixed: two overlapping slot openings at once could end in a 500 (Postgres deadlock), now 409. No migration, no new route.
+
+**2026-11-10:** MLink-26 (`feat/MLink-26-agenda`): `master` merged after #87 and #113, so the agenda migration is renumbered **V15** (`V15__agenda_reference_data.sql`; V14 is MLink-99's slot search index). Dev databases that ran the branch's old V14 need the setup script with `--reset` (`-Reset`) once. Conflicts kept both sides (`SlotRepository`, access matrix). New test: a closed slot cannot be booked. See the MLink-26 section.
+
+**2026-10-31, updated 2026-11-08:** MLink-65 (sub-sprint 3 part, `feat/ss3-setup-staff-code-check`): both setup
+scripts check the session with `GET /api/auth/me` (#107): `patient.dev` gets 200 with exactly the roles `["PATIENT"]`, and
+`practitioner.dev`'s password alone opens no session (login 200 with `mfaRequired`, then 401). Scripts and README
+only: no migration, no endpoint.
+
+**2026-11-07:** MLink-103 on `epic/MLink-8`, PR #87: two patients booking one slot at once get one appointment and
+one 409 `SLOT_TAKEN`; a double booking only the unique index catches also answers 409, never 500. No migration (the
+index is in V13), no new route. See the MLink-103 section.
+
+**2026-11-07:** MLink-102 on `epic/MLink-8`, PR #87: **new route `POST /api/appointments`** (patients book a slot);
+one new line in `AccessMatrixFunctionalTest`. No migration. **New dev user `patient.demo@medlink.local`** (dev password):
+`patient.dev` has no patient profile, so it cannot book (403 `PATIENT_PROFILE_REQUIRED`); `setup-dev` imports the new
+user at the next start. See the MLink-102 section.
+
+**2026-11-07:** MLink-163 on `epic/MLink-8`, PR #87: **new route `GET /api/slots/filters`** (patients only, the
+lists of the search form); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-163 section.
+
+**2026-11-07:** MLink-99 (slot search index) on `epic/MLink-8`, PR #87: **migration V14**
+(`V14__slot_search_index.sql`, one partial index on the free slots); dev databases need the setup script once
+(V14 runs on start, no `--reset` needed). No new route. See the MLink-99 section.
+
+**2026-11-07:** `epic/MLink-8` (PR #87): current `master` merged (Scalar instead of Swagger UI, so the SCA run is
+green again); `GET /api/slots` now checks the role before reading any parameter, so a non-patient gets 403 even with
+`clinicId=abc` (code owner's review, see the MLink-100 section). The migration stays **V13**. No new route.
+
+**2026-10-29 (night):** MLink-53, `GET /api/auth/me` (endpoint 6, `feat/mlink-53-auth-me`): the user object of the
+login, read from the session the login opened (the id token and the granted roles), with no Keycloak or database
+call; 401 `UNAUTHENTICATED` without a session, after a logout, or with only a pending code step. React needs it to
+restore who is logged in after a page refresh (the front's MLink-128). Taken over from Ahlem with her agreement. No
+migration. The tests and setup scripts that check a session with `/api/users/_health` can now use it.
+
+**2026-10-29 (evening):** MLink-68 (story MLink-19) on `feat/mlink-68-lockout-check`: `scripts/check-lockout.sh`
+proves the lockout on the running dev stack: 5 wrong passwords 1.2 s apart (Keycloak's quick-login guard would lock
+after 2 otherwise), then the right password is refused (401, like a wrong password: a 423 would reveal that the
+account exists) and Keycloak's brute-force status says locked; `patient.dev` is unlocked at the end. `PASS` on the dev
+stack, `FAIL` with `failureFactor` raised to 50 through the admin API. No migration, no endpoint.
+Review of #103 (2026-10-30): the script refuses a non-local `APP_URL` or `KEYCLOAK_URL` before any request (exit 2),
+so a mistaken staging/prod URL cannot lock or unlock a real account; a remote dev stack needs
+`ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack`. `scripts/check-lockout.test.sh` (offline, fake `curl`, run by CI's
+`build-test`) covers 14 cases, lookalikes included (`localhost.evil.com`, `localhost:8180@evil.com`); two mutants of the
+guard turn it red. The cookie jar is removed in the `EXIT` trap.
+Review of #103 (2026-11-02): the unlock is now checked. It needs an admin token and Keycloak's 204; otherwise it says
+why on stderr and the run fails (exit 1, never `PASS`), at the start (the count would prove nothing), at the end (the
+unlock runs before the result is printed) and in the `EXIT` trap (an interrupted run). The offline test plays a fake
+dev stack: final unlock answered 500 or 401, no admin token, first unlock refused (19 cases); mutants without the status
+check or the token check turn it red. `PAUSE_SECONDS` (default 1.2) lets the test skip the waits.
+Review of #103 (2026-11-06): the guard read `https://prod.example.com#@localhost` (or `?@`, `\@`) as localhost,
+because it dropped the user-info before the query and fragment: the admin and test passwords would have gone to
+prod. `url_host()` now cuts the host at the first `/`, `?`, `#` or `\` before dropping the user-info; 5 new cases
+(24 in all), red before the fix.
+
+**2026-10-29 (evening), updated 2026-10-30:** MLink-127 follow-up and GitHub #65 on `fix/65-swagger-off-in-prod`:
+staging and prod serve neither the API reference UI nor `/v3/api-docs` (404 over HTTP, `ApiDocsExposureIntegrationTest`),
+dev keeps both (DAST runs the dev profile). After #100 (Scalar replaces Swagger UI) the UI is Scalar at `/scalar`:
+`scalar.enabled: false` in staging and prod switches it off on its own (today `springdoc.api-docs.enabled: false` also
+hides it, as a side effect of Scalar's configuration depending on springdoc's; staging mutants: no switch exposes
+`/scalar`, `/scalar/scalar.js` and `/v3/api-docs`; `scalar.enabled: false` alone hides Scalar). The test lists
+`/scalar`, `/scalar/scalar.js` and the old Swagger UI paths, with soft assertions. The DOMPurify 3.4.16 suppression
+of the first version is dropped: Swagger UI is no longer a dependency and Scalar's bundle embeds no DOMPurify.
+No migration, no endpoint.
 
 **2026-10-29:** `epic/MLink-8` (PR #87, ready for review): `master` merged after #97 and #99, so the appointment
 migration is renumbered **V13** (`V13__appointment_domain.sql`); dev databases that ran an older number need the
@@ -132,6 +201,32 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-65 — setup scripts check the session and the staff code (2026-10-31, updated 2026-11-07, feat/ss3-setup-staff-code-check)
+
+- **Built:** `scripts/setup-dev.ps1` and `scripts/setup-dev.sh` (same behaviour, bash 3.2 safe). The `patient.dev`
+  login check now calls `GET /api/auth/me` (#107): `[OK]` only for 200 with the `roles` array exactly `["PATIENT"]`. Then a fresh
+  browser logs in as `practitioner.dev` with the right password: `[OK]` only when the login answers 200 with `"mfaRequired": true` **and** the same cookies get 401 on `/api/auth/me` (no
+  session before the code); anything else is a warning. The cookie and answer files are deleted afterwards; the
+  password is never printed. README and the scripts' header mention the check.
+- **Proof:** on a fresh realm, `setup-dev.ps1 -SkipTests -Reset` (Windows PowerShell) and `setup-dev.sh --skip-tests`
+  (Git Bash 5.2, volumes re-imported): **0 failures, 0 warnings**, both print `[OK] staff code asked`. Again after
+  the switch to `/api/auth/me` (2026-11-07, `master` with #107 and #103 merged in): `setup-dev.ps1 -SkipTests` and
+  `setup-dev.sh --skip-tests`, **0 warnings** each, both print the `PATIENT` role line and `[OK] staff code asked`.
+- **2026-11-07:** the first version checked the session on `/api/users/_health`, because `/api/auth/me` was not on
+  `master` yet; after #107 merged, both checks use it, as the ticket asks.
+- **Review of #113 (2026-11-08):** the first `/api/auth/me` check searched the whole answer for `"PATIENT"`, so
+  `PATIENT` plus a privileged role would still have passed. Both scripts now read the `roles` array (`tr`/`sed` in
+  bash 3.2, `ConvertFrom-Json` in PowerShell) and want exactly `["PATIENT"]`. Checked offline on 8 fake answers in
+  bash, Windows PowerShell 5.1 and PowerShell 7: only `["PATIENT"]` (compact or pretty-printed) passes; `PATIENT`
+  with `ADMINISTRATIVE_STAFF` or `PRACTITIONER`, an empty array, no array, `patient` in lower case and a missing
+  answer all fail. `master` merged in (52 commits). Live: `setup-dev.ps1 -SkipTests` and `setup-dev.sh --skip-tests`
+  0 warnings each (`roles exactly ["PATIENT"]`, `staff code asked`); `./mvnw -B verify` 475/475 and reverse class
+  order 475/475.
+- **Found on the way:** after an API run started by `setup-dev.sh` (Git Bash on Windows), both `setup-dev.ps1 -Stop`
+  and `setup-dev.sh --stop` stop the containers, but the API's Java process (forked by `spring-boot:run`) keeps port
+  8080, so the next run stops at "Free these ports first". A run started by `setup-dev.ps1` stops cleanly. To report
+  as an issue; not fixed here.
 
 ## MLink-62, MLink-63 - staff code, TOTP (2026-10-25, feat/ss3-staff-totp)
 
@@ -336,6 +431,140 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## MLink-103 — one booking per slot under concurrency, 409 `SLOT_TAKEN` (2026-11-07, epic/MLink-8)
+
+Task 27.2 of MLink-27, its acceptance criterion: "if two patients choose the same slot, one appointment is made and the
+other is told".
+
+**Built:**
+- No migration: the unique index the ticket asked for, `appointments_one_active_per_slot ON appointments (slot_id)
+  WHERE status = 'BOOKED'`, is already in V13 (code owner's review of MLink-97).
+- Two guards. First, the slot row lock of MLink-102 (`findForBookingById`, `SELECT … FOR UPDATE`) serves two bookings
+  one after the other, and the second sees the slot taken. Second, the unique index: `AppointmentService.book` saves
+  with `saveAndFlush`, and a violation of `appointments_one_active_per_slot` now answers the same 409 `SLOT_TAKEN`
+  ("Ce créneau n'est plus disponible. Choisissez-en un autre.") instead of a 500; any other integrity error still
+  fails as before (never hidden).
+- `AppointmentRaceFunctionalTest` (real API): two patients post the same slot at the same instant (two threads
+  released together), five rounds: each round one 201, one 409 `SLOT_TAKEN`, one BOOKED row. And the race lost after
+  the checks (the slot still FREE with an active appointment already in the table): 409, not 500, nothing added.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (9a9b7eb, the tests alone): 2 tests, 1 failure, the last-guard test (expected 409 but was 500). The
+  concurrent test was already green: the lock of MLink-102 holds; it proves the acceptance criterion.
+- Green (663b46d): both race tests and `AppointmentBookingFunctionalTest`, 12 tests, 0 failures.
+- Mutation check: when the translation no longer recognises the index, the last-guard test turns red again (500).
+- `./mvnw -B clean verify` **475 tests, 0 failures**; reverse order 475, 0 failures. No endpoint changed: Postman as
+  for MLink-102.
+
+## MLink-102 — book an appointment, `POST /api/appointments` (2026-11-07, epic/MLink-8)
+
+Task 27.1 of MLink-27: a patient books a free slot online and sees the confirmation.
+
+**Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments { "slotId" }` → 201
+`{ "id", "status": "BOOKED", "clinic": { "id", "name" }, "practitioner": { "id", "firstName", "lastName" },
+"startsAt", "endsAt" }`. 400 `VALIDATION_FAILED` (`slotId` missing: "Le créneau est obligatoire.", not a UUID:
+"Identifiant invalide.") · 401 · 403 for a non-patient or without the CSRF header · **403 `PATIENT_PROFILE_REQUIRED`**
+"Complétez votre profil patient avant de réserver." · 404 `NOT_FOUND` unknown slot · 409 `SLOT_TAKEN` "Ce créneau
+n'est plus disponible. Choisissez-en un autre." (already booked, or started).
+
+**Built:**
+- `AppointmentController.book` (`@PreAuthorize` PATIENT): `slotId` arrives as text in `BookAppointmentRequest` and
+  is read after the role check, so a non-patient gets 403 even with `"abc"` or `{}` (same reason as the MLink-100
+  review). The patient is always the caller: `patient_id` = `booked_by` = `currentUser.id()`; any id in the body is
+  ignored. `AppointmentMapper` → `AppointmentDto` (the practitioner's names only).
+- `AppointmentService.book`, one transaction: the patient profile exists, then `SlotRepository.findForBookingById`
+  locks the slot row (`SELECT … FOR UPDATE`), the slot must be FREE and not started, it becomes BOOKED and the
+  appointment is saved. Two bookings of one slot run one after the other: the second sees it taken (MLink-103 proves
+  the race and translates the unique-index violation, the last guard).
+- **Gap found and closed:** `appointments.patient_id` references `patients`, a row only registration makes. A patient
+  made elsewhere (the Keycloak console, the realm's `patient.dev`) has none, and booking hit a 500. The service now
+  answers 403 `PATIENT_PROFILE_REQUIRED`. For the dev stack, `keycloak/dev/dev-practitioners.json` gets a demo patient,
+  **`patient.demo@medlink.local`** (fixed id `d0c70000-0000-4000-8000-000000000010`, group `/patients`, dev password),
+  and the dev seed its `users` and `patients` rows. Still dev only (`RealmImportSeparationTest`).
+- `AccessMatrixFunctionalTest`: one line, `POST /api/appointments` (anonymous 401, patient open, practitioner and staff
+  403). Postman folder 7: ten requests (earliest free slot; `patient.dev` → 403 `PATIENT_PROFILE_REQUIRED`; log in as
+  `patient.demo` → 201; the slot leaves the search; the same slot again → 409 `SLOT_TAKEN`).
+
+**Proof** (Ubuntu VM with Docker, then CI):
+- Red first (be498f4): `AppointmentBookingFunctionalTest` 10 tests, 8 failures (404, the route did not exist; the
+  anonymous 401 and the missing-CSRF 403 already held) and the access matrix.
+- Green (4bb50bc): the two classes, 83 tests, 0 failures.
+- Mutation check: without `slot.setStatus(SlotStatus.BOOKED)`, two tests turn red (`aPatientBooksAFreeSlotAndItLeavesTheSearch`:
+  the slot stays FREE; `aTakenSlotIsRefusedAndTheFirstBookingStays`: the unique index answers 500 instead of 409).
+- Demo patient: red first (34a3f36; its CI run was cancelled by the next push, so proved in the VM with the data of
+  4bb50bc: `RealmImportSeparationTest` and `DevSeedTest`, 2 failures, exactly the two new checks), green (6155802).
+- `./mvnw -B clean verify` **473 tests, 0 failures**; reverse order 473, 0 failures; CI on 6155802 green
+  (`build-test`, `dependency-check`).
+- `setup-dev --skip-tests` (0 warnings) then newman: **132 requests, 314 assertions, 0 failures**.
+
+## MLink-163 — the slot search form's lists, `GET /api/slots/filters` (2026-11-07, epic/MLink-8)
+
+Task 25.6 of MLink-25, added for the search page (MLink-101): the form offers lists (clinic, specialty,
+practitioner) instead of ids to type, and choosing a clinic shows only its practitioners.
+
+**Contract:** session required, PATIENT only. `GET /api/slots/filters` → 200
+`{ "clinics": [ { "id", "name", "city" } ], "specialties": [ { "id", "name" } ], "practitioners": [ { "id",
+"firstName", "lastName", "specialtyId", "clinicIds": [ ] } ] }`, each list in French order by name (practitioners by
+last name, then first name); 401 `UNAUTHENTICATED` without a session; 403 for a practitioner or staff. Of a
+practitioner, only what the form needs: never an email or a username.
+
+**Built:**
+- `SlotController.filters()` (`@GetMapping("/filters")`, `@PreAuthorize` PATIENT) → `SlotMapper.toFiltersResponse`
+  → `SlotFiltersResponse` (records `ClinicItem`, `SpecialtyItem`, `PractitionerItem`).
+- `SlotService.filters()` returns `SlotFilters` (entities, no DTO), sorted with a French `Collator` in Java: a few
+  dozen rows, and SQL ordering would depend on the database collation ("Pédiatrie" must come before
+  "Pneumologie", not after "Z").
+- `PractitionerRepository.findAllBy()` with `@EntityGraph({"specialty", "clinics"})`: every practitioner with
+  their specialty and clinics in one query, no N+1.
+- `AccessMatrixFunctionalTest`: one line, `GET /api/slots/filters` (anonymous 401, patient open, practitioner and
+  staff 403). Postman folder 7: one request on the dev seed (the three clinics and specialties, the cardiologist's
+  specialty and two clinics, no `@` in the body).
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (26a1a96, the tests alone): `SlotFiltersFunctionalTest` and the access matrix, 6 failures (404 instead
+  of 200 or 403, and a matrix line with no route).
+- Green (64ca169): both classes pass.
+- Mutation check: without the `@PreAuthorize` of `filters()`, `aPractitionerAndStaffAreRefused` turns red
+  (expected 403 but was 200).
+- `./mvnw -B clean verify` **458 tests, 0 failures**; reverse order 458, 0 failures.
+- `setup-dev` then newman (b8d75aa): **122 requests, 295 assertions, 0 failures**.
+
+## MLink-99 — slot search index, an answer in less than 2 seconds (2026-11-07, epic/MLink-8)
+
+Task 25.3 of MLink-25, its acceptance criterion: "the results show in less than 2 seconds".
+
+**Built:**
+- `V14__slot_search_index.sql`: `CREATE INDEX slots_free_by_start ON slots (starts_at, id) WHERE status = 'FREE'`.
+  Partial (free slots only) and in the search's own order (`ORDER BY starts_at, id`): the search reads the first
+  rows of the period and stops at the page, instead of reading the whole table and sorting it. No code change.
+- No index for the practitioner filter: `slots_practitioner_starts_at_unique (practitioner_id, starts_at)` (V13)
+  already serves it. No clinic or specialty index: a test with one clinic could not show it helps, so none without
+  proof (the ticket asked for them only "if the EXPLAIN shows it").
+- `SlotSearchIndexTest` (real PostgreSQL, Testcontainers): 50,000 slots (50 practitioners × 1,000 back-to-back
+  30-minute slots, every fifth booked), `ANALYZE`, then `EXPLAIN` of the search's SQL with no filter (the widest
+  search): the plan uses `slots_free_by_start` and holds no `Seq Scan on slots`.
+- `SlotSearchPerformanceFunctionalTest` (real API, real port, a patient logged in): the same 50,000 slots, in 2031
+  so no other test sees them, then `GET /api/slots` over 31 days with `size=50`: 200 in less than 2 seconds,
+  `total` 40,000, 50 items. The rows are deleted afterwards (`@AfterEach`).
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (e95aab9, the tests alone): `SlotSearchIndexTest` fails; the timing test is already green (50,000 rows
+  are little for PostgreSQL: it guards the criterion, the index test proves the index). The plan without the index:
+  ```
+  Limit  (cost=3046.61..3046.66 rows=20 width=920)
+    ->  Sort  (cost=3046.61..3146.85 rows=40097 width=920)
+          Sort Key: s.starts_at, s.id
+          ->  Hash Join  (cost=55.97..1979.64 rows=40097 width=920)
+                ...
+                                  ->  Seq Scan on slots s  (cost=0.00..1493.00 rows=40097 width=64)
+                                        Filter: ((starts_at >= '2031-03-03 08:00:00+00') AND (starts_at < '2031-04-03 08:00:00+00') AND ((status)::text = 'FREE'::text))
+  ```
+  every free slot of the month read, joined, then sorted, to keep 20.
+- Green (32fd3f1): both tests pass; the plan reads `slots_free_by_start`.
+- Mutation check: without the `CREATE INDEX` line, `SlotSearchIndexTest` turns red again (`Seq Scan on slots`).
+- `./mvnw -B clean verify` **450 tests, 0 failures**; reverse order 450, 0 failures.
+- `setup-dev --reset` then newman: **121 requests, 290 assertions, 0 failures**.
+
 ## MLink-100 — slot search input rules and "no result" message (2026-10-24, epic/MLink-8)
 
 Task 25.4 of MLink-25: wrong input to `GET /api/slots` is refused clearly, and an empty search says so.
@@ -356,6 +585,22 @@ Task 25.4 of MLink-25: wrong input to `GET /api/slots` is refused clearly, and a
 Nothing matches at all: 200 `{ "items": [], "total": 0, "message": "Aucun créneau disponible. Élargissez la
 recherche (dates, clinique ou spécialité)." }`; `message` is absent whenever something matches (and on a page past
 the last one, where `total` is not 0).
+
+**Code owner's review on PR #87 (2026-11-02): the role before the parameters.** Spring converted the typed
+parameters (`Instant`, `UUID`, `int`) before `@PreAuthorize` ran, so a practitioner sending `clinicId=abc` got this
+controller's 400 instead of the 403 of a patient-only endpoint (the "Limits" below). `SlotController.search` now
+takes every parameter as text and reads it itself, after the role check (`instant`, `uuid`, `integer`), with the same
+French messages; the local `MethodArgumentTypeMismatchException` handler is gone, and an unreadable value is now
+listed together with the other broken fields. A patient sees no change. New functional test
+`aPractitionerAndStaffAreRefusedEvenWithUnreadableParameters`: a practitioner and a staff member send `clinicId=abc`,
+`practitionerId=abc`, `from=demain`, `page=x`, `size=51` and no parameter at all, and get 403 every time. The same day
+`master` was merged (75 commits, conflict in this report only, both sides kept): Scalar replaces Swagger UI, which
+clears the SCA finding (DOMPurify) that blocked this PR. Proof:
+- red first (a31ac35): `SlotSearchFunctionalTest` 12 tests, 1 failure, `practitioner …&clinicId=abc`
+  expected 403 but was 400;
+- green (1eef08b): `./mvnw -B clean verify` **448 tests, 0 failures**; reverse order 448, 0 failures;
+- `setup-dev --reset` then newman: **121 requests, 290 assertions, 0 failures**;
+- CI on 1eef08b: every check green, `SCA-Dependency-Check` included; PR mergeable.
 
 **Built:**
 - `SlotController`: the rules, all collected before answering, so one call lists every broken field. The
@@ -381,8 +626,8 @@ the last one, where `total` is not 0).
 **Decisions** (also in the log below): the messages above; 31 days at most, exactly 31 accepted; pages of 1 to
 50, numbered from 0; the type-mismatch handler local to `SlotController`; the message only when nothing matches.
 
-**Limits:** an unreadable parameter is converted by Spring before `@PreAuthorize`: a practitioner sending
-`clinicId=abc` gets this 400, not 403 (a malformed request reveals nothing; a well-formed one still gets 403).
+**Limits:** ~~an unreadable parameter is converted by Spring before `@PreAuthorize`: a practitioner sending
+`clinicId=abc` gets this 400, not 403~~. Fixed on 2026-11-07 after the code owner's review (see above).
 
 ## MLink-98 — slot search, `GET /api/slots` (2026-10-23, epic/MLink-8)
 
