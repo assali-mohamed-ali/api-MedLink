@@ -86,6 +86,9 @@ public class SecurityConfig {
                         // @PreAuthorize as well.
                         .requestMatchers(HttpMethod.POST, "/api/appointments", "/api/appointments/**")
                         .hasRole(Roles.PATIENT)
+                        // Staff only, decided before any body is read: a patient sending a bad body gets 403, not 400
+                        .requestMatchers("/api/admin/**")
+                        .hasRole(Roles.ADMINISTRATIVE_STAFF)
                         .anyRequest()
                         .authenticated())
                 // Every logged-in call checks Keycloak still accepts the account (GitHub #28)
