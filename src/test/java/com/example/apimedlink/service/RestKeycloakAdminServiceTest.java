@@ -38,6 +38,7 @@ class RestKeycloakAdminServiceTest {
     static final String KC = "http://kc.test";
     static final String TOKEN_URL = KC + "/realms/medlink/protocol/openid-connect/token";
     static final String USERS = KC + "/admin/realms/medlink/users";
+    static final String GROUP_BY_PATH = KC + "/admin/realms/medlink/group-by-path/";
     static final UUID ID = UUID.fromString("09aa87e2-f034-4809-84ca-9e71ab5c4b11");
 
     MockRestServiceServer server;
@@ -253,5 +254,201 @@ class RestKeycloakAdminServiceTest {
                 .body("{\"error\":\"unauthorized_client\"}"));
 
         assertThatThrownBy(() -> service.getUser(ID)).isInstanceOf(KeycloakUnavailableException.class);
+    }
+
+    // ---- searchUsers (MLink-69) ---------------------------------------------------------------------
+
+    @Test
+    void searchUsersReadsTheTotalThePageAndEachUsersGroup() {
+        expectToken("t1", 300);
+        server.expect(requestTo(USERS + "/count?search=kar"))
+                .andExpect(method(HttpMethod.GET))
+                .andExpect(header("Authorization", "Bearer t1"))
+                .andRespond(withSuccess("3", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(USERS + "?search=kar&first=20&max=10&briefRepresentation=false"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        [{"id":"%s","username":"karim@example.com","email":"karim@example.com",
+                          "firstName":"Karim","lastName":"Mansour","enabled":true,"emailVerified":true}]
+                        """.formatted(ID), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(USERS + "/" + ID + "/groups"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("[{\"id\":\"g-pr\",\"path\":\"/practitioners\"}]", MediaType.APPLICATION_JSON));
+
+        KeycloakUserPage page = service.searchUsers("kar", 2, 10);
+
+        assertThat(page.total()).isEqualTo(3);
+        assertThat(page.items()).hasSize(1);
+        assertThat(page.items().get(0).user())
+                .isEqualTo(new KeycloakUser(ID, "karim@example.com", "Karim", "Mansour", true, true));
+        assertThat(page.items().get(0).groupPath()).isEqualTo("/practitioners");
+        server.verify();
+    }
+
+    @Test
+    void searchWithoutTextSendsNoSearchFilter() {
+        expectToken("t1", 300);
+        server.expect(requestTo(USERS + "/count")).andRespond(withSuccess("0", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(USERS + "?first=0&max=20&briefRepresentation=false"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        KeycloakUserPage page = service.searchUsers("   ", 0, 20);
+
+        assertThat(page.total()).isZero();
+        assertThat(page.items()).isEmpty();
+        server.verify();
+    }
+
+    @Test
+    void searchTextCannotAddAParameterToTheKeycloakUrl() {
+        expectToken("t1", 300);
+        // "&" and "=" are dropped, so the text stays one search value
+        server.expect(requestTo(USERS + "/count?search=karmax1000"))
+                .andRespond(withSuccess("0", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(USERS + "?search=karmax1000&first=0&max=20&briefRepresentation=false"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        service.searchUsers("kar&max=1000", 0, 20);
+
+        server.verify();
+    }
+
+    @Test
+    void aUserInNoGroupHasNoGroupPath() {
+        expectToken("t1", 300);
+        server.expect(requestTo(USERS + "/count")).andRespond(withSuccess("1", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(USERS + "?first=0&max=20&briefRepresentation=false"))
+                .andRespond(withSuccess("""
+                        [{"id":"%s","email":"a@b.c","firstName":"A","lastName":"B","enabled":true,"emailVerified":false}]
+                        """.formatted(ID), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(USERS + "/" + ID + "/groups"))
+                .andRespond(withSuccess("[]", MediaType.APPLICATION_JSON));
+
+        KeycloakUserPage page = service.searchUsers("", 0, 20);
+
+        assertThat(page.items()).hasSize(1);
+        assertThat(page.items().get(0).groupPath()).isNull();
+    }
+
+    @Test
+    void aSearchServerErrorIsIdentityUnavailable() {
+        expectToken("t1", 300);
+        server.expect(requestTo(USERS + "/count")).andRespond(withServerError());
+
+        assertThatThrownBy(() -> service.searchUsers("", 0, 20)).isInstanceOf(KeycloakUnavailableException.class);
+    }
+
+    // ---- moveToGroup (MLink-69) ---------------------------------------------------------------------
+
+    private void expectGroup(String path, String id) {
+        server.expect(requestTo(GROUP_BY_PATH + path))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("{\"id\":\"" + id + "\",\"path\":\"/" + path + "\"}", MediaType.APPLICATION_JSON));
+    }
+
+    private void expectGroupsOfUser(String json) {
+        server.expect(requestTo(USERS + "/" + ID + "/groups"))
+                .andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess(json, MediaType.APPLICATION_JSON));
+    }
+
+    @Test
+    void moveToGroupAddsTheNewGroupThenRemovesTheOldOne() {
+        expectToken("t1", 300);
+        expectGroup("practitioners", "g-pr");
+        expectGroupsOfUser("[{\"id\":\"g-staff\",\"path\":\"/administrative-staff\"}]");
+        // The server expects these in order: the new group is added first, so a failure never leaves no role
+        server.expect(requestTo(USERS + "/" + ID + "/groups/g-pr"))
+                .andExpect(method(HttpMethod.PUT))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+        server.expect(requestTo(USERS + "/" + ID + "/groups/g-staff"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+
+        service.moveToGroup(ID, "/practitioners");
+
+        server.verify();
+    }
+
+    @Test
+    void moveToGroupDoesNothingWhenTheUserIsAlreadyInTheGroup() {
+        expectToken("t1", 300);
+        expectGroup("practitioners", "g-pr");
+        expectGroupsOfUser("[{\"id\":\"g-pr\",\"path\":\"/practitioners\"}]");
+
+        service.moveToGroup(ID, "/practitioners"); // no PUT, no DELETE: any other request fails the test
+
+        server.verify();
+    }
+
+    @Test
+    void moveToGroupOfAnUnknownUserIsNotFound() {
+        expectToken("t1", 300);
+        expectGroup("practitioners", "g-pr");
+        server.expect(requestTo(USERS + "/" + ID + "/groups")).andRespond(withResourceNotFound());
+
+        assertThatThrownBy(() -> service.moveToGroup(ID, "/practitioners"))
+                .isInstanceOf(EntityNotFoundException.class);
+    }
+
+    @Test
+    void moveToAnUnknownGroupIsIdentityUnavailable() {
+        expectToken("t1", 300);
+        server.expect(requestTo(GROUP_BY_PATH + "nurses")).andRespond(withResourceNotFound());
+
+        assertThatThrownBy(() -> service.moveToGroup(ID, "/nurses"))
+                .isInstanceOf(KeycloakUnavailableException.class);
+    }
+
+    @Test
+    void aFailureAddingTheNewGroupLeavesTheOldGroupUntouched() {
+        expectToken("t1", 300);
+        expectGroup("practitioners", "g-pr");
+        expectGroupsOfUser("[{\"id\":\"g-staff\",\"path\":\"/administrative-staff\"}]");
+        server.expect(requestTo(USERS + "/" + ID + "/groups/g-pr"))
+                .andExpect(method(HttpMethod.PUT))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> service.moveToGroup(ID, "/practitioners"))
+                .isInstanceOf(KeycloakUnavailableException.class);
+
+        server.verify(); // no DELETE was sent: the user keeps their old role
+    }
+
+    @Test
+    void aFailureRemovingTheOldGroupKeepsBothGroupsSoLoginRefusesTheAccount() {
+        expectToken("t1", 300);
+        expectGroup("practitioners", "g-pr");
+        expectGroupsOfUser("[{\"id\":\"g-staff\",\"path\":\"/administrative-staff\"}]");
+        server.expect(requestTo(USERS + "/" + ID + "/groups/g-pr"))
+                .andExpect(method(HttpMethod.PUT))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+        server.expect(requestTo(USERS + "/" + ID + "/groups/g-staff"))
+                .andExpect(method(HttpMethod.DELETE))
+                .andRespond(withServerError());
+
+        assertThatThrownBy(() -> service.moveToGroup(ID, "/practitioners"))
+                .isInstanceOf(KeycloakUnavailableException.class);
+
+        server.verify(); // two roles at worst (login refuses it), never none; staff send the change again
+    }
+
+    @Test
+    void aUserInSeveralGroupsKeepsEveryGroupPath() {
+        expectToken("t1", 300);
+        server.expect(requestTo(USERS + "/count")).andRespond(withSuccess("1", MediaType.APPLICATION_JSON));
+        server.expect(requestTo(USERS + "?first=0&max=20&briefRepresentation=false"))
+                .andRespond(withSuccess("""
+                        [{"id":"%s","email":"a@b.c","firstName":"A","lastName":"B","enabled":true,"emailVerified":true}]
+                        """.formatted(ID), MediaType.APPLICATION_JSON));
+        server.expect(requestTo(USERS + "/" + ID + "/groups"))
+                .andRespond(withSuccess("""
+                        [{"id":"g-pr","path":"/practitioners"},{"id":"g-staff","path":"/administrative-staff"}]
+                        """, MediaType.APPLICATION_JSON));
+
+        KeycloakUserPage page = service.searchUsers("", 0, 20);
+
+        assertThat(page.items().get(0).groupPaths()).containsExactly("/practitioners", "/administrative-staff");
+        assertThat(page.items().get(0).groupPath()).as("no single group").isNull();
     }
 }
