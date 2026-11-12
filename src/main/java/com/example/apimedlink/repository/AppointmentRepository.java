@@ -4,6 +4,7 @@ import com.example.apimedlink.model.Appointment;
 import com.example.apimedlink.model.AppointmentStatus;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
@@ -47,6 +48,20 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
     @Modifying
     @Query("update Appointment a set a.reminderSentAt = :sentAt where a.id = :id and a.reminderSentAt is null")
     int markReminderSent(@Param("id") UUID id, @Param("sentAt") Instant sentAt);
+
+    boolean existsBySlot_IdAndStatus(UUID slotId, AppointmentStatus status);
+
+    /**
+     * The appointments with the given status on these slots, with their patient's names, in one query. The
+     * patient is joined on {@code patientId} (a plain column, not a relation) and only ids and names are read.
+     */
+    @Query("""
+            select new com.example.apimedlink.repository.BookedAppointment(
+                a.slot.id, a.id, p.id, p.firstName, p.lastName)
+            from Appointment a join Patient p on p.id = a.patientId
+            where a.slot.id in :slotIds and a.status = :status""")
+    List<BookedAppointment> findWithPatient(
+            @Param("slotIds") Collection<UUID> slotIds, @Param("status") AppointmentStatus status);
 
     /**
      * Whether the patient is attached to the practitioner (MLink-31): a {@code BOOKED} appointment on one of the
