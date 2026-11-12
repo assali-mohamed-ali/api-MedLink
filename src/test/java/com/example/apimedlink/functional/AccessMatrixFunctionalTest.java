@@ -63,7 +63,9 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             // MLink-106: only the holder; {id} is someone else's (a random one), so even a patient gets 403
             new Rule("POST",   "/api/appointments/{id}/cancel", L, F, F, F),
             // MLink-107: a patient's empty body is refused first (400, it tells nothing about {id}); others get 403
-            new Rule("POST",   "/api/appointments/{id}/reschedule", L, O, F, F));
+            new Rule("POST",   "/api/appointments/{id}/reschedule", L, O, F, F),
+            // MLink-31: a random id is nobody's attached patient, so a practitioner gets 403 too
+            new Rule("GET",    "/api/patients/{id}/record",     L, F, F, F));
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")
