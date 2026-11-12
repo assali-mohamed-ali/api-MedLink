@@ -59,6 +59,12 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/slots",                    L, O, F, F), // MLink-98: patients search slots
             new Rule("GET",    "/api/slots/filters",            L, O, F, F), // MLink-163: the search form's lists
             new Rule("POST",   "/api/appointments",             L, O, F, F), // MLink-102: patients book a slot
+            // MLink-26: the practitioner's agenda. The matrix practitioner (practitioner.dev) has no practitioner
+            // profile and sends no dates or an empty body: a 4xx that is not 403 is "open" here. {id} is a random
+            // UUID that is nobody's slot: refused (403) even for a practitioner, like /api/users/{id}.
+            new Rule("GET",    "/api/practitioner/agenda",      L, F, O, F),
+            new Rule("POST",   "/api/practitioner/slots",       L, F, O, F),
+            new Rule("PATCH",  "/api/practitioner/slots/{id}",  L, F, F, F),
             // MLink-31: a random id is nobody's attached patient, so a practitioner gets 403 too
             new Rule("GET",    "/api/patients/{id}/record",     L, F, F, F));
 
