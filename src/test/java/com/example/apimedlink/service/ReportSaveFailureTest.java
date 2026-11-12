@@ -3,11 +3,15 @@ package com.example.apimedlink.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doThrow;
 
 import com.example.apimedlink.TestcontainersConfiguration;
 import com.example.apimedlink.exception.ApiException;
+import com.example.apimedlink.model.AuditAction;
+import com.example.apimedlink.model.AuditEntry;
 import com.example.apimedlink.model.ConsultationReport;
+import com.example.apimedlink.repository.AuditEntryRepository;
 import com.example.apimedlink.repository.ConsultationReportRepository;
 import java.sql.Date;
 import java.sql.Timestamp;
@@ -41,6 +45,9 @@ class ReportSaveFailureTest {
     @MockitoSpyBean
     ConsultationReportRepository reports;
 
+    @MockitoSpyBean
+    AuditEntryRepository entries;
+
     @Test
     void aSaveThatFailsAnswersReportSaveFailedAndLeavesNoRow() {
         UUID pro = practitioner();
@@ -54,6 +61,21 @@ class ReportSaveFailureTest {
                     assertThat(error.getCode()).isEqualTo("REPORT_SAVE_FAILED");
                     assertThat(error.getMessage()).contains("n'a pas pu être enregistré").doesNotContain("database");
                 });
+
+        assertThat(jdbc.queryForObject("select count(*) from consultation_reports where patient_id = ?", Integer.class, patient))
+                .isZero();
+    }
+
+    /** 32.4: the report and its REPORT_CREATED row are one unit: if the row cannot be written, no report is kept. */
+    @Test
+    void aReportWhoseAuditCannotBeWrittenIsNotKept() {
+        UUID pro = practitioner();
+        UUID patient = patientAttachedTo(pro);
+        doThrow(new DataAccessResourceFailureException("audit store unavailable"))
+                .when(entries).save(argThat((AuditEntry entry) -> entry != null && entry.getAction() == AuditAction.REPORT_CREATED));
+
+        assertThatThrownBy(() -> service.create(pro, patient, "Compte-rendu sans trace possible."))
+                .isInstanceOfSatisfying(ApiException.class, error -> assertThat(error.getCode()).isEqualTo("REPORT_SAVE_FAILED"));
 
         assertThat(jdbc.queryForObject("select count(*) from consultation_reports where patient_id = ?", Integer.class, patient))
                 .isZero();

@@ -159,6 +159,58 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
     }
 
     @SuppressWarnings("unchecked")
+    // ---- 32.4: every write and every read is traced, ids only ----
+
+    @Test
+    void everyWriteAddsOneReportCreatedEntryWithTheIdsOnly() throws Exception {
+        Pro pro = practitioner();
+        UUID patient = insertPatient();
+        appointment(pro.id(), patient, "BOOKED");
+
+        String id = (String) Browser.json(pro.browser().postJson(reports(patient), json(TEXT))).get("id");
+
+        List<Map<String, Object>> rows = jdbc.queryForList("select user_id, resource_type, resource_id, outcome "
+                + "from audit_entries where action = 'REPORT_CREATED' and user_id = ?", pro.id());
+        assertThat(rows).containsExactly(Map.of("user_id", pro.id(), "resource_type", "CONSULTATION_REPORT",
+                "resource_id", id, "outcome", "SUCCESS"));
+        // Ids only: never the text
+        assertThat(jdbc.queryForObject("select count(*) from audit_entries where resource_id like '%Douleur%'", Integer.class))
+                .isZero();
+    }
+
+    @Test
+    void everyReadAddsOneReportViewedEntryForThePatient() throws Exception {
+        Pro pro = practitioner();
+        UUID patient = insertPatient();
+        appointment(pro.id(), patient, "BOOKED");
+
+        assertThat(pro.browser().call(reports(patient)).statusCode()).isEqualTo(200);
+        assertThat(pro.browser().call(reports(patient)).statusCode()).isEqualTo(200);
+
+        List<Map<String, Object>> rows = jdbc.queryForList("select resource_type, resource_id, outcome from audit_entries "
+                + "where action = 'REPORT_VIEWED' and user_id = ?", pro.id());
+        assertThat(rows).hasSize(2).allSatisfy(row -> assertThat(row).isEqualTo(Map.of(
+                "resource_type", "PATIENT_REPORTS", "resource_id", patient.toString(), "outcome", "SUCCESS")));
+    }
+
+    @Test
+    void aRefusedOrInvalidCallIsNeverTracedAsAWriteOrARead() throws Exception {
+        Pro attached = practitioner();
+        Pro other = practitioner();
+        UUID patient = insertPatient();
+        appointment(attached.id(), patient, "BOOKED");
+
+        other.browser().postJson(reports(patient), json(TEXT));
+        other.browser().call(reports(patient));
+        attached.browser().postJson(reports(patient), json("   "));
+
+        assertThat(jdbc.queryForObject("select count(*) from audit_entries where action in ('REPORT_CREATED', 'REPORT_VIEWED') "
+                + "and user_id in (?, ?)", Integer.class, attached.id(), other.id())).isZero();
+        // The refusals are traced as such
+        assertThat(jdbc.queryForObject("select count(*) from audit_entries where action = 'ACCESS_DENIED' and user_id = ?",
+                Integer.class, other.id())).isEqualTo(2);
+    }
+
     private List<Object> list(HttpResponse<String> response) {
         return mapper.readValue(response.body(), List.class);
     }
