@@ -1,5 +1,6 @@
 package com.example.apimedlink.controller;
 
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
@@ -8,6 +9,7 @@ import static org.mockito.Mockito.when;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.csrf;
 import static org.springframework.security.test.web.servlet.request.SecurityMockMvcRequestPostProcessors.user;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.put;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -34,7 +36,7 @@ import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
 import org.springframework.test.web.servlet.request.MockHttpServletRequestBuilder;
 
-/** Endpoints 12, 13 and 15 (MLink-69), written from the contract. Real database; Keycloak is a mock. */
+/** Endpoints 12, 13, 15 and 16 (MLink-69, MLink-70), written from the contract. Real database; Keycloak is a mock. */
 @SpringBootTest
 @AutoConfigureMockMvc
 @Import(TestcontainersConfiguration.class)
@@ -59,6 +61,11 @@ class AdminUserControllerTest {
 
     private ResultActions asStaff(MockHttpServletRequestBuilder request) throws Exception {
         return mvc.perform(request.with(user("staff").roles(Roles.ADMINISTRATIVE_STAFF)).with(csrf()));
+    }
+
+    /** Staff whose name is their Keycloak id, as in a real session (CurrentUser reads it as a UUID). */
+    private ResultActions asStaffWithId(UUID staffId, MockHttpServletRequestBuilder request) throws Exception {
+        return mvc.perform(request.with(user(staffId.toString()).roles(Roles.ADMINISTRATIVE_STAFF)).with(csrf()));
     }
 
     private static String createBody(String email, String role) {
@@ -167,6 +174,50 @@ class AdminUserControllerTest {
                 .content("{\"role\":\"PATIENT\"}"))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.details.role").isNotEmpty());
+    }
+
+    @Test
+    void disablingAnAccountIsNoContentAndEndsItsSessions() throws Exception {
+        asStaffWithId(UUID.randomUUID(), patch("/api/admin/users/" + keycloakId + "/status")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isNoContent());
+
+        verify(keycloak).setEnabled(keycloakId, false);
+        verify(keycloak).endSessions(keycloakId);
+    }
+
+    @Test
+    void enablingAnAccountIsNoContent() throws Exception {
+        asStaffWithId(UUID.randomUUID(), patch("/api/admin/users/" + keycloakId + "/status")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":true}"))
+                .andExpect(status().isNoContent());
+
+        verify(keycloak).setEnabled(keycloakId, true);
+    }
+
+    @Test
+    void staffDisablingThemselvesIsAConflict() throws Exception {
+        asStaffWithId(keycloakId, patch("/api/admin/users/" + keycloakId + "/status")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.code").value("CANNOT_DISABLE_SELF"));
+    }
+
+    @Test
+    void aStatusChangeOfAnUnknownUserIsNotFound() throws Exception {
+        doThrow(new EntityNotFoundException("unknown")).when(keycloak).setEnabled(eq(keycloakId), anyBoolean());
+
+        asStaffWithId(UUID.randomUUID(), patch("/api/admin/users/" + keycloakId + "/status")
+                .contentType(MediaType.APPLICATION_JSON).content("{\"enabled\":false}"))
+                .andExpect(status().isNotFound());
+    }
+
+    @Test
+    void aStatusChangeWithoutAnEnabledFlagIsRefused() throws Exception {
+        asStaffWithId(UUID.randomUUID(), patch("/api/admin/users/" + keycloakId + "/status")
+                .contentType(MediaType.APPLICATION_JSON).content("{}"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.details.enabled").isNotEmpty());
     }
 
     @Test
