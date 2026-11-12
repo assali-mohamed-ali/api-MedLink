@@ -48,6 +48,33 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-08:** MLink-111 on `epic/MLink-8`: a failed reminder is tried 3 times then logged (id only) and left for the
+next run; one reminder only. New property `app.appointments.reminder-retry-backoff`. See the MLink-111 section.
+
+**2026-11-08:** MLink-110 on `epic/MLink-8`: a **scheduled job** mails a reminder 24 hours before a booked appointment
+(H-02 = `app.appointments.reminder-hours-before`). No route, no migration. See the MLink-110 section.
+
+**2026-11-08:** MLink-107 on `epic/MLink-8`: **new route `POST /api/appointments/{id}/reschedule`** (move to another
+slot, all or nothing); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-107 section.
+
+**2026-11-08:** MLink-106 on `epic/MLink-8`: **new route `POST /api/appointments/{id}/cancel`** (the holder cancels up
+to 12 hours before, H-03 = `app.appointments.cancel-deadline-hours`); one new line in `AccessMatrixFunctionalTest`;
+**`SecurityConfig`** (shared): every POST under `/api/appointments` is PATIENT-only in the filter chain. No migration.
+`QrCodesTest` (MLink-62/63) errored once in the reverse order and passed on reruns: reported as flaky. See the
+MLink-106 section.
+
+**2026-11-08:** MLink-108 on `epic/MLink-8`: **new route `GET /api/appointments/me`** (a patient's own appointments,
+latest first, cancelled included); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-108 section.
+
+**2026-11-08:** MLink-104 on `epic/MLink-8`: every booking writes one audit line (`APPOINTMENT_BOOKED`, SUCCESS,
+ids only). `AuditAction` and `AuditOutcome` gain a value each (`SUCCESS` is also added by MLink-114 and epic MLink-9).
+No migration, no new route. See the MLink-104 section.
+
+**2026-11-08:** PR #87 (epic MLink-8, first batch: MLink-97, 98, 99, 100, 163, 102, 103) **merged into `master`**
+(f71c577). `epic/MLink-8` goes on for the rest of the epic. Post-merge review fix on it: **`SecurityConfig`** (shared)
+makes `POST /api/appointments` PATIENT-only in the filter chain, so a malformed body from a non-patient is 403, not
+400. See the MLink-102 section.
+
 **2026-11-12:** MLink-26, code owner's second review on #116: a slot change and its audit row are now one unit. The slot was committed before its audit row (written in its own `REQUIRES_NEW` transaction), so a failed audit could answer 500 after a kept change, with no trace. `AuditService.recordWithin` (new, `MANDATORY`) writes the row in the change's transaction; `AgendaService` calls it for an opening, a closing and a reopening, and the controller no longer audits. If the row cannot be written, the change rolls back. `AuditService.record` (own transaction) is unchanged for refusals. New test `AgendaAuditAtomicityTest` (audit repository made to fail). Shared file: `AuditService` (one method added). No migration, no new route.
 
 **2026-11-10:** MLink-26, code owner's review on #116: `SecurityConfig` gains a role rule for `/api/practitioner/**` (the role is checked before Spring converts dates and JSON: 403, never 400, for a patient). Shared file: no other route changes. Also fixed: two overlapping slot openings at once could end in a 500 (Postgres deadlock), now 409. No migration, no new route.
@@ -458,6 +485,176 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
 
+## MLink-111 — one reminder only, retried and logged on failure (2026-11-08, epic/MLink-8)
+
+Task 36.2 of MLink-36: "un échec d'envoi est réessayé et consigné", and never two reminders.
+
+**Built** (in `AppointmentReminderJob`, no new dependency):
+- A failed mail (`MailException`) is tried 3 times in the run, waiting `app.appointments.reminder-retry-backoff` (2 s),
+  then twice that. After the third failure: one `WARN` line with the appointment id only (never the address, the
+  practitioner or the clinic), `reminder_sent_at` stays empty, and the next run (15 minutes later) tries again.
+- `reminder_sent_at` is set only after a sent mail (MLink-110), and the job's query skips rows where it is set: two runs
+  send one mail. If the application stops during a wait, the reminder is left for the next start.
+
+**Proof:**
+- `AppointmentReminderFunctionalTest.theJobRunningTwiceSendsOneReminderOnly` (Mailpit): two runs, one mail,
+  `reminder_sent_at` unchanged by the second.
+- `AppointmentReminderJobTest` (unit, mocked mail server, the outage a functional test cannot cause on demand): down →
+  3 attempts, the failure logged without the address, `markReminderSent` never called; server back → the next run sends
+  and marks it; one failure then success → sent at the second attempt.
+- Red first (the tests alone): they do not compile without the backoff in the job's constructor.
+- Mutation check (the ticket's): with `reminder_sent_at` set before sending, the outage test and the "server back" test
+  turn red (3 tests, 2 failures).
+- `./mvnw -B verify` **519 tests, 0 failures**; reverse order 519, 0 failures. Postman: no endpoint changed.
+
+## MLink-110 — reminder mail before an appointment, scheduled job (2026-11-08, epic/MLink-8)
+
+Task 36.1 of MLink-36: a patient gets a reminder before their appointment.
+
+**Rule:** every 15 minutes (`app.appointments.reminder-interval`), each `BOOKED` appointment that starts within the next
+H-02 hours (`app.appointments.reminder-hours-before=24`, UTC, the shared `Clock`) and has no `reminder_sent_at` gets one
+mail. A cancelled appointment, or one further away, gets none. No new route, no migration (`reminder_sent_at` is in V13).
+
+**Built:**
+- `AppointmentReminderJob.sendDueReminders()` (`@Scheduled`, first run one interval after start so a restart never sends
+  a burst; `synchronized` so two runs never overlap): `AppointmentRepository.findRemindersDue` (slot, clinic and
+  practitioner in one query), the holders' `patients` rows in one `findAllById`, the mail, then
+  `markReminderSent` (only when still empty). A failed mail (`MailException`) is logged with the appointment id only and
+  `reminder_sent_at` stays empty: the next run tries again. Retries with backoff are MLink-111.
+- `MailService.sendAppointmentReminder(to, firstName, clinic, practitioner, startsAt)`: French, text + HTML, subject
+  "Rappel de votre rendez-vous MedLink"; date and time in Tunisia's time (`Africa/Tunis`), practitioner, clinic, and a
+  link to "Mes rendez-vous" to cancel or move it. No medical detail.
+- `@EnableScheduling` was already on `config/RateLimitConfig` (MLink-112): no configuration file changed.
+- One API instance today; several would need a lock on the job (out of this task).
+
+**Proof** (Ubuntu VM with Docker): `AppointmentReminderFunctionalTest`, 3 tests calling the job directly, mails read in
+Mailpit: booked within 24 h → one mail with date, time, practitioner and clinic, `reminder_sent_at` set; cancelled → no
+mail; 30 h away → no mail.
+- Red first (a90a02e, the test alone): it does not compile without the job.
+- Mutation check (the ticket's): without the `BOOKED` filter, `aCancelledAppointmentGetsNoReminder` turns red (3 tests,
+  1 failure). Green (e93f2dc): 3 tests, 0 failures.
+- `./mvnw -B verify` **515 tests, 0 failures**; reverse order 515, 0 failures.
+- Postman: no endpoint changed.
+
+## MLink-107 — move an appointment, `POST /api/appointments/{id}/reschedule` (2026-11-08, epic/MLink-8)
+
+Task 28.2 of MLink-28: a patient moves their appointment to another free slot, without losing it if that slot is taken.
+
+**Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments/{id}/reschedule { "newSlotId" }`
+→ 200, the new appointment (MLink-102's body). 400 `VALIDATION_FAILED` (`newSlotId` missing: "Le nouveau créneau est
+obligatoire.", not a UUID: "Identifiant invalide.") · 401 · 403 `FORBIDDEN` (MLink-106's cases: someone else's, unknown
+or unreadable `{id}`, a non-patient, no CSRF header) · 404 unknown new slot · 409 `SLOT_TAKEN` · 409
+`APPOINTMENT_CANCELLED` "Ce rendez-vous est annulé : réservez un nouveau créneau." (not in the ticket: a cancelled
+appointment has nothing to move) · 422 `CANCEL_DEADLINE_PASSED` (H-03 on the current appointment).
+
+**Built:**
+- `AppointmentService.reschedule`, one transaction: the appointment locked (unknown → the shared 403),
+  `OwnershipGuard`, a cancelled one → 409; both slots locked in one order, lower id first, so two crossed moves never
+  wait on each other (no deadlock); H-03 on the old slot; the old appointment is cancelled and its slot freed, then the
+  new slot is booked (`bookLocked`, shared with `book`: FREE and not started, or 409; the unique index as last guard).
+  Any refusal after the first change rolls the whole move back: the patient keeps the appointment they had.
+- `AppointmentController.reschedule`: `{id}` read as for a cancel (unreadable → 403), then `newSlotId` (400). For a
+  patient the body is checked before the appointment, which tells nothing about `{id}`: hence the access matrix line
+  `POST /api/appointments/{id}/reschedule` (anonymous 401, patient past security with its 400, practitioner and staff
+  403 from the filter chain). Path and body ids are read by two shared helpers (`appointmentId`, `slotId`).
+- Postman folder 7: book a slot two days ahead, move it to the next one (200), my appointments shows the old one
+  CANCELLED and the new one BOOKED, moving the cancelled one → 409 `APPOINTMENT_CANCELLED`.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (the tests alone; checked with the code of the commit before): `RescheduleAppointmentFunctionalTest` 9 tests,
+  6 failures.
+- Green (a1fadb7): with the access matrix, 94 tests, 0 failures.
+- Mutation check (the ticket's): without `@Transactional` on `reschedule`, 6 tests turn red, among them
+  `whenTheNewSlotIsTakenTheOldAppointmentIsKeptAsItWas`.
+- `./mvnw -B clean verify` **512 tests, 0 failures**; reverse order 512, 0 failures.
+- `setup-dev --skip-tests` then newman: **146 requests, 341 assertions, 0 failures**.
+
+## MLink-106 — cancel an appointment, `POST /api/appointments/{id}/cancel` (2026-11-08, epic/MLink-8)
+
+Task 28.1 of MLink-28: a patient cancels their own appointment, within the allowed time.
+
+**Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments/{id}/cancel` → 204. 401
+`UNAUTHENTICATED` · 403 `FORBIDDEN`, one answer for someone else's appointment, an unknown id, an unreadable id, a
+non-patient or a missing CSRF header (never tell whether an appointment exists) · 422 `CANCEL_DEADLINE_PASSED` "Ce
+rendez-vous ne peut plus être annulé moins de 12 heures avant son début." An already cancelled appointment: 204, nothing
+changes.
+
+**Built:**
+- `AppointmentController.cancel` (`@PostMapping("/{id}/cancel")`, `@PreAuthorize` PATIENT, so administrative staff,
+  whom `OwnershipGuard` lets through, cannot cancel here: the story says the holder only). `{id}` is text; an
+  unreadable one is refused with the same 403 as an unknown one.
+- `AppointmentService.cancel`, one transaction: `AppointmentRepository.findForChangeById` locks the appointment (an
+  unknown id → `AccessDeniedException`, the shared 403), `OwnershipGuard.check(patientId)`, a CANCELLED appointment is
+  left as it is (even if its slot has been booked again since), then the slot is locked (`findForBookingById`, as for
+  a booking); less than the H-03 deadline before the start → 422; otherwise the appointment becomes CANCELLED with
+  `cancelled_at` and the slot FREE.
+- H-03 is `app.appointments.cancel-deadline-hours=12` (`application.properties`), computed on the server in UTC.
+- `SecurityConfig` (shared): the PATIENT rule of the filter chain now covers `POST /api/appointments` and
+  `/api/appointments/**`, so a path or body Spring cannot read never gives a non-patient anything but 403.
+- `AccessMatrixFunctionalTest`: one line, `POST /api/appointments/{id}/cancel` (anonymous 401, and 403 for every role:
+  `{id}` is a random id, someone else's). Postman folder 7: book a slot two days ahead, cancel it (204), it shows
+  CANCELLED in my appointments, the slot is offered again, cancel again (204), an unknown id (403).
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (the tests alone; checked with the code of the commit before): `CancelAppointmentFunctionalTest` 7 tests,
+  5 failures (the route did not exist; anonymous 401 and the missing-CSRF 403 already held).
+- Green (596fb4f): with the access matrix, 88 tests, 0 failures.
+- Mutation check (the ticket's): without `ownership.check`, `anotherPatientAnUnknownIdAndAnUnreadableIdGetTheSame403…`
+  turns red.
+- `./mvnw -B clean verify` **499 tests, 0 failures**. Reverse order: once `QrCodesTest.scanningTheQrCodeGivesBackTheUrl`
+  errored (ZXing `NotFoundException`, MLink-62/63, not touched here); it passed three times alone, and the reverse
+  order run again gave **499, 0 failures**: a flaky decoding test, reported on its ticket.
+- `setup-dev --skip-tests` then newman: **141 requests, 331 assertions, 0 failures**.
+
+## MLink-108 — my appointments, `GET /api/appointments/me` (2026-11-08, epic/MLink-8)
+
+Task 28.3 of MLink-28: a patient sees their own appointments, to cancel or reschedule them (28.1, 28.2, 28.4).
+
+**Contract:** session required, PATIENT only. `GET /api/appointments/me?page=0&size=20` → 200 `{ "items": [ { "id",
+"status", "clinic": { "id", "name" }, "practitioner": { "id", "firstName", "lastName" }, "startsAt", "endsAt" } ],
+"total" }`, latest first (`startsAt` descending, then id), cancelled appointments included. 400 `VALIDATION_FAILED`
+for `page` below 0 or `size` outside 1–50 (the slot search's messages) · 401 · 403 for a non-patient. No id in the URL:
+always the caller's appointments.
+
+**Built:**
+- `AppointmentController.mine` (`@GetMapping("/me")`, `@PreAuthorize` PATIENT): `page` and `size` arrive as text and
+  are read after the role check (a non-patient gets 403 even with `size=abc`); the patient is `currentUser.id()`.
+- `AppointmentService.mine` → `AppointmentRepository.findByPatientId` with `@EntityGraph({"slot", "slot.clinic",
+  "slot.practitioner"})` (one query, no N+1), sorted by `slot.startsAt` then id, descending. `AppointmentMapper` →
+  `AppointmentPageResponse` (items are MLink-102's `AppointmentDto`). A patient without a profile simply has none.
+- `AccessMatrixFunctionalTest`: one line, `GET /api/appointments/me` (anonymous 401, patient open, practitioner and
+  staff 403). Postman folder 7: the 201 booking keeps the appointment id; a new request checks the demo patient's list
+  holds it, latest first.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (dcd1b27; checked with the code of the commit before): `MyAppointmentsFunctionalTest` 6 tests, 4 failures
+  and 1 error (the route did not exist; the anonymous 401 already held). Tests: patient A sees only A's, never B's,
+  latest first, the cancelled one included; paging and `total`; an empty list; `size=51` and `page=-1` → 400;
+  anonymous 401; practitioner and staff 403.
+- Green (12596de): with the access matrix, 83 tests, 0 failures.
+- `./mvnw -B clean verify` **488 tests, 0 failures**; reverse order 488, 0 failures.
+- `setup-dev --skip-tests` then newman: **133 requests, 319 assertions, 0 failures**.
+
+## MLink-104 — every booking in the audit trail (2026-11-08, epic/MLink-8)
+
+Task 27.3 of MLink-27: each booking leaves a trace in the shared audit trail (MLink-59).
+
+**Built:**
+- `AuditAction.APPOINTMENT_BOOKED` and `AuditOutcome.SUCCESS` (MLink-114 and epic MLink-9 add `SUCCESS` on their
+  branches too: a one-line conflict to keep once when the branches meet).
+- `AppointmentController.book` calls `AuditService.record(APPOINTMENT_BOOKED, "APPOINTMENT", <appointment id>, SUCCESS)`
+  once `AppointmentService.book` has returned, so the booking is committed: a refused (409, 404, 403) or rolled-back
+  booking writes no SUCCESS. The line holds ids only: the caller (from the session, in `AuditService`), the appointment
+  id and the client IP; never a name or a medical detail.
+- `AppointmentAuditFunctionalTest` (real API): a booking writes exactly one `APPOINTMENT_BOOKED` line with the
+  caller, `APPOINTMENT`, the appointment id, SUCCESS and an IP; a booking refused with 409 writes no SUCCESS line.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (94941ad, the tests alone; checked with the code of the commit before): 2 tests, 1 failure, the
+  one-line test (no audit line). The refused-booking test already held: without an audit call there is no SUCCESS.
+- Green (49e2d73); `./mvnw -B clean verify` **478 tests, 0 failures**; reverse order 478, 0 failures. No endpoint
+  changed.
+
 ## MLink-103 — one booking per slot under concurrency, 409 `SLOT_TAKEN` (2026-11-07, epic/MLink-8)
 
 Task 27.2 of MLink-27, its acceptance criterion: "if two patients choose the same slot, one appointment is made and the
@@ -486,6 +683,15 @@ other is told".
 ## MLink-102 — book an appointment, `POST /api/appointments` (2026-11-07, epic/MLink-8)
 
 Task 27.1 of MLink-27: a patient books a free slot online and sees the confirmation.
+
+**Code owner's post-merge review on #87 (2026-11-08): the role before the body.** Reading `slotId` as text after the
+role check (below) is not enough: a body Spring cannot parse at all (`{"slotId":`, `not json`, `[]`) failed during the
+`@RequestBody` conversion, before the method-level `@PreAuthorize`, so a practitioner or staff member got the parsing's
+400 instead of 403. `SecurityConfig` (shared file) now makes `POST /api/appointments` PATIENT-only in the filter chain,
+before the body is read; the method keeps its `@PreAuthorize`. New test
+`aPractitionerAndStaffAreRefusedEvenWithMalformedJson`. Proof: red first (c785ea4; with the previous `SecurityConfig`,
+1 failure, expected 403 but was 400, which is also the mutation check), green (137f7f8); `./mvnw -B clean verify`
+**476 tests, 0 failures**, reverse order 476, 0 failures.
 
 **Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments { "slotId" }` → 201
 `{ "id", "status": "BOOKED", "clinic": { "id", "name" }, "practitioner": { "id", "firstName", "lastName" },

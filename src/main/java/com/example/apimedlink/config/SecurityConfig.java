@@ -81,6 +81,11 @@ public class SecurityConfig {
                                 "/api/auth/mfa/setup",
                                 "/api/auth/mfa/verify")
                         .permitAll()
+                        // Patients only, checked before the body is read: a body Spring cannot parse would otherwise
+                        // give a non-patient the 400 of the parsing, not 403 (review on #87). The method keeps its
+                        // @PreAuthorize as well.
+                        .requestMatchers(HttpMethod.POST, "/api/appointments", "/api/appointments/**")
+                        .hasRole(Roles.PATIENT)
                         // The role before anything reads the request: Spring converts query dates and the JSON body before
                         // @PreAuthorize, so without this rule a patient would get 400, not 403 (MLink-26, review on #116)
                         .requestMatchers("/api/practitioner/**")
