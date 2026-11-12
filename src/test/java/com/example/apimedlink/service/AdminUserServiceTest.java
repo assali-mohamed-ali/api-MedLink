@@ -28,6 +28,9 @@ import com.example.apimedlink.repository.PractitionerRepository;
 import com.example.apimedlink.exception.KeycloakUnavailableException;
 import java.time.LocalDate;
 import jakarta.persistence.EntityNotFoundException;
+import jakarta.mail.Session;
+import jakarta.mail.internet.MimeMessage;
+import org.springframework.mail.javamail.JavaMailSender;
 import java.util.Set;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -72,6 +75,9 @@ class AdminUserServiceTest {
     @MockitoBean
     KeycloakAdminService keycloak;
 
+    @MockitoBean
+    JavaMailSender mailSender;
+
     UUID keycloakId;
     String email;
     UUID specialtyId;
@@ -85,6 +91,7 @@ class AdminUserServiceTest {
                 .thenReturn(keycloakId);
         specialtyId = specialties.save(new Specialty("Spec-" + keycloakId)).getId();
         clinicId = clinics.save(new Clinic("Clinic-" + keycloakId, "Sousse")).getId();
+        when(mailSender.createMimeMessage()).thenAnswer(i -> new MimeMessage((Session) null));
     }
 
     private void accountOf(UUID id, String mail) {
