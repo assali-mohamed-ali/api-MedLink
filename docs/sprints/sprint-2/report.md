@@ -13,6 +13,8 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-12:** MLink-37 37.1 (`feat/MLink-37-cancellation-alerts`): `V17__alerts.sql`, the practitioner's alerts, kept until read (H-06: an offline practitioner finds them at the next login). Columns of the ticket; `practitioner_id` references `practitioners` (= `users.id`, stricter than `users`: only a practitioner gets an alert); `type` checked (`APPOINTMENT_CANCELLED`); one alert per (type, appointment), so a cancellation processed twice gives one alert (37.2); partial index for the unread list. Entity `Alert`, `AlertType`, `AlertRepository` (unread newest first, own alert by id, already alerted). **V17 because V15 (#116, agenda) and V16 (MLink-32, reports) come first: this branch merges after both.**
+
 **2026-11-10:** MLink-31 (`feat/MLink-31-patient-record`): `GET /api/patients/{id}/record` for the practitioners the patient is attached to (a `BOOKED` appointment). No migration. **One new line in `AccessMatrixFunctionalTest`**, one new rule in `SecurityConfig`. See the MLink-31 section.
 
 **2026-10-31, updated 2026-11-08:** MLink-65 (sub-sprint 3 part, `feat/ss3-setup-staff-code-check`): both setup
