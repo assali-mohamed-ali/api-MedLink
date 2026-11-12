@@ -64,7 +64,9 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             // UUID that is nobody's slot: refused (403) even for a practitioner, like /api/users/{id}.
             new Rule("GET",    "/api/practitioner/agenda",      L, F, O, F),
             new Rule("POST",   "/api/practitioner/slots",       L, F, O, F),
-            new Rule("PATCH",  "/api/practitioner/slots/{id}",  L, F, F, F));
+            new Rule("PATCH",  "/api/practitioner/slots/{id}",  L, F, F, F),
+            // MLink-31: a random id is nobody's attached patient, so a practitioner gets 403 too
+            new Rule("GET",    "/api/patients/{id}/record",     L, F, F, F));
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")

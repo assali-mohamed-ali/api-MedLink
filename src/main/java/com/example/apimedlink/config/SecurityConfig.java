@@ -85,6 +85,9 @@ public class SecurityConfig {
                         // @PreAuthorize, so without this rule a patient would get 400, not 403 (MLink-26, review on #116)
                         .requestMatchers("/api/practitioner/**")
                         .hasRole(Roles.PRACTITIONER)
+                        // The role before Spring reads the request, so a patient never gets a 400 (MLink-31, as #116)
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/record")
+                        .hasRole(Roles.PRACTITIONER)
                         // Staff only, decided before any body is read: a patient sending a bad body gets 403, not 400
                         .requestMatchers("/api/admin/**")
                         .hasRole(Roles.ADMINISTRATIVE_STAFF)

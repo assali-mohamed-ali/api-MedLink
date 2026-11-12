@@ -7,5 +7,7 @@ package com.example.apimedlink.model;
 public enum AuditAction {
     ACCESS_DENIED,
     SLOT_OPENED,
-    SLOT_CLOSED
+    SLOT_CLOSED,
+    /** A practitioner read a patient's record (MLink-31): ids only, never medical content. */
+    RECORD_VIEWED
 }
