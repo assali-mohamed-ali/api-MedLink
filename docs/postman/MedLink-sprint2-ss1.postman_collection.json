@@ -4895,6 +4895,363 @@
           ]
         }
       ]
+    },
+    {
+      "name": "11 · Consultation reports (MLink-32)",
+      "description": "Access rules of GET and POST /api/patients/{id}/reports, after folder 10 (its practitioner is still logged in). The 201 and 200 need an appointment, which no endpoint creates yet: they are proven by ConsultationReportFunctionalTest.",
+      "item": [
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: the reports of a patient who does not exist",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"the record's 403\", () => pm.expect(pm.response.json().code).to.eql(pm.collectionVariables.get(\"recordDeniedCode\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: a report on a patient who does not exist (refused before the text is read)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Compte-rendu\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"the record's 403\", () => pm.expect(pm.response.json().code).to.eql(pm.collectionVariables.get(\"recordDeniedCode\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: an empty body, the same answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"the record's 403\", () => pm.expect(pm.response.json().code).to.eql(pm.collectionVariables.get(\"recordDeniedCode\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: an id that is not a UUID, the same answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/not-a-uuid/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Compte-rendu\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"the record's 403\", () => pm.expect(pm.response.json().code).to.eql(pm.collectionVariables.get(\"recordDeniedCode\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /logout → no session left (204, or 401 if none)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"randomPatientId\", \"00000000-0000-4000-8000-\" + String(Date.now()).padStart(12, \"0\").slice(-12));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"204 or 401\", () => pm.expect(pm.response.code).to.be.oneOf([204, 401]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · anonymous: the reports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → a token for the login",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /login as patient.demo → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient.demo@medlink.local\",\n  \"password\": \"{{devPassword}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"PATIENT\", () => pm.expect(pm.response.json().user.roles).to.eql([\"PATIENT\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: the reports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: a report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Compte-rendu\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: a broken body (403, not 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{not json"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [

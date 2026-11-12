@@ -13,6 +13,8 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-12:** MLink-32 (`feat/MLink-32-consultation-report`): 32.1 `V16__consultation_reports.sql` (immutable rows, content sealed only), 32.2 `ReportCipher` (AES-256-GCM, own key `APP_REPORT_ENCRYPTION_KEY`, report and patient ids as associated data), 32.3 `POST`/`GET /api/patients/{id}/reports` for the practitioners the patient is attached to (the record's rule, MLink-31): body `{ content }` (not blank, 10 000 characters at most, `details.content` on a 400), answer `{ id, createdAt, content }`, newest first; any other caller gets the record's 403, checked before the text; a failed save answers 500 `REPORT_SAVE_FAILED` and keeps nothing. Shared files: `SecurityConfig` (one URL rule, `/api/patients/*/reports` for PRACTITIONER, so a patient's bad body is 403, not 400), two rows in `AccessMatrixFunctionalTest`, Postman folder 11. The migration is V16: this branch merges after #116 (V15).
+
 **2026-11-10:** MLink-31 (`feat/MLink-31-patient-record`): `GET /api/patients/{id}/record` for the practitioners the patient is attached to (a `BOOKED` appointment). No migration. **One new line in `AccessMatrixFunctionalTest`**, one new rule in `SecurityConfig`. See the MLink-31 section.
 
 **2026-10-31, updated 2026-11-08:** MLink-65 (sub-sprint 3 part, `feat/ss3-setup-staff-code-check`): both setup
