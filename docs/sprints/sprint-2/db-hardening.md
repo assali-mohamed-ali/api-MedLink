@@ -5,6 +5,39 @@ the bottom: it says what is done, the last commit and the next step.
 
 GitHub #68 (MFA for the Keycloak bootstrap admin) is **not** part of this plan.
 
+## Hand-over for the next session (2026-11-12): start Part B
+
+**State.** Part A (#64) is done, tested and committed on the local branch `fix/db-hardening` (**never pushed**: the
+plan is one PR for #64 + #57). `master` was merged in three times (last `b7e1bee`, master at `048e6f9`, PR #116);
+16 commits ahead, 0 behind. On that head: `./mvnw -B clean verify` **619 tests, 0 failures** and
+`./mvnw -B test -Dsurefire.runOrder=reversealphabetical` 619/0 (2026-11-12). Clean tree.
+
+**Do first, in order:**
+1. `git checkout fix/db-hardening && git fetch origin && git merge origin/master` (never rebase; `report.md` status
+   notes conflict often: keep both, newest first). Run the suite once to start from green.
+2. **Migration number: V18** (`V18__app_role_grants.sql`). Taken: V15 on `master` (agenda), V16
+   `feat/MLink-32-consultation-report`, V17 `feat/MLink-37-cancellation-alerts`. Check `master` and the open PRs
+   again before committing it (`git ls-tree --name-only origin/<branch> src/main/resources/db/migration/`, sort -V).
+   `epic/MLink-9` (lead) still holds `V14__patient_documents.sql`, clashing with master's V14: not ours, tell the lead.
+3. The 30-minute spike below (`@ServiceConnection` + `spring.flyway.user`), no commit, then **B1** red.
+
+**Machine traps (lead's Windows laptop, 16 GB):**
+- `JAVA_HOME` defaults to JDK 11: `export JAVA_HOME=/c/Users/ASUS/.jdks/ms-17.0.16 PATH=$JAVA_HOME/bin:$PATH` (Git
+  Bash) before `./mvnw`.
+- The full suite needs ~3 GB free RAM: **stop the dev stack first** (API, Vite, `docker compose -f compose.yaml stop`)
+  or the run is killed. Close Chrome. Use `clean verify` after a branch switch (stale migrations in `target/`).
+- The Bash setup script cannot stop an API that the PowerShell script started (Windows PID): use the same script
+  family to stop what it started, or stop the java process holding port 8080.
+- Mailpit keeps mails in memory: a restart empties the inbox (a pending verification link is lost; the login
+  page's resend button sends a new one).
+- On 2026-11-12 the dev Keycloak container stopped once by itself (exit 143, restart policy `no`): if the API
+  answers 503 `IDENTITY_UNAVAILABLE`, `docker compose -f compose.yaml up -d keycloak`.
+
+**Shared files this part touches** (Team rules: say so on the teammates' tickets before pushing):
+`TestcontainersConfiguration` (every functional test), `compose.yaml`, `docker-compose.yml`, both setup scripts,
+`application-*.yml`, `.env*.example`, Terraform. MLink-32 (Ahlem) adds `APP_REPORT_ENCRYPTION_KEY` to the same
+compose/env files: merge carefully, `ComposeFilesTest` must stay green.
+
 ## Scope and branches
 
 These are security and operations fixes outside any epic, so they get their own branch (CLAUDE.md "Epic branches"):
@@ -40,6 +73,7 @@ pull again, push. Each task: a red commit then its green commit, `#64`/`#57`/`#6
 - Migrations on `master` end at `V14__slot_search_index.sql`. `epic/MLink-9` (the lead's branch) holds
   `V13__patient_documents.sql`, which already clashes with master's V13. **Before numbering, check master and open
   PRs again** (memory "migration numbering"), take the next free number (V15 today) and say so on MLink-9.
+  **Update 2026-11-12:** master is at V15 (agenda); V16 and V17 are taken by open branches: Part B takes **V18**.
 
 ## Part A: #64, fail closed on missing DB credentials
 
@@ -113,7 +147,7 @@ Design:
 - The role is created by **one init script** `docker/postgres/initdb/10-app-role.sh` (reads `APP_DB_PASSWORD`,
   creates the role only if missing). The same file is used by `compose.yaml`, `docker-compose.yml` and the
   Testcontainers container (DRY: one place defines the role).
-- Grants in the next migration (`V15__app_role_grants.sql` if still free): `SELECT, INSERT, UPDATE, DELETE` on the
+- Grants in the next migration (`V18__app_role_grants.sql`, see the hand-over above): `SELECT, INSERT, UPDATE, DELETE` on the
   app's tables, **only `SELECT, INSERT` on `audit_entries`**, `USAGE` on sequences, and `ALTER DEFAULT PRIVILEGES`
   so tables made by later migrations are granted too. Revoke `TRIGGER`/`TRUNCATE` from the runtime role.
 
@@ -196,6 +230,10 @@ Critical findings, to put in front of the reviewers, not only in the commits:
    bucket (#51). Both are passed now (with `KEYCLOAK_ADMIN_CLIENT_ID`); `ComposeFilesTest` fails when a variable
    the configuration reads is not passed to the container. The `TRUSTED_PROXIES` fallback stays loopback only:
    an empty fallback would trust every client's `X-Forwarded-For`.
+7. **This PR changes `.github/workflows/ci.yml`** (one step: `scripts/compose-credentials.test.sh`). Workflows are
+   the repo owner's: point at it in the PR and let him decide (memory: report CI changes, do not own them).
+8. **Placeholders are matched by prefix.** `DatabaseCredentialsCheck` refuses anything starting with `change-me`
+   (any case), so every placeholder of the examples is refused, not only the exact list.
 
 ## Bookkeeping
 
@@ -212,5 +250,7 @@ Critical findings, to put in front of the reviewers, not only in the commits:
 - [x] A3b red + green committed (2026-11-09), not pushed: compose passes CORS, proxies, admin client id (PR note 6).
 - [x] `master` merged in (2026-11-11, `4203c2d`, no conflict), then A4 checked: both setup scripts pass in full-stack mode.
 - [x] A5 red + green + docs committed (2026-11-11). Part A done; push and the #64 comment wait for Mohamed's go.
-- Next step: **Part B** (the 30-minute `@ServiceConnection` spike, then **B1**).
-- Last commit: the A5 docs commit.
+- [x] 2026-11-12: `master` merged in twice more (`865ae6b` MLink-31, `b7e1bee` MLink-26 / V15); dev stack checked by
+  hand (register, mail, verify, login); `clean verify` + reversed order 619/0. Still local, nothing pushed.
+- Next step: **Part B** (see "Hand-over for the next session" at the top: merge master, V18, the spike, then **B1**).
+- Last commit: the hand-over commit of 2026-11-12.
