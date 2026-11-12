@@ -7,14 +7,11 @@ import com.example.apimedlink.dto.SlotStatusRequest;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.ErrorBody;
 import com.example.apimedlink.mapper.AgendaMapper;
-import com.example.apimedlink.model.AuditAction;
-import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Slot;
 import com.example.apimedlink.model.SlotStatus;
 import com.example.apimedlink.security.CurrentUser;
 import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.service.AgendaService;
-import com.example.apimedlink.service.AuditService;
 import com.example.apimedlink.service.SlotChange;
 import java.time.Duration;
 import java.time.Instant;
@@ -49,15 +46,11 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 @PreAuthorize("hasRole('" + Roles.PRACTITIONER + "')")
 public class PractitionerAgendaController {
 
-    private static final String RESOURCE_SLOT = "SLOT";
-
     private final AgendaService service;
-    private final AuditService audit;
     private final CurrentUser currentUser;
 
-    public PractitionerAgendaController(AgendaService service, AuditService audit, CurrentUser currentUser) {
+    public PractitionerAgendaController(AgendaService service, CurrentUser currentUser) {
         this.service = service;
-        this.audit = audit;
         this.currentUser = currentUser;
     }
 
@@ -93,9 +86,8 @@ public class PractitionerAgendaController {
             errors.put("endsAt", "La date de fin est obligatoire.");
         }
         failIfAny(errors);
+        // The service writes the slot and its audit row in one transaction (review on #116)
         Slot slot = service.open(currentUser.id(), request.clinicId(), request.startsAt(), request.endsAt());
-        // After the commit: an audit entry is never written for a slot that was not saved
-        audit.record(AuditAction.SLOT_OPENED, RESOURCE_SLOT, slot.getId().toString(), AuditOutcome.SUCCESS);
         return ResponseEntity.status(HttpStatus.CREATED).body(AgendaMapper.toSlotItem(slot));
     }
 
@@ -107,12 +99,8 @@ public class PractitionerAgendaController {
         // Ownership first: a slot that is not the caller's is a 403 whatever the body says
         service.ownSlot(practitionerId, slotId);
         SlotStatus target = targetStatus(request);
+        // A real change and its audit row are written together by the service (review on #116)
         SlotChange change = service.setStatus(practitionerId, slotId, target);
-        if (change.change() == SlotChange.Change.CLOSED) {
-            audit.record(AuditAction.SLOT_CLOSED, RESOURCE_SLOT, slotId.toString(), AuditOutcome.SUCCESS);
-        } else if (change.change() == SlotChange.Change.OPENED) {
-            audit.record(AuditAction.SLOT_OPENED, RESOURCE_SLOT, slotId.toString(), AuditOutcome.SUCCESS);
-        }
         return AgendaMapper.toSlotItem(change.slot());
     }
 

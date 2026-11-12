@@ -2,6 +2,8 @@ package com.example.apimedlink.service;
 
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.model.AppointmentStatus;
+import com.example.apimedlink.model.AuditAction;
+import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Clinic;
 import com.example.apimedlink.model.Slot;
 import com.example.apimedlink.model.SlotStatus;
@@ -54,6 +56,9 @@ public class AgendaService {
 
     private static final String ENDS_AT = "endsAt";
 
+    /** The audit trail's name for a slot. */
+    static final String RESOURCE_SLOT = "SLOT";
+
     private static final String SQLSTATE_EXCLUSION = "23P01";
     private static final String SQLSTATE_UNIQUE = "23505";
     private static final String SQLSTATE_FOREIGN_KEY = "23503";
@@ -64,15 +69,18 @@ public class AgendaService {
     private final PractitionerRepository practitioners;
     private final Clock clock;
     private final TransactionTemplate transaction;
+    private final AuditService audit;
 
     public AgendaService(SlotRepository slots, AppointmentRepository appointments, ClinicRepository clinics,
-            PractitionerRepository practitioners, Clock clock, PlatformTransactionManager transactionManager) {
+            PractitionerRepository practitioners, Clock clock, PlatformTransactionManager transactionManager,
+            AuditService audit) {
         this.slots = slots;
         this.appointments = appointments;
         this.clinics = clinics;
         this.practitioners = practitioners;
         this.clock = clock;
         this.transaction = new TransactionTemplate(transactionManager);
+        this.audit = audit;
     }
 
     /** The practitioner's clinics and their slots starting in {@code [from, to)}, past ones included. */
@@ -104,8 +112,12 @@ public class AgendaService {
                 throw overlap(inTheWay.get(0));
             }
             try {
-                return transaction.execute(status ->
-                    slots.saveAndFlush(new Slot(practitioners.getReferenceById(practitionerId), clinic, startsAt, endsAt)));
+                // The slot and its audit row in one transaction: both are kept, or neither (review on #116)
+                return transaction.execute(status -> {
+                    Slot saved = slots.saveAndFlush(new Slot(practitioners.getReferenceById(practitionerId), clinic, startsAt, endsAt));
+                    audit.recordWithin(AuditAction.SLOT_OPENED, RESOURCE_SLOT, saved.getId().toString(), AuditOutcome.SUCCESS);
+                    return saved;
+                });
             } catch (DataIntegrityViolationException refused) {
                 // Outside the transaction that failed: the re-read below runs in a fresh one
                 throw translate(refused, practitionerId, startsAt, endsAt);
@@ -135,7 +147,10 @@ public class AgendaService {
                 .orElseThrow(() -> new AccessDeniedException("Not the practitioner's slot"));
     }
 
-    /** Closes or reopens one of the caller's slots; the target is {@code FREE} (open) or {@code CLOSED}. */
+    /**
+     * Closes or reopens one of the caller's slots; the target is {@code FREE} (open) or {@code CLOSED}. A real change
+     * writes its audit row in this same transaction (review on #116); nothing changed, nothing written.
+     */
     @Transactional
     public SlotChange setStatus(UUID practitionerId, UUID slotId, SlotStatus target) {
         Slot slot = findOwn(practitionerId, slotId);
@@ -150,6 +165,7 @@ public class AgendaService {
 
     private SlotChange close(UUID practitionerId, UUID slotId) {
         if (slots.closeIfFree(slotId, practitionerId) == 1) {
+            audit.recordWithin(AuditAction.SLOT_CLOSED, RESOURCE_SLOT, slotId.toString(), AuditOutcome.SUCCESS);
             return new SlotChange(findOwn(practitionerId, slotId), Change.CLOSED);
         }
         // Nothing closed: a patient booked it in the meantime, or it was closed at the same moment
@@ -171,6 +187,7 @@ public class AgendaService {
                     "Ce créneau est déjà commencé ou passé : il ne peut plus être rouvert.");
         }
         if (slots.reopenIfClosed(slot.getId(), practitionerId, now) == 1) {
+            audit.recordWithin(AuditAction.SLOT_OPENED, RESOURCE_SLOT, slot.getId().toString(), AuditOutcome.SUCCESS);
             return new SlotChange(findOwn(practitionerId, slot.getId()), Change.OPENED);
         }
         Slot current = findOwn(practitionerId, slot.getId());
