@@ -7,8 +7,8 @@ GitHub #68 (MFA for the Keycloak bootstrap admin) is **not** part of this plan.
 
 ## Hand-over for the next session (2026-11-12): start Part B
 
-**State.** Part A (#64) is done, tested and committed on the local branch `fix/db-hardening` (**never pushed**: the
-plan is one PR for #64 + #57). `master` was merged in three times (last `b7e1bee`, master at `048e6f9`, PR #116);
+**State.** Part A (#64) is done, tested and committed on `fix/db-hardening`, **pushed to GitHub on 2026-11-12 with no
+PR** (the plan is one PR for #64 + #57; start with `git pull --no-rebase`). `master` was merged in three times (last `b7e1bee`, master at `048e6f9`, PR #116);
 16 commits ahead, 0 behind. On that head: `./mvnw -B clean verify` **619 tests, 0 failures** and
 `./mvnw -B test -Dsurefire.runOrder=reversealphabetical` 619/0 (2026-11-12). Clean tree.
 
@@ -251,6 +251,6 @@ Critical findings, to put in front of the reviewers, not only in the commits:
 - [x] `master` merged in (2026-11-11, `4203c2d`, no conflict), then A4 checked: both setup scripts pass in full-stack mode.
 - [x] A5 red + green + docs committed (2026-11-11). Part A done; push and the #64 comment wait for Mohamed's go.
 - [x] 2026-11-12: `master` merged in twice more (`865ae6b` MLink-31, `b7e1bee` MLink-26 / V15); dev stack checked by
-  hand (register, mail, verify, login); `clean verify` + reversed order 619/0. Still local, nothing pushed.
+  hand (register, mail, verify, login); `clean verify` + reversed order 619/0. Branch pushed (no PR yet).
 - Next step: **Part B** (see "Hand-over for the next session" at the top: merge master, V18, the spike, then **B1**).
 - Last commit: the hand-over commit of 2026-11-12.
