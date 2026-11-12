@@ -72,6 +72,30 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
         assertThat((String) row.get("content_encrypted")).doesNotContain("Douleur").doesNotContain("ECG");
     }
 
+    /**
+     * 32.7, criterion 1, further: the same text written twice is sealed twice differently (a new IV each time), and the
+     * column holds neither the text nor its plain base64, so nothing in the database can be matched to a known text.
+     */
+    @Test
+    void theSameTextIsSealedDifferentlyEachTimeAndNeverAsItsPlainBase64() throws Exception {
+        Pro pro = practitioner();
+        UUID patient = insertPatient();
+        appointment(pro.id(), patient, "BOOKED");
+
+        pro.browser().postJson(reports(patient), json(TEXT));
+        pro.browser().postJson(reports(patient), json(TEXT));
+
+        List<String> sealed = jdbc.queryForList("select content_encrypted from consultation_reports where patient_id = ?",
+                String.class, patient);
+        String plainBase64 = java.util.Base64.getEncoder().encodeToString(TEXT.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        assertThat(sealed).hasSize(2).doesNotHaveDuplicates();
+        assertThat(sealed).allSatisfy(stored -> assertThat(stored).doesNotContain(TEXT).doesNotContain(plainBase64)
+                .doesNotContain(plainBase64.substring(0, 16)));
+        // Both still read back as written
+        assertThat(list(pro.browser().call(reports(patient))).stream().map(item -> map(item).get("content")).toList())
+                .containsExactly(TEXT, TEXT);
+    }
+
     @Test
     void theReportsComeNewestFirstAndEveryAttachedPractitionerSeesThePatientsReports() throws Exception {
         Pro first = practitioner();
