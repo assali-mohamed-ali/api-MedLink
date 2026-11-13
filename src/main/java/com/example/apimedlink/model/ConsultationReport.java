@@ -9,6 +9,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -66,7 +67,9 @@ public class ConsultationReport implements Persistable<UUID> {
     @PrePersist
     void onCreate() {
         if (createdAt == null) {
-            createdAt = Instant.now();
+            // Microseconds, as PostgreSQL stores them: the time answered at creation is the time read later (Linux
+            // clocks give nanoseconds; seen on #123's CI)
+            createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
         }
     }
 
