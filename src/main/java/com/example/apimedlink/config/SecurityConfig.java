@@ -88,6 +88,9 @@ public class SecurityConfig {
                         // The role before Spring reads the request, so a patient never gets a 400 (MLink-31, as #116)
                         .requestMatchers(HttpMethod.GET, "/api/patients/*/record")
                         .hasRole(Roles.PRACTITIONER)
+                        // The reports too, before the body is read: a patient sending a bad body gets 403 (MLink-32)
+                        .requestMatchers("/api/patients/*/reports")
+                        .hasRole(Roles.PRACTITIONER)
                         // Staff only, decided before any body is read: a patient sending a bad body gets 403, not 400
                         .requestMatchers("/api/admin/**")
                         .hasRole(Roles.ADMINISTRATIVE_STAFF)

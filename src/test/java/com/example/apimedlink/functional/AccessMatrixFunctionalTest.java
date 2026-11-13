@@ -66,7 +66,10 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("POST",   "/api/practitioner/slots",       L, F, O, F),
             new Rule("PATCH",  "/api/practitioner/slots/{id}",  L, F, F, F),
             // MLink-31: a random id is nobody's attached patient, so a practitioner gets 403 too
-            new Rule("GET",    "/api/patients/{id}/record",     L, F, F, F));
+            new Rule("GET",    "/api/patients/{id}/record",     L, F, F, F),
+            // MLink-32: the same attachment rule as the record; a random id is nobody's patient, so 403 for all
+            new Rule("GET",    "/api/patients/{id}/reports",    L, F, F, F),
+            new Rule("POST",   "/api/patients/{id}/reports",    L, F, F, F));
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")
