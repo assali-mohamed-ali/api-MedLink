@@ -102,6 +102,30 @@ public class MailService {
         send(to, "Tentative d'inscription avec votre adresse e-mail MedLink", text, html);
     }
 
+    /**
+     * MLink-37 (37.4, H-06): a patient cancelled one of the practitioner's appointments. Who, when (Tunis time) and
+     * where, with a link to the agenda: never medical content. Throws like {@link #sendEmailVerification}.
+     */
+    public void sendAppointmentCancelled(String to, String firstName, String patient, String when, String clinic) {
+        String agenda = UriComponentsBuilder.fromUriString(frontendUrl).path("/praticien/agenda").build().toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        String text = hello + "\n\n"
+                + "Un rendez-vous de votre agenda vient d'être annulé par le patient :\n\n"
+                + "Patient : " + patient + "\n"
+                + "Date : " + when + " (heure de Tunis)\n"
+                + "Clinique : " + clinic + "\n\n"
+                + "Le créneau est de nouveau libre. Votre agenda : " + agenda + "\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Un rendez-vous de votre agenda vient d'être annulé par le patient :</p>"
+                + "<ul><li>Patient : " + HtmlUtils.htmlEscape(patient) + "</li>"
+                + "<li>Date : " + HtmlUtils.htmlEscape(when) + " (heure de Tunis)</li>"
+                + "<li>Clinique : " + HtmlUtils.htmlEscape(clinic) + "</li></ul>"
+                + "<p>Le créneau est de nouveau libre. <a href=\"" + HtmlUtils.htmlEscape(agenda) + "\">Ouvrir mon agenda</a></p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Un rendez-vous a été annulé", text, html);
+    }
+
     private void send(String to, String subject, String text, String html) {
         MimeMessage message = mailSender.createMimeMessage();
         try {

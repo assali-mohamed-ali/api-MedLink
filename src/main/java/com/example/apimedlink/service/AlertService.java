@@ -8,15 +8,20 @@ import com.example.apimedlink.model.Slot;
 import com.example.apimedlink.repository.AlertRepository;
 import com.example.apimedlink.repository.AppointmentRepository;
 import com.example.apimedlink.repository.PatientRepository;
+import com.example.apimedlink.repository.UserRepository;
 import java.time.Clock;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
 
 /**
  * A practitioner's alerts (MLink-37). Every query is scoped to the caller: an alert of someone else looks exactly like
@@ -29,15 +34,22 @@ public class AlertService {
     private static final DateTimeFormatter WHEN =
             DateTimeFormatter.ofPattern("EEEE d MMMM 'à' HH:mm", Locale.FRENCH).withZone(ZoneId.of("Africa/Tunis"));
 
+    private static final Logger log = LoggerFactory.getLogger(AlertService.class);
+
     private final AlertRepository alerts;
     private final AppointmentRepository appointments;
     private final PatientRepository patients;
+    private final UserRepository users;
+    private final MailService mail;
     private final Clock clock;
 
-    public AlertService(AlertRepository alerts, AppointmentRepository appointments, PatientRepository patients, Clock clock) {
+    public AlertService(AlertRepository alerts, AppointmentRepository appointments, PatientRepository patients,
+            UserRepository users, MailService mail, Clock clock) {
         this.alerts = alerts;
         this.appointments = appointments;
         this.patients = patients;
+        this.users = users;
+        this.mail = mail;
         this.clock = clock;
     }
 
@@ -60,9 +72,41 @@ public class AlertService {
         String patient = patients.findById(appointment.getPatientId())
                 .map(found -> found.getFirstName() + " " + found.getLastName())
                 .orElse("un patient");
-        String message = "Rendez-vous annulé : " + patient + ", " + WHEN.format(slot.getStartsAt()) + ", "
-                + slot.getClinic().getName() + ".";
-        alerts.save(new Alert(slot.getPractitioner().getId(), AlertType.APPOINTMENT_CANCELLED, appointment.getId(), message));
+        String when = WHEN.format(slot.getStartsAt());
+        String clinic = slot.getClinic().getName();
+        UUID practitionerId = slot.getPractitioner().getId();
+        Alert alert = alerts.save(new Alert(practitionerId, AlertType.APPOINTMENT_CANCELLED, appointment.getId(),
+                "Rendez-vous annulé : " + patient + ", " + when + ", " + clinic + "."));
+        // 37.4: the mail leaves once the cancellation and its alert are committed, never for a rolled-back one
+        String firstName = slot.getPractitioner().getFirstName();
+        String to = users.findById(practitionerId).map(user -> user.getEmail()).orElse(null);
+        Runnable send = () -> mailQuietly(alert.getId(), to, firstName, patient, when, clinic);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    send.run();
+                }
+            });
+        } else {
+            send.run();
+        }
+    }
+
+    /**
+     * A mail that cannot be sent never blocks the cancellation (37.4): the alert is kept and shows in the bell, the
+     * failure is logged by the alert's id only (no address, no name).
+     */
+    private void mailQuietly(UUID alertId, String to, String firstName, String patient, String when, String clinic) {
+        if (to == null || to.isBlank()) {
+            log.warn("Cancellation mail not sent for alert {}: the practitioner has no e-mail", alertId);
+            return;
+        }
+        try {
+            mail.sendAppointmentCancelled(to, firstName, patient, when, clinic);
+        } catch (RuntimeException failed) {
+            log.warn("Cancellation mail not sent for alert {}: {}", alertId, failed.getClass().getSimpleName());
+        }
     }
 
     /** The caller's alerts, newest first: the unread ones (the bell), or all of them. */
