@@ -13,6 +13,9 @@ public interface AlertRepository extends JpaRepository<Alert, UUID> {
     /** The unread alerts of a practitioner, newest first (partial index idx_alerts_unread). */
     List<Alert> findByPractitionerIdAndReadAtIsNullOrderByCreatedAtDesc(UUID practitionerId);
 
+    /** All the alerts of a practitioner, read or not, newest first. */
+    List<Alert> findByPractitionerIdOrderByCreatedAtDesc(UUID practitionerId);
+
     /** The alert if it is this practitioner's: another one's looks like one that does not exist (37.3). */
     Optional<Alert> findByIdAndPractitionerId(UUID id, UUID practitionerId);
 

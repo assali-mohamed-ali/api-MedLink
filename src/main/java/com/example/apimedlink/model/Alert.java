@@ -10,6 +10,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.time.Instant;
+import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -64,7 +65,8 @@ public class Alert {
     @PrePersist
     void onCreate() {
         if (createdAt == null) {
-            createdAt = Instant.now();
+            // Microseconds, as PostgreSQL stores them (Linux clocks give nanoseconds): the time read back is this one
+            createdAt = Instant.now().truncatedTo(ChronoUnit.MICROS);
         }
     }
 }
