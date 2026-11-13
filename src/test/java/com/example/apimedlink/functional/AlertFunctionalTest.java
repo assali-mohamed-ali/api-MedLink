@@ -10,6 +10,7 @@ import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,6 +23,10 @@ import tools.jackson.databind.json.JsonMapper;
  * Alerts are inserted in SQL here: 37.2 creates them when an appointment is cancelled.
  */
 class AlertFunctionalTest extends FunctionalTestBase {
+
+    /** The test slots, one per hour from in three days: never two at once for one practitioner. */
+    static final Instant FIRST_SLOT = Instant.now().truncatedTo(ChronoUnit.HOURS).plus(3, ChronoUnit.DAYS);
+    static final AtomicInteger NEXT_SLOT = new AtomicInteger();
 
     static final String PASSWORD = "Alert-Functional-2026!";
 
@@ -147,7 +152,8 @@ class AlertFunctionalTest extends FunctionalTestBase {
         jdbc.update("insert into clinics (id, name, city) values (?, ?, 'Sousse')", clinic, "Clinique " + clinic);
         jdbc.update("insert into practitioner_clinics (practitioner_id, clinic_id) values (?, ?)", practitioner, clinic);
         UUID slot = UUID.randomUUID();
-        Instant start = Instant.now().plus(3, ChronoUnit.DAYS).plus((long) (Math.random() * 10_000), ChronoUnit.MINUTES);
+        // One hour after the previous one: a practitioner's slots never overlap (the database refuses it, #116)
+        Instant start = FIRST_SLOT.plus(NEXT_SLOT.getAndIncrement(), ChronoUnit.HOURS);
         jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) values (?, ?, ?, ?, ?, 'FREE')",
                 slot, practitioner, clinic, Timestamp.from(start), Timestamp.from(start.plus(30, ChronoUnit.MINUTES)));
         UUID appointment = UUID.randomUUID();
