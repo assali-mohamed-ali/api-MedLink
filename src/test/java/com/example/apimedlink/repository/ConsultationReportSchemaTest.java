@@ -60,6 +60,22 @@ class ConsultationReportSchemaTest {
         assertThat(found.get(0).getCreatedAt()).isNotNull();
     }
 
+    /**
+     * The time given back when a report is saved is the time stored: PostgreSQL keeps microseconds, and Linux clocks
+     * give nanoseconds (the CI's), so the entity keeps microseconds too (the POST's createdAt equals the GET's).
+     */
+    @Test
+    void theCreationTimeKeptByTheEntityIsTheOneTheDatabaseStores() {
+        UUID practitioner = insertPractitioner();
+        UUID patient = insertPatient();
+
+        ConsultationReport saved = reports.saveAndFlush(new ConsultationReport(UUID.randomUUID(), patient, practitioner, "sealed"));
+
+        assertThat(saved.getCreatedAt().getNano() % 1_000).isZero();
+        assertThat(jdbc.queryForObject("select created_at from consultation_reports where id = ?", java.sql.Timestamp.class,
+                saved.getId()).toInstant()).isEqualTo(saved.getCreatedAt());
+    }
+
     @Test
     void theAuthorMustBeAPractitioner() {
         UUID patient = insertPatient();
