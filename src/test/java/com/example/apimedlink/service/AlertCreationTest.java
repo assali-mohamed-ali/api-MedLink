@@ -1,6 +1,9 @@
 package com.example.apimedlink.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.Mockito.doThrow;
 
 import com.example.apimedlink.TestcontainersConfiguration;
 import com.example.apimedlink.model.Appointment;
@@ -18,6 +21,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.mail.MailSendException;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 /**
  * MLink-37 (37.2): a cancelled appointment gives one alert to the practitioner of its slot, written in French with
@@ -40,6 +45,9 @@ class AlertCreationTest {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @MockitoSpyBean
+    MailService mails;
 
     @Test
     void aCancelledAppointmentGivesOneAlertToThePractitionerOfItsSlotInFrench() {
@@ -101,6 +109,19 @@ class AlertCreationTest {
         alerts.onAppointmentCancelled(load(appointment));
 
         assertThat(alerts.list(pro, true)).extracting(alert -> alert.getAppointmentId()).containsExactly(appointment);
+    }
+
+    /** 37.4: a mail that cannot be sent never blocks the cancellation: the alert is kept, nothing is thrown. */
+    @Test
+    void aMailThatFailsLeavesTheAlertAndThrowsNothing() {
+        UUID pro = practitioner();
+        UUID appointment = appointment(pro, clinic("Clinique MedLink Tunis"), FIRST_SLOT.plus(NEXT_SLOT.getAndIncrement(), ChronoUnit.HOURS), "CANCELLED");
+        doThrow(new MailSendException("smtp down")).when(mails)
+                .sendAppointmentCancelled(anyString(), anyString(), anyString(), anyString(), anyString());
+
+        assertThatCode(() -> alerts.onAppointmentCancelled(load(appointment))).doesNotThrowAnyException();
+
+        assertThat(jdbc.queryForObject("select count(*) from alerts where appointment_id = ?", Integer.class, appointment)).isEqualTo(1);
     }
 
     private Appointment load(UUID appointment) {
