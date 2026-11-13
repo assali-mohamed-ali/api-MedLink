@@ -14,6 +14,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
+import com.example.apimedlink.repository.AppointmentRepository;
+import com.example.apimedlink.service.AlertService;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -36,7 +38,55 @@ class AlertFunctionalTest extends FunctionalTestBase {
     @Autowired
     JdbcTemplate jdbc;
 
-    record Pro(UUID id, Browser browser) {}
+    @Autowired
+    AlertService alertService;
+
+    @Autowired
+    AppointmentRepository appointments;
+
+    record Pro(UUID id, String email, Browser browser) {}
+
+    // ---- 37.8: the three acceptance criteria of MLink-37, end to end ----
+
+    /**
+     * The whole story (H-06): the practitioner is logged out, a patient cancels, the practitioner gets the alert and
+     * the mail; logged in again, the alert is still there, unread; once marked read it leaves the list; another
+     * practitioner can neither see it nor mark it. The cancel route is US-15's (not merged yet): its cancel code calls
+     * AlertService.onAppointmentCancelled, called here the same way after the appointment is set CANCELLED.
+     */
+    @Test
+    void anAlertReceivedWhileLoggedOutIsThereAtTheNextLoginWithItsMailThenMarkedRead() throws Exception {
+        Pro pro = practitioner();
+        Pro other = practitioner();
+        UUID appointment = appointment(pro.id());
+        assertThat(pro.browser().logout().statusCode()).isIn(204, 401);
+
+        // The patient cancels while the practitioner is away
+        alertService.onAppointmentCancelled(appointments.findById(appointment).orElseThrow());
+
+        // Criterion 1: an alert row for the practitioner, and the mail in Mailpit
+        assertThat(jdbc.queryForObject("select count(*) from alerts where practitioner_id = ? and appointment_id = ?",
+                Integer.class, pro.id(), appointment)).isEqualTo(1);
+        assertThat(new Mailbox().to(pro.email(), "Un rendez-vous a été annulé")).hasSize(1);
+
+        // Criterion 2: logged in again, the alert is still listed, unread
+        Browser back = new Browser().login(pro.email(), PASSWORD);
+        List<Map<String, Object>> unread = list(back.call("/api/practitioner/alerts?unread=true"));
+        assertThat(unread).hasSize(1);
+        assertThat(unread.get(0)).containsEntry("appointmentId", appointment.toString())
+                .containsEntry("type", "APPOINTMENT_CANCELLED");
+        assertThat((String) unread.get(0).get("message")).startsWith("Rendez-vous annulé : Amel Ben Salah, ");
+        String alert = (String) unread.get(0).get("id");
+
+        // Criterion 4: another practitioner cannot mark it, and does not see it
+        assertThat(other.browser().postJson("/api/practitioner/alerts/" + alert + "/read", "").statusCode()).isEqualTo(403);
+        assertThat(list(other.browser().call("/api/practitioner/alerts?unread=true"))).isEmpty();
+
+        // Criterion 3: marked read by its owner, it leaves the unread list and stays read after another login
+        assertThat(back.postJson("/api/practitioner/alerts/" + alert + "/read", "").statusCode()).isEqualTo(204);
+        assertThat(list(back.call("/api/practitioner/alerts?unread=true"))).isEmpty();
+        assertThat(list(new Browser().login(pro.email(), PASSWORD).call("/api/practitioner/alerts?unread=true"))).isEmpty();
+    }
 
     @Test
     void aPractitionerSeesTheirUnreadAlertsNewestFirstInTheFrontsShape() throws Exception {
@@ -139,7 +189,7 @@ class AlertFunctionalTest extends FunctionalTestBase {
         jdbc.update("insert into specialties (id, name) values (?, ?)", specialty, "Specialty " + specialty);
         jdbc.update("insert into users (id, username, email) values (?, ?, ?) on conflict (id) do nothing", id, email, email);
         jdbc.update("insert into practitioners (id, first_name, last_name, specialty_id) values (?, 'Sami', 'Dev', ?)", id, specialty);
-        return new Pro(id, new Browser().login(email, PASSWORD));
+        return new Pro(id, email, new Browser().login(email, PASSWORD));
     }
 
     /** A cancelled appointment of one of the practitioner's slots. */
