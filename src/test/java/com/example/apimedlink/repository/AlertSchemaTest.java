@@ -97,14 +97,16 @@ class AlertSchemaTest {
         UUID pro = insertPractitioner();
         UUID appointment = insertAppointment(pro);
         alerts.saveAndFlush(new Alert(pro, AlertType.APPOINTMENT_CANCELLED, appointment, "Annulé"));
+        // Read before the refused insert: in PostgreSQL a refused statement ends the test's transaction
+        assertThat(alerts.existsByTypeAndAppointmentId(AlertType.APPOINTMENT_CANCELLED, appointment)).isTrue();
 
         assertThatThrownBy(() -> alerts.saveAndFlush(new Alert(pro, AlertType.APPOINTMENT_CANCELLED, appointment, "Encore")))
                 .isInstanceOf(DataIntegrityViolationException.class);
-        assertThat(alerts.existsByTypeAndAppointmentId(AlertType.APPOINTMENT_CANCELLED, appointment)).isTrue();
     }
 
+    /** One refused statement per test: in PostgreSQL it ends the test's transaction (@DataJpaTest runs each test in one). */
     @Test
-    void theOwnerMustBeAPractitionerAndTheMessageIsRequired() {
+    void theOwnerMustBeAPractitioner() {
         UUID pro = insertPractitioner();
         UUID appointment = insertAppointment(pro);
         UUID notAPractitioner = insertUser();
@@ -112,6 +114,13 @@ class AlertSchemaTest {
         assertThatThrownBy(() -> jdbc.update("insert into alerts (id, practitioner_id, type, appointment_id, message) "
                 + "values (?, ?, 'APPOINTMENT_CANCELLED', ?, 'Annulé')", UUID.randomUUID(), notAPractitioner, appointment))
                 .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void theMessageIsRequired() {
+        UUID pro = insertPractitioner();
+        UUID appointment = insertAppointment(pro);
+
         assertThatThrownBy(() -> jdbc.update("insert into alerts (id, practitioner_id, type, appointment_id, message) "
                 + "values (?, ?, 'APPOINTMENT_CANCELLED', ?, null)", UUID.randomUUID(), pro, appointment))
                 .isInstanceOf(DataIntegrityViolationException.class);
