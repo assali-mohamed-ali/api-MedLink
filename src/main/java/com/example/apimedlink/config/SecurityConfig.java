@@ -81,6 +81,10 @@ public class SecurityConfig {
                                 "/api/auth/mfa/setup",
                                 "/api/auth/mfa/verify")
                         .permitAll()
+                        // The role before anything reads the request: Spring converts query dates and the JSON body before
+                        // @PreAuthorize, so without this rule a patient would get 400, not 403 (MLink-26, review on #116)
+                        .requestMatchers("/api/practitioner/**")
+                        .hasRole(Roles.PRACTITIONER)
                         // The role before Spring reads the request, so a patient never gets a 400 (MLink-31, as #116)
                         .requestMatchers(HttpMethod.GET, "/api/patients/*/record")
                         .hasRole(Roles.PRACTITIONER)
