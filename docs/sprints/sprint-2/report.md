@@ -2,6 +2,41 @@
 
 Updated by every sub-sprint PR. Newest information first inside each section.
 
+## MLink-26 — Agenda multi-sites (back-end)
+
+**Tickets:** MLink-133, 134, 135, 136, 137, 138, 141. Front (MLink-139, 140) in `web-MedLink`.
+
+**Routes** (class-level `@PreAuthorize(PRACTITIONER)`; the practitioner is always the caller):
+
+| Route | Answer |
+|---|---|
+| `GET /api/practitioner/agenda?from=&to=` | `{clinics, items}`; period up to 31 days; past slots included; patient names only |
+| `POST /api/practitioner/slots` | 201 + the slot; 409 `SLOT_OVERLAP`; 400 `VALIDATION_FAILED` |
+| `PATCH /api/practitioner/slots/{id}` | `{"status":"OPEN"\|"CLOSED"}`; 409 `SLOT_BOOKED`, `SLOT_IN_PAST`; 403 if not the caller's slot |
+
+**Decisions**
+- V15 inserts the three reference clinics (no endpoint creates a clinic) and adds the `CLOSED` slot status.
+- The overlap is enforced by the database (`slots_no_overlap`); the application check only names the slot in the way, and a lost race is translated to the same 409 (never a 500).
+- A closed slot keeps its time range: reopening it frees the time (decision D4, to confirm).
+- Closing is one conditional `UPDATE` (free and no active appointment): a concurrent booking cannot end on a closed slot. The booking (MLink-102, merged with #87) locks the slot (`SELECT … FOR UPDATE`) and refuses any slot that is not `FREE`, so a closed slot answers 409 `SLOT_TAKEN`; in a race, Postgres's row lock makes one side see the other's status.
+- Spring converts query parameters and the JSON body before `@PreAuthorize` runs, so a patient sending `from=not-a-date` got 400 instead of 403 (code owner's review on #116). **`SecurityConfig` now limits `/api/practitioner/**` to `PRACTITIONER`** in the filter chain, before any conversion (shared file, changed at the code owner's request); the class-level `@PreAuthorize` stays as a second check. Nothing is `@Valid` or required either: a patient or staff member gets 403, never 400, whatever they send.
+- Two overlapping openings at once: the exclusion constraint can make each insert wait for the other, and Postgres aborts one with a deadlock (40P01), which reached the client as 500. `AgendaService.open` retries once after a `PessimisticLockingFailureException`: the overlap check or the constraint then answers 409 `SLOT_OVERLAP`; a second deadlock also answers 409. Found while revalidating the review fix.
+- The agenda is not audited per read (it is not the medical record); slot changes are (`SLOT_OPENED`, `SLOT_CLOSED`); refusals are (`ACCESS_DENIED`).
+- Duration 10 min to 8 h and horizon 180 days are assumptions (constants in `AgendaService`), not in the cahier des charges.
+
+**Proofs**
+- Repository queries: `SlotRepositoryAgendaTest` (9 tests) with `AppointmentSchemaTest`, `AppointmentDomainRepositoryTest` and `SlotSearchFunctionalTest` still green (39 tests).
+- Access matrix: 3 new lines, 73 cases green.
+- `AgendaFunctionalTest`: 21 tests green, including `aClosedSlotCannotBeBookedEvenByItsIdAndNoAppointmentIsCreated` (added after the merge of `master`): checked once that it turns red when the booking refuses only `BOOKED` slots.
+- Postman: new folder 9 "Practitioner agenda (MLink-26)", 25 requests: anonymous 401 and patient 403 on every route (403, never 400, even without dates or body); a disposable practitioner through the code step gets 400 without dates, 409 `PRACTITIONER_PROFILE_MISSING` and 403 on a slot that is not theirs. Folder alone: 26 requests, 41 assertions, 0 failures. Whole collection, `npx newman@6.2.1 run`: **158 requests, 355 assertions, 0 failures**, twice in a row. The full flow (three clinics, overlap, close, reopen) needs a practitioner profile, which no endpoint creates yet (SS5): it stays proven by `AgendaFunctionalTest`.
+- Review on #116 (2026-11-10): `patientsAndStaffGet403EvenWithMalformedDatesOrJson` (malformed dates, malformed JSON, an id that is not a UUID, on the three routes, for a patient and a staff member) committed red first: `expected: 403 but was: 400`; green with the `SecurityConfig` rule. `twoSimultaneousOverlappingOpeningsLeaveExactlyOneSlotAndNoServerError` was red 4 runs out of 5 (201 + 500, SQLSTATE 40P01), green 10 runs out of 10 with the retry. Full suite `./mvnw -B verify`: **519 tests, 0 failures**; reverse class order: 519 tests, 0 failures. Postman folder 9 on the rebuilt dev stack: 26 requests, 41 assertions, 0 failures.
+- Full suite `./mvnw -B verify`: 476 tests, 0 failures; reverse class order (`-Dsurefire.runOrder=reversealphabetical`): 476 tests, 0 failures.
+- After merging `master` (2026-11-10, booking and slot search index included): `./mvnw -B verify` 517 tests, 0 failures; reverse class order 517 tests, 0 failures (before the closed-slot booking test was added).
+- `pre-commit run --all-files`: all 14 hooks passed (gitleaks, checkov, detect-private-key included).
+- One isolated failure of `QrCodesTest` (MLink-62) was seen once in a full run; not reproduced in 10 separate runs nor in the next full runs; unrelated to this PR.
+
+**Follow-ups:** `AuditService.recordInCurrentTransaction` (MLink-114) to write the audit in the business transaction; `SlotRepository` is shared with MLink-98; the enum conflict with MLink-114 is to be resolved at rebase (keep all values).
+
 ## Status
 
 | Sub-sprint | Scope | State | PR | Date |
@@ -14,6 +49,12 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
 **2026-11-12:** MLink-37 37.1 (`feat/MLink-37-cancellation-alerts`): `V17__alerts.sql`, the practitioner's alerts, kept until read (H-06: an offline practitioner finds them at the next login). Columns of the ticket; `practitioner_id` references `practitioners` (= `users.id`, stricter than `users`: only a practitioner gets an alert); `type` checked (`APPOINTMENT_CANCELLED`); one alert per (type, appointment), so a cancellation processed twice gives one alert (37.2); partial index for the unread list. Entity `Alert`, `AlertType`, `AlertRepository` (unread newest first, own alert by id, already alerted). **V17 because V15 (#116, agenda) and V16 (MLink-32, reports) come first: this branch merges after both.**
+
+**2026-11-12:** MLink-26, code owner's second review on #116: a slot change and its audit row are now one unit. The slot was committed before its audit row (written in its own `REQUIRES_NEW` transaction), so a failed audit could answer 500 after a kept change, with no trace. `AuditService.recordWithin` (new, `MANDATORY`) writes the row in the change's transaction; `AgendaService` calls it for an opening, a closing and a reopening, and the controller no longer audits. If the row cannot be written, the change rolls back. `AuditService.record` (own transaction) is unchanged for refusals. New test `AgendaAuditAtomicityTest` (audit repository made to fail). Shared file: `AuditService` (one method added). No migration, no new route.
+
+**2026-11-10:** MLink-26, code owner's review on #116: `SecurityConfig` gains a role rule for `/api/practitioner/**` (the role is checked before Spring converts dates and JSON: 403, never 400, for a patient). Shared file: no other route changes. Also fixed: two overlapping slot openings at once could end in a 500 (Postgres deadlock), now 409. No migration, no new route.
+
+**2026-11-10:** MLink-26 (`feat/MLink-26-agenda`): `master` merged after #87 and #113, so the agenda migration is renumbered **V15** (`V15__agenda_reference_data.sql`; V14 is MLink-99's slot search index). Dev databases that ran the branch's old V14 need the setup script with `--reset` (`-Reset`) once. Conflicts kept both sides (`SlotRepository`, access matrix). New test: a closed slot cannot be booked. See the MLink-26 section.
 
 **2026-11-10:** MLink-31 (`feat/MLink-31-patient-record`): `GET /api/patients/{id}/record` for the practitioners the patient is attached to (a `BOOKED` appointment). No migration. **One new line in `AccessMatrixFunctionalTest`**, one new rule in `SecurityConfig`. See the MLink-31 section.
 

@@ -1,7 +1,11 @@
 package com.example.apimedlink.model;
 
-/** Whether a slot can still be booked (MLink-97). */
+/**
+ * Where a slot stands (MLink-97, MLink-26). FREE can be booked; BOOKED holds a patient's appointment; CLOSED
+ * was closed by its practitioner (kept, never deleted) and is neither offered nor bookable until reopened.
+ */
 public enum SlotStatus {
     FREE,
-    BOOKED
+    BOOKED,
+    CLOSED
 }
