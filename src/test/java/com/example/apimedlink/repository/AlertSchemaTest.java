@@ -80,6 +80,18 @@ class AlertSchemaTest {
                 .isEqualTo(first);
     }
 
+    /** The creation time kept by the entity is the one stored: microseconds, as PostgreSQL (Linux clocks give nanoseconds). */
+    @Test
+    void theCreationTimeKeptByTheEntityIsTheOneTheDatabaseStores() {
+        UUID pro = insertPractitioner();
+
+        Alert saved = alerts.saveAndFlush(new Alert(pro, AlertType.APPOINTMENT_CANCELLED, insertAppointment(pro), "Annulé"));
+
+        assertThat(saved.getCreatedAt().getNano() % 1_000).isZero();
+        assertThat(jdbc.queryForObject("select created_at from alerts where id = ?", Timestamp.class, saved.getId()).toInstant())
+                .isEqualTo(saved.getCreatedAt());
+    }
+
     @Test
     void oneAppointmentGivesOneCancellationAlertOnly() {
         UUID pro = insertPractitioner();
