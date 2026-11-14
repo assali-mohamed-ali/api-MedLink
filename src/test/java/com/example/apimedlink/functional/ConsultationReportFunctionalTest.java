@@ -2,7 +2,12 @@ package com.example.apimedlink.functional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.io.ByteArrayInputStream;
+import java.net.URI;
+import java.net.http.HttpClient;
+import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.sql.Date;
 import java.sql.Timestamp;
 import java.time.Instant;
@@ -182,6 +187,69 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
         assertThat(new Browser().call(reports(patientId)).statusCode()).isEqualTo(401);
     }
 
+    // ---- Review on #123: what a write must pass before its body is read ----
+
+    /**
+     * Not attached: the record's 403 whatever the body is, so before Spring reads it. A malformed body would be a
+     * JSON-parser 400 and a huge one would be read in full if the attachment were checked in the service.
+     */
+    @Test
+    void aPractitionerWhoIsNotAttachedGets403BeforeTheBodyIsReadWhateverItHolds() throws Exception {
+        Pro attached = practitioner();
+        Pro other = practitioner();
+        UUID patient = insertPatient();
+        appointment(attached.id(), patient, "BOOKED");
+
+        List<HttpResponse<String>> refused = List.of(
+                other.browser().postJson(reports(patient), "{not json"),
+                other.browser().postJson(reports(patient), json("x".repeat(100_000))),
+                postUnsized(other.browser(), reports(patient), json(TEXT)));
+
+        for (HttpResponse<String> response : refused) {
+            assertThat(response.statusCode()).as(response.body()).isEqualTo(403);
+            assertThat(Browser.json(response).get("code")).isEqualTo("FORBIDDEN");
+        }
+        assertThat(jdbc.queryForObject("select count(*) from consultation_reports where patient_id = ?", Integer.class, patient))
+                .isZero();
+    }
+
+    /**
+     * Attached: a body over the hard byte limit is 413 and one that does not say its size (chunked) is 411, both
+     * before it is read; nothing is saved. A malformed body is still the usual 400.
+     */
+    @Test
+    void anAttachedPractitionersOversizedOrUnsizedBodyIsRefusedBeforeItIsRead() throws Exception {
+        Pro pro = practitioner();
+        UUID patient = insertPatient();
+        appointment(pro.id(), patient, "BOOKED");
+
+        HttpResponse<String> oversized = pro.browser().postJson(reports(patient), json("x".repeat(100_000)));
+        HttpResponse<String> unsized = postUnsized(pro.browser(), reports(patient), json(TEXT));
+        HttpResponse<String> malformed = pro.browser().postJson(reports(patient), "{not json");
+
+        assertThat(oversized.statusCode()).as(oversized.body()).isEqualTo(413);
+        assertThat(Browser.json(oversized).get("code")).isEqualTo("PAYLOAD_TOO_LARGE");
+        assertThat(unsized.statusCode()).as(unsized.body()).isEqualTo(411);
+        assertThat(Browser.json(unsized).get("code")).isEqualTo("LENGTH_REQUIRED");
+        assertThat(malformed.statusCode()).as(malformed.body()).isEqualTo(400);
+        assertThat(jdbc.queryForObject("select count(*) from consultation_reports where patient_id = ?", Integer.class, patient))
+                .isZero();
+    }
+
+    /** The byte limit never refuses a valid report: 10 000 characters, each at its longest JSON escape, still pass. */
+    @Test
+    void theLongestValidReportStillFitsUnderTheByteLimit() throws Exception {
+        Pro pro = practitioner();
+        UUID patient = insertPatient();
+        appointment(pro.id(), patient, "BOOKED");
+
+        String body = "{\"content\": \"" + "\\u00e9".repeat(10_000) + "\"}";
+
+        HttpResponse<String> created = pro.browser().postJson(reports(patient), body);
+        assertThat(created.statusCode()).as(created.body()).isEqualTo(201);
+        assertThat((String) Browser.json(created).get("content")).hasSize(10_000);
+    }
+
     @SuppressWarnings("unchecked")
     // ---- 32.4: every write and every read is traced, ids only ----
 
@@ -278,6 +346,25 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
                 "BOOKED".equals(status) ? "BOOKED" : "FREE");
         jdbc.update("insert into appointments (id, slot_id, patient_id, booked_by, status) values (?, ?, ?, ?, ?)",
                 UUID.randomUUID(), slot, patient, patient, status);
+    }
+
+    /**
+     * A JSON post whose body does not say its size (no Content-Length: HTTP/1.1 chunked), with the browser's session
+     * and CSRF header, as a client streaming a body would send it.
+     */
+    private static HttpResponse<String> postUnsized(Browser browser, String path, String json) throws Exception {
+        if (browser.cookies.value("XSRF-TOKEN") == null) {
+            browser.call("/api/auth/csrf");
+        }
+        byte[] bytes = json.getBytes(StandardCharsets.UTF_8);
+        HttpRequest request = HttpRequest.newBuilder(URI.create(appUrl(path)))
+                .version(HttpClient.Version.HTTP_1_1)
+                .header("X-Forwarded-For", browser.forwardedFor)
+                .header("Content-Type", "application/json")
+                .header("X-XSRF-TOKEN", browser.cookies.value("XSRF-TOKEN"))
+                .POST(HttpRequest.BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(bytes)))
+                .build();
+        return browser.http.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     private static String reports(UUID patient) {
