@@ -15,7 +15,6 @@ import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.TransactionException;
-import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
@@ -39,6 +38,7 @@ public class ConsultationReportService {
     private final AppointmentRepository appointments;
     private final ReportCipher cipher;
     private final TransactionTemplate transaction;
+    private final TransactionTemplate readOnly;
     private final AuditService audit;
 
     public ConsultationReportService(ConsultationReportRepository reports, AppointmentRepository appointments,
@@ -47,6 +47,8 @@ public class ConsultationReportService {
         this.appointments = appointments;
         this.cipher = cipher;
         this.transaction = new TransactionTemplate(transactionManager);
+        this.readOnly = new TransactionTemplate(transactionManager);
+        this.readOnly.setReadOnly(true);
         this.audit = audit;
     }
 
@@ -78,21 +80,26 @@ public class ConsultationReportService {
 
     /**
      * The patient's reports, newest first, whoever of their practitioners wrote them. The REPORT_VIEWED row is written
-     * before they leave (32.4, in its own transaction like the record's): a read that cannot be traced is not answered.
+     * before they leave (32.4): a read that cannot be traced is not answered. The read transaction ends first and gives
+     * its connection back, then the row is written in its own (review on #123): a list never holds two connections.
      */
-    @Transactional(readOnly = true)
     public List<ReadableReport> list(UUID practitionerId, UUID patientId) {
-        requireAttached(practitionerId, patientId);
-        List<ReadableReport> found = reports.findByPatientIdOrderByCreatedAtDesc(patientId).stream()
-                .map(report -> new ReadableReport(report.getId(), report.getCreatedAt(),
-                        cipher.decrypt(report.getId(), report.getPatientId(), report.getContentEncrypted())))
-                .toList();
+        List<ReadableReport> found = readOnly.execute(status -> {
+            requireAttached(practitionerId, patientId);
+            return reports.findByPatientIdOrderByCreatedAtDesc(patientId).stream()
+                    .map(report -> new ReadableReport(report.getId(), report.getCreatedAt(),
+                            cipher.decrypt(report.getId(), report.getPatientId(), report.getContentEncrypted())))
+                    .toList();
+        });
         audit.record(AuditAction.REPORT_VIEWED, RESOURCE_PATIENT_REPORTS, patientId.toString(), AuditOutcome.SUCCESS);
         return found;
     }
 
-    /** Not attached, unknown or malformed: the record's 403 (audited as a refusal by the access-denied handler). */
-    private void requireAttached(UUID practitionerId, UUID patientId) {
+    /**
+     * Not attached, unknown or malformed: the record's 403 (audited as a refusal by the access-denied handler). Also
+     * called by {@code ReportWriteGuard} before a write's body is read (review on #123).
+     */
+    public void requireAttached(UUID practitionerId, UUID patientId) {
         if (!appointments.existsByPractitionerAndPatient(practitionerId, patientId)) {
             throw new AccessDeniedException("Patient not attached to the practitioner");
         }

@@ -23,7 +23,8 @@ import org.springframework.web.bind.annotation.RestController;
 /**
  * MLink-32 (32.3): the consultation reports of a patient, for the practitioners the patient is attached to. The role
  * is also checked by the URL rule in {@code SecurityConfig}, before Spring reads the body: a patient gets 403, never
- * 400. The attachment is checked before the text: a practitioner who is not attached gets 403 whatever they send.
+ * 400. A write's attachment and byte size are checked by {@code ReportWriteGuard} before Spring reads the body
+ * (review on #123): a practitioner who is not attached gets 403 whatever they send, an oversized body 413.
  */
 @RestController
 @RequestMapping("/api/patients")
