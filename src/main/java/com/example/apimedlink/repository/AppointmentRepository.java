@@ -13,10 +13,8 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
-import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
-import org.springframework.transaction.annotation.Transactional;
 
 /** Patients' appointments on slots (MLink-97). */
 public interface AppointmentRepository extends JpaRepository<Appointment, UUID> {
@@ -31,23 +29,17 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
     Optional<Appointment> findForChangeById(@Param("id") UUID id);
 
     /**
-     * MLink-110: the appointments still to remind, those in {@code status} that start after {@code from} and no later
-     * than {@code until}, with their slot, clinic and practitioner for the mail.
+     * MLink-110: the ids of the appointments still to remind, those in {@code status} that start after {@code from}
+     * and no later than {@code until}. Only candidates: each one is locked and checked again before its mail
+     * (MLink-111, review on #120), since it can be cancelled while the job runs.
      */
-    @EntityGraph(attributePaths = {"slot", "slot.clinic", "slot.practitioner"})
     @Query("""
-            select a from Appointment a
+            select a.id from Appointment a
             where a.status = :status and a.reminderSentAt is null
               and a.slot.startsAt > :from and a.slot.startsAt <= :until
             order by a.slot.startsAt""")
-    List<Appointment> findRemindersDue(@Param("status") AppointmentStatus status, @Param("from") Instant from,
+    List<UUID> findRemindersDue(@Param("status") AppointmentStatus status, @Param("from") Instant from,
             @Param("until") Instant until);
-
-    /** MLink-110: the reminder of this appointment went out. Only the first success counts. */
-    @Transactional
-    @Modifying
-    @Query("update Appointment a set a.reminderSentAt = :sentAt where a.id = :id and a.reminderSentAt is null")
-    int markReminderSent(@Param("id") UUID id, @Param("sentAt") Instant sentAt);
 
     boolean existsBySlot_IdAndStatus(UUID slotId, AppointmentStatus status);
 
