@@ -56,6 +56,8 @@ class AppointmentReminderFunctionalTest extends FunctionalTestBase {
                 .contains("Praticien : Dr Rim Jaziri")
                 .contains("Clinique : Clinique Rappel Sfax")
                 .contains("/patient/rendez-vous");
+        // MLink-111, review on #120: one Message-ID per appointment, the same if the reminder is ever sent again
+        assertThat(mails.get(0).get("MessageID")).isEqualTo("appointment-reminder-" + appointment + "@medlink.local");
         assertThat(jdbc.queryForObject("select reminder_sent_at from appointments where id = ?", Timestamp.class,
                 appointment)).isNotNull();
     }
