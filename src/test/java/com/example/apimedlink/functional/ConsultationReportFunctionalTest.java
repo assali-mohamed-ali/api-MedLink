@@ -3,6 +3,9 @@ package com.example.apimedlink.functional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import java.io.ByteArrayInputStream;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -236,6 +239,24 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
                 .isZero();
     }
 
+    /**
+     * Second review on #123: a write that says neither its length nor Transfer-Encoding (as an HTTP/2 hop may
+     * forward it) is 411 too, never passed on to the JSON reader. Sent over a raw socket, since an HTTP client
+     * always adds one of the two headers. The HTTP/2 form is in ReportWriteGuardTest.
+     */
+    @Test
+    void aWriteWithNeitherContentLengthNorTransferEncodingIsRefusedWith411() throws Exception {
+        Pro pro = practitioner();
+        UUID patient = insertPatient();
+        appointment(pro.id(), patient, "BOOKED");
+
+        String answer = postWithoutLength(pro.browser(), reports(patient));
+
+        assertThat(answer).startsWith("HTTP/1.1 411").contains("LENGTH_REQUIRED");
+        assertThat(jdbc.queryForObject("select count(*) from consultation_reports where patient_id = ?", Integer.class, patient))
+                .isZero();
+    }
+
     /** The byte limit never refuses a valid report: 10 000 characters, each at its longest JSON escape, still pass. */
     @Test
     void theLongestValidReportStillFitsUnderTheByteLimit() throws Exception {
@@ -365,6 +386,30 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
                 .POST(HttpRequest.BodyPublishers.ofInputStream(() -> new ByteArrayInputStream(bytes)))
                 .build();
         return browser.http.send(request, HttpResponse.BodyHandlers.ofString());
+    }
+
+    /** A POST with the browser's session and CSRF header, and neither Content-Length nor Transfer-Encoding. */
+    private static String postWithoutLength(Browser browser, String path) throws Exception {
+        if (browser.cookies.value("XSRF-TOKEN") == null) {
+            browser.call("/api/auth/csrf");
+        }
+        URI uri = URI.create(appUrl(path));
+        String cookie = browser.cookies.get(uri, Map.of()).getOrDefault("Cookie", List.of("")).get(0);
+        String request = "POST " + path + " HTTP/1.1\r\n"
+                + "Host: localhost:" + uri.getPort() + "\r\n"
+                + "X-Forwarded-For: " + browser.forwardedFor + "\r\n"
+                + "Content-Type: application/json\r\n"
+                + "X-XSRF-TOKEN: " + browser.cookies.value("XSRF-TOKEN") + "\r\n"
+                + "Cookie: " + cookie + "\r\n"
+                + "Connection: close\r\n\r\n";
+        try (Socket socket = new Socket(uri.getHost(), uri.getPort())) {
+            socket.setSoTimeout(10_000);
+            OutputStream out = socket.getOutputStream();
+            out.write(request.getBytes(StandardCharsets.US_ASCII));
+            out.flush();
+            InputStream in = socket.getInputStream();
+            return new String(in.readAllBytes(), StandardCharsets.UTF_8);
+        }
     }
 
     private static String reports(UUID patient) {
