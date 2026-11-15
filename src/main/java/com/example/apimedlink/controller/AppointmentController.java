@@ -7,12 +7,9 @@ import com.example.apimedlink.dto.RescheduleAppointmentRequest;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.mapper.AppointmentMapper;
 import com.example.apimedlink.model.Appointment;
-import com.example.apimedlink.model.AuditAction;
-import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.security.CurrentUser;
 import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.service.AppointmentService;
-import com.example.apimedlink.service.AuditService;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.UUID;
@@ -37,12 +34,10 @@ public class AppointmentController {
 
     private final AppointmentService service;
     private final CurrentUser currentUser;
-    private final AuditService audit;
 
-    public AppointmentController(AppointmentService service, CurrentUser currentUser, AuditService audit) {
+    public AppointmentController(AppointmentService service, CurrentUser currentUser) {
         this.service = service;
         this.currentUser = currentUser;
-        this.audit = audit;
     }
 
     /**
@@ -54,10 +49,8 @@ public class AppointmentController {
     @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
     public AppointmentDto book(@RequestBody(required = false) BookAppointmentRequest request) {
         UUID slotId = slotId("slotId", request == null ? null : request.slotId(), "Le créneau est obligatoire.");
+        // MLink-104: the booking writes its own audit row, in its transaction (review on #120)
         Appointment appointment = service.book(currentUser.id(), slotId);
-        // MLink-104: recorded once the booking is committed, so a refused or rolled-back booking leaves no SUCCESS;
-        // ids only (the caller is taken from the session by AuditService)
-        audit.record(AuditAction.APPOINTMENT_BOOKED, "APPOINTMENT", appointment.getId().toString(), AuditOutcome.SUCCESS);
         return AppointmentMapper.toDto(appointment);
     }
 

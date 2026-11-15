@@ -3,6 +3,8 @@ package com.example.apimedlink.service;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.model.Appointment;
 import com.example.apimedlink.model.AppointmentStatus;
+import com.example.apimedlink.model.AuditAction;
+import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Slot;
 import com.example.apimedlink.model.SlotStatus;
 import com.example.apimedlink.repository.AppointmentRepository;
@@ -36,15 +38,18 @@ public class AppointmentService {
     private final SlotRepository slots;
     private final PatientRepository patients;
     private final OwnershipGuard ownership;
+    private final AuditService audit;
     /** H-03: no cancel less than this before the start (app.appointments.cancel-deadline-hours). */
     private final Duration cancelDeadline;
 
     public AppointmentService(AppointmentRepository appointments, SlotRepository slots, PatientRepository patients,
-            OwnershipGuard ownership, @Value("${app.appointments.cancel-deadline-hours}") long cancelDeadlineHours) {
+            OwnershipGuard ownership, AuditService audit,
+            @Value("${app.appointments.cancel-deadline-hours}") long cancelDeadlineHours) {
         this.appointments = appointments;
         this.slots = slots;
         this.patients = patients;
         this.ownership = ownership;
+        this.audit = audit;
         this.cancelDeadline = Duration.ofHours(cancelDeadlineHours);
     }
 
@@ -128,7 +133,9 @@ public class AppointmentService {
     /**
      * MLink-102: the patient books a free slot that has not started, for themselves ({@code patient_id} =
      * {@code booked_by} = the caller). One transaction: the slot row is locked, the appointment is created and the
-     * slot becomes BOOKED, so a second booking of the same slot waits, then sees it taken.
+     * slot becomes BOOKED, so a second booking of the same slot waits, then sees it taken. MLink-104 (review on #120):
+     * the audit row is written in this same transaction, so a booking is never kept without its trace, and a failed
+     * audit write rolls the booking back instead of answering 500 for a slot that stays booked.
      */
     @Transactional
     public Appointment book(UUID patientId, UUID slotId) {
@@ -137,7 +144,11 @@ public class AppointmentService {
             throw new ApiException(HttpStatus.FORBIDDEN, "PATIENT_PROFILE_REQUIRED",
                     "Complétez votre profil patient avant de réserver.");
         }
-        return bookLocked(slotToBook(slotId), patientId, Instant.now());
+        Appointment appointment = bookLocked(slotToBook(slotId), patientId, Instant.now());
+        // Ids only (the caller is taken from the session by AuditService)
+        audit.recordWithin(AuditAction.APPOINTMENT_BOOKED, "APPOINTMENT", appointment.getId().toString(),
+                AuditOutcome.SUCCESS);
+        return appointment;
     }
 
     /** Books a slot already locked by the caller's transaction, for the patient (patient_id = booked_by). */
