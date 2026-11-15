@@ -175,7 +175,10 @@ public class AdminUserService {
     }
 
     /**
-     * Enables or disables an account. Disabling signs the user out at once (the API's own mark, then Keycloak).
+     * Enables or disables an account. A disable writes the local revocation (session_revocations) first, as
+     * changeRole does: the API validates already-issued tokens locally, so if that write fails nothing has changed
+     * in Keycloak and staff send the request again, while a failure after it only leaves the account enabled with
+     * its sessions refused (the user logs in again). Keycloak then disables the account and ends its sessions.
      *
      * @throws ApiException 409 {@code CANNOT_DISABLE_SELF} when staff disable their own account
      */
@@ -184,9 +187,11 @@ public class AdminUserService {
             throw new ApiException(HttpStatus.CONFLICT, "CANNOT_DISABLE_SELF",
                     "Vous ne pouvez pas désactiver votre propre compte.");
         }
-        keycloak.setEnabled(id, enabled);
         if (!enabled) {
             revocations.revoke(id);
+        }
+        keycloak.setEnabled(id, enabled);
+        if (!enabled) {
             keycloak.endSessions(id);
         }
     }
