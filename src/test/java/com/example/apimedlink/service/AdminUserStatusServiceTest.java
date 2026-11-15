@@ -2,9 +2,11 @@ package com.example.apimedlink.service;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.example.apimedlink.TestcontainersConfiguration;
 import com.example.apimedlink.exception.ApiException;
@@ -17,8 +19,10 @@ import org.mockito.InOrder;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.http.HttpStatus;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
+import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 /** MLink-70: enabling and disabling an account. Real database; Keycloak is a mock. */
 @SpringBootTest
@@ -31,24 +35,39 @@ class AdminUserStatusServiceTest {
     @Autowired
     UserRepository users;
 
-    @Autowired
+    /** The real store, watched: a test can make its write fail. */
+    @MockitoSpyBean
     SessionRevocationStore revocations;
 
     @MockitoBean
     KeycloakAdminService keycloak;
 
     @Test
-    void disablingAnAccountDisablesThenRevokesAndEndsItsSessions() {
+    void disablingAnAccountRevokesFirstThenDisablesAndEndsItsSessions() {
         UUID id = UUID.randomUUID();
         String email = "status-" + id + "@example.com";
         users.save(User.builder().id(id).username(email).email(email).build());
 
         admin.setEnabled(id, false, UUID.randomUUID());
 
-        InOrder order = inOrder(keycloak);
+        InOrder order = inOrder(revocations, keycloak);
+        order.verify(revocations).revoke(id);
         order.verify(keycloak).setEnabled(id, false);
         order.verify(keycloak).endSessions(id);
         assertThat(revocations.revokedAt(id)).as("the API's own mark").isPresent();
+    }
+
+    @Test
+    void aFailedRevocationLeavesKeycloakUntouched() {
+        UUID id = UUID.randomUUID();
+        doThrow(new DataAccessResourceFailureException("database down")).when(revocations).revoke(id);
+
+        assertThatThrownBy(() -> admin.setEnabled(id, false, UUID.randomUUID()))
+                .isInstanceOf(DataAccessResourceFailureException.class)
+                .hasMessageContaining("database down");
+
+        // Fail closed: nothing was disabled and no session was ended, so staff send the request again
+        verifyNoInteractions(keycloak);
     }
 
     @Test
