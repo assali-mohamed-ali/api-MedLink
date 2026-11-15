@@ -48,6 +48,12 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-15:** Code owner's review on #120 (`epic/MLink-8`), three fixes: a booking and its audit row in one
+transaction (MLink-104); each reminder locks and rechecks its appointment before the mail, so a cancel during the run
+stops it (MLink-110); reminder delivery is stated as **at least once**, with one Message-ID per appointment (MLink-111).
+Shared file: none changed (`AuditService.recordWithin` came with #116). No migration, no new route. See the section
+"Review on #120".
+
 **2026-11-08:** MLink-111 on `epic/MLink-8`: a failed reminder is tried 3 times then logged (id only) and left for the
 next run; one reminder only. New property `app.appointments.reminder-retry-backoff`. See the MLink-111 section.
 
@@ -484,6 +490,52 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## Review on #120 — booking audit, reminder vs cancel, at-least-once reminders (2026-11-15, epic/MLink-8)
+
+The code owner kept *changes requested* on #120 for three reliability findings (the Trivy CVE of 2026-11-11 was fixed
+on `master` meanwhile). Each fix: red test commit, green commit, then a mutation check.
+
+**1. A booking and its audit row are one unit (MLink-104).** Before, `AppointmentController` wrote
+`APPOINTMENT_BOOKED` with `AuditService.record` (`REQUIRES_NEW`) after `book()` had committed: a failed audit write
+answered 500 for a slot that stayed booked, and the patient's retry met `SLOT_TAKEN`. Now `AppointmentService.book`
+writes the row with `AuditService.recordWithin` (`MANDATORY`, added by #116 for the same review on the agenda) inside
+the booking transaction; the controller no longer audits.
+- Test `AppointmentAuditAtomicityTest` (service, Testcontainers, audit repository made to fail as in
+  `AgendaAuditAtomicityTest`): a failed audit leaves no appointment and a FREE slot; a booking writes exactly one
+  `APPOINTMENT_BOOKED` row. Red with the previous code (609f323, checked with the code of the commit before): 2 of 2
+  fail. Green (eea5401): 15 tests with the booking and audit functional tests, 0 failures.
+- Mutation note: swapping `recordWithin` for `record` *inside* the transaction does not turn it red (the audit
+  failure still propagates and rolls the booking back); the guarded defect is the audit written after the commit,
+  which is exactly what the red run proves.
+
+**2. A reminder never crosses a cancel (MLink-110).** Before, the job read the due appointments once and sent from
+that detached list: a cancel during the run still got its reminder, and the marker update did not check the status.
+Now `findRemindersDue` returns ids only; for each one, a short transaction locks the row (`findForChangeById`, the
+lock a cancel takes), checks it again (still `BOOKED`, `reminder_sent_at` empty, still in the window), sends, and sets
+`reminder_sent_at` on that locked row. A cancel and a reminder run one after the other; a second API instance waits
+on the lock and then finds the reminder marked. `markReminderSent` is removed. The lock is held at most one SMTP
+attempt (timeouts 5 s connect, 10 s read/write); retries release it between attempts.
+- Test `AppointmentReminderRaceTest` (service, Testcontainers, mail sender spied so nothing is sent): the second due
+  appointment is cancelled while the first one's mail is being sent; it gets no reminder and stays unmarked.
+
+**3. Delivery is at least once, and said so (MLink-111).** SMTP cannot join the database transaction: if the mail
+server accepts a reminder and the marker then fails to commit (crash, database), the next run sends it again. That
+is now the documented contract, logged as "sent but not marked", and both copies carry the same
+`Message-ID: <appointment-reminder-{appointmentId}@medlink.local>` (`MailService.reminderMessageId`), so mail systems
+can recognise the duplicate.
+- `AppointmentReminderJobTest` (unit, 5 tests): outage → 3 attempts, logged by id only, nothing committed; server back
+  → sent and marked; one failure then success; **sent but marker commit fails → sent again next run, same
+  appointment**; found cancelled when locked → no mail. `AppointmentReminderFunctionalTest` checks the Message-ID in
+  Mailpit.
+
+**Proof** (Ubuntu VM with Docker):
+- Red (4286db7, run with the code of the commit before): `AppointmentReminderRaceTest` fails (the cancelled one got
+  its mail) and the Mailpit test fails (no stable Message-ID). Green (f79fd9c): 10 reminder tests, 0 failures.
+- Mutation (fix 2): without the `BOOKED` recheck under the lock, `AppointmentReminderRaceTest` turns red.
+- `./mvnw -B verify` **639 tests, 0 failures**; reverse order 639, 0 failures (one earlier run had `AgendaFunctionalTest`
+  miss its staff-code mail while `setup-dev` ran in parallel; alone it passed, 22/22, then the full run was green).
+- `setup-dev --skip-tests` then newman: **191 requests, 413 assertions, 0 failures** (after #116 and #117 merged in).
 
 ## MLink-111 — one reminder only, retried and logged on failure (2026-11-08, epic/MLink-8)
 
