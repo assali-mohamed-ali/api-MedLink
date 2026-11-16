@@ -12,6 +12,10 @@ PR** (the plan is one PR for #64 + #57; start with `git pull --no-rebase`). `mas
 16 commits ahead, 0 behind. On that head: `./mvnw -B clean verify` **619 tests, 0 failures** and
 `./mvnw -B test -Dsurefire.runOrder=reversealphabetical` 619/0 (2026-11-12). Clean tree.
 
+**Warning (2026-11-16): `master` does not compile** since #118 + #119 were squash-merged (`setEnabled` twice in
+`AdminUserService`; reported on #119, fix is theirs). Check `master` builds (`./mvnw -B -q compile` on a worktree)
+before step 1; while it is red, skip the merge and work on this branch as it is (it compiles).
+
 **Do first, in order:**
 1. `git checkout fix/db-hardening && git fetch origin && git merge origin/master` (never rebase; `report.md` status
    notes conflict often: keep both, newest first). Run the suite once to start from green.
