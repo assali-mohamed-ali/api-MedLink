@@ -34,16 +34,23 @@ public class RateLimitFilter extends OncePerRequestFilter {
     public static final String CODE = "TOO_MANY_REQUESTS";
     public static final String MESSAGE = "Trop de demandes depuis votre connexion. Réessayez dans quelques minutes.";
 
+    /**
+     * A limited path, and the name its counter is kept under. The stored key is the name, a colon and a 64-character
+     * hash, in a VARCHAR(100) column (V8): a name is at most 35 characters, so a long path gets a short name.
+     */
+    private record Limit(String counter, Rule rule) {}
+
     private final RateLimitStore store;
-    private final Map<String, Rule> rules;
+    private final Map<String, Limit> rules;
     private final JsonMapper json;
 
     public RateLimitFilter(RateLimitStore store, RateLimitProperties limits, JsonMapper json) {
         this.store = store;
         this.rules = Map.of(
-                "/api/auth/login", limits.login(),
-                "/api/auth/register", limits.register(),
-                "/api/auth/verify-email/resend", limits.resend());
+                "/api/auth/login", new Limit("ip:/api/auth/login", limits.login()),
+                "/api/auth/register", new Limit("ip:/api/auth/register", limits.register()),
+                "/api/auth/verify-email/resend", new Limit("ip:/api/auth/verify-email/resend", limits.resend()),
+                "/api/auth/account/activate/resend", new Limit("ip:/api/auth/activation/resend", limits.resend()));
         this.json = json;
     }
 
@@ -60,9 +67,9 @@ public class RateLimitFilter extends OncePerRequestFilter {
     @Override
     protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, FilterChain chain)
             throws ServletException, IOException {
-        String path = request.getServletPath();
-        Rule rule = rules.get(path);
-        Hit hit = store.hit("ip:" + path, request.getRemoteAddr(), rule.window());
+        Limit limit = rules.get(request.getServletPath());
+        Rule rule = limit.rule();
+        Hit hit = store.hit(limit.counter(), request.getRemoteAddr(), rule.window());
         if (hit.count() <= rule.max()) {
             chain.doFilter(request, response);
             return;

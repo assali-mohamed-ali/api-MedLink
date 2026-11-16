@@ -21,6 +21,8 @@ import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.service.KeycloakAdminService;
 import com.example.apimedlink.service.KeycloakUser;
 import com.example.apimedlink.service.KeycloakUserPage;
+import jakarta.mail.Session;
+import jakarta.mail.internet.MimeMessage;
 import jakarta.persistence.EntityNotFoundException;
 import java.util.List;
 import java.util.UUID;
@@ -31,6 +33,7 @@ import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.boot.webmvc.test.autoconfigure.AutoConfigureMockMvc;
 import org.springframework.context.annotation.Import;
 import org.springframework.http.MediaType;
+import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.ResultActions;
@@ -48,6 +51,9 @@ class AdminUserControllerTest {
     @MockitoBean
     KeycloakAdminService keycloak;
 
+    @MockitoBean
+    JavaMailSender mailSender;
+
     UUID keycloakId;
     String email;
 
@@ -57,6 +63,7 @@ class AdminUserControllerTest {
         email = "karim-" + keycloakId + "@example.com";
         when(keycloak.createUser(anyString(), anyString(), anyString(), anyString(), anyString()))
                 .thenReturn(keycloakId);
+        when(mailSender.createMimeMessage()).thenAnswer(i -> new MimeMessage((Session) null));
     }
 
     private ResultActions asStaff(MockHttpServletRequestBuilder request) throws Exception {

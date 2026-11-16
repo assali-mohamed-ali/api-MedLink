@@ -76,6 +76,8 @@ public class SecurityConfig {
                                 "/api/auth/register",
                                 "/api/auth/verify-email",
                                 "/api/auth/verify-email/resend",
+                                "/api/auth/account/activate",
+                                "/api/auth/account/activate/resend",
                                 "/api/auth/password",
                                 // Staff code step: the pending step login started is the guard (MLink-62/63)
                                 "/api/auth/mfa/setup",
