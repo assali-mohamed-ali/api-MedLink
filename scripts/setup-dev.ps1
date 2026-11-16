@@ -141,7 +141,7 @@ function New-Secret {
     return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
 }
 
-# The staff code key (APP_MFA_ENCRYPTION_KEY): exactly 32 random bytes, in base64
+# The staff code and report keys (APP_MFA_ENCRYPTION_KEY, APP_REPORT_ENCRYPTION_KEY): exactly 32 random bytes, in base64
 function New-Key {
     $bytes = New-Object byte[] 32
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
@@ -290,6 +290,7 @@ if (Test-Path '.env') {
         KC_BFF_CLIENT_SECRET    = New-Secret
         KC_ADMIN_CLIENT_SECRET  = New-Secret
         APP_MFA_ENCRYPTION_KEY  = New-Key
+        APP_REPORT_ENCRYPTION_KEY = New-Key
         KC_DEV_USERS_PASSWORD   = $DevUsersPassword
     }
     foreach ($key in $generated.Keys) {
@@ -305,14 +306,14 @@ $added = @()
 foreach ($key in (Read-DotEnv '.env.example').Keys) {
     if ($envValues.ContainsKey($key)) { continue }
     $value = (Read-DotEnv '.env.example')[$key]
-    if ($key -eq 'APP_MFA_ENCRYPTION_KEY') { $value = New-Key }
+    if ($key -eq 'APP_MFA_ENCRYPTION_KEY' -or $key -eq 'APP_REPORT_ENCRYPTION_KEY') { $value = New-Key }
     elseif ($key -like '*SECRET*' -or $key -like '*PASSWORD*') { $value = New-Secret }
     [System.IO.File]::AppendAllText((Join-Path $Repo '.env'), "`n$key=$value", (New-Object System.Text.UTF8Encoding($false)))
     $added += $key
 }
 if ($added) { Write-Ok "added to .env: $($added -join ', ')" }
 $envValues = Read-DotEnv '.env'
-foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KC_ADMIN_CLIENT_SECRET', 'APP_MFA_ENCRYPTION_KEY', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD') {
+foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KC_ADMIN_CLIENT_SECRET', 'APP_MFA_ENCRYPTION_KEY', 'APP_REPORT_ENCRYPTION_KEY', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD') {
     if (-not $envValues[$key] -or $envValues[$key] -like 'change-me*') {
         if ($FullStack) { Stop-Setup "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." }
     }
