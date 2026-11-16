@@ -29,7 +29,9 @@ import org.springframework.web.bind.annotation.RestController;
  * needs the link mailed at that login (review of #97), so a stolen password alone enrols nothing.
  * Contract: docs/sprints/sprint-2/plan.md §4.
  *
- * <p>LOGIN/SUCCESS is audited here, once the session really opens (review of #90).
+ * <p>LOGIN/SUCCESS is audited here, once the session really opens (review of #90). When it cannot be opened,
+ * the failure is audited and the half-made session and the Keycloak session are cleaned up before the error
+ * goes on.
  */
 @RestController
 @RequestMapping("/api/auth/mfa")
@@ -87,6 +89,9 @@ public class MfaController {
             sessions.open(login, request, response);
         } catch (RuntimeException notOpened) {
             logins.recordLoginFailure(userId);
+            // No usable session: drop what open() may have left, and end the Keycloak session of this login
+            sessions.abandon(request, response);
+            logins.endSessionQuietly(login.tokens().refreshToken());
             throw notOpened;
         }
         logins.recordLoginSuccess(userId);

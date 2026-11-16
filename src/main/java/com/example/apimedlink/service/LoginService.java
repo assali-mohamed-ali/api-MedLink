@@ -156,6 +156,22 @@ public class LoginService {
         keycloak.endSession(refreshToken);
     }
 
+    /**
+     * Ends the Keycloak session of a login whose web session could not be opened (review of #90). Best effort:
+     * it never throws, so the error that made the login fail is the one the caller sees. A null token means
+     * there is nothing to end.
+     */
+    public void endSessionQuietly(String refreshToken) {
+        if (refreshToken == null) {
+            return;
+        }
+        try {
+            keycloak.endSession(refreshToken);
+        } catch (Exception endEx) {
+            log.warn("Failed to end the Keycloak session of a login whose session could not be opened", endEx);
+        }
+    }
+
     private static List<String> ourRoles(Jwt token) {
         List<String> claimed = token.getClaimAsStringList("roles");
         if (claimed == null) {

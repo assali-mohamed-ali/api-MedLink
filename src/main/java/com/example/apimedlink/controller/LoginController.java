@@ -23,7 +23,9 @@ import org.springframework.web.bind.annotation.RestController;
  * Contract: docs/sprints/sprint-2/plan.md §4.
  *
  * <p>The audit says LOGIN/SUCCESS only once a session exists. A forced password change is recorded as
- * a challenge (PASSWORD_CHANGE_REQUIRED), and the staff code step records nothing yet.
+ * a challenge (PASSWORD_CHANGE_REQUIRED), and the staff code step records nothing yet. When the session
+ * cannot be opened, the failure is audited and the half-made session and the Keycloak session are cleaned
+ * up before the error goes on (review of #90).
  */
 @RestController
 @RequestMapping("/api/auth")
@@ -54,6 +56,9 @@ public class LoginController {
                 sessions.open(success.login(), request, response);
             } catch (RuntimeException notOpened) {
                 logins.recordLoginFailure(userId);
+                // No usable session: drop what open() may have left, and end the Keycloak session of this login
+                sessions.abandon(request, response);
+                logins.endSessionQuietly(success.login().tokens().refreshToken());
                 throw notOpened;
             }
             logins.recordLoginSuccess(userId);

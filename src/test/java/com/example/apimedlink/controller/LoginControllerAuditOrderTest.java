@@ -3,6 +3,7 @@ package com.example.apimedlink.controller;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
@@ -29,7 +30,8 @@ import org.springframework.mock.web.MockHttpServletResponse;
 
 /**
  * LOGIN/SUCCESS is audited only once a session really exists (review of #90). A forced password
- * change is a challenge, not a login. No Spring context.
+ * change is a challenge, not a login. A session that cannot be opened leaves nothing behind: the
+ * half-made web session and the Keycloak session are cleaned up. No Spring context.
  */
 class LoginControllerAuditOrderTest {
 
@@ -45,15 +47,17 @@ class LoginControllerAuditOrderTest {
     final MockHttpServletResponse response = new MockHttpServletResponse();
     final UUID userId = UUID.randomUUID();
     final LoginRequest body = mock(LoginRequest.class);
+    final KeycloakTokens tokens = mock(KeycloakTokens.class);
 
     LoginControllerAuditOrderTest() {
         when(body.email()).thenReturn("user@example.com");
         when(body.password()).thenReturn("a-password");
+        when(tokens.refreshToken()).thenReturn("refresh-token");
     }
 
     private Login aLogin() {
         User user = User.builder().id(userId).username("user@example.com").email("user@example.com").build();
-        return new Login(user, "Ada", "Lovelace", List.of(), mock(KeycloakTokens.class));
+        return new Login(user, "Ada", "Lovelace", List.of(), tokens);
     }
 
     @Test
@@ -67,6 +71,8 @@ class LoginControllerAuditOrderTest {
         order.verify(sessions).open(any(), any(), any());
         order.verify(logins).recordLoginSuccess(userId);
         verify(logins, never()).recordLoginFailure(any());
+        verify(sessions, never()).abandon(any(), any());
+        verify(logins, never()).endSessionQuietly(any());
     }
 
     @Test
@@ -81,6 +87,37 @@ class LoginControllerAuditOrderTest {
 
         verify(logins).recordLoginFailure(userId);
         verify(logins, never()).recordLoginSuccess(any());
+    }
+
+    @Test
+    void aSessionThatCannotBeOpenedIsCleanedUpHereAndInKeycloak() {
+        Login login = aLogin();
+        when(logins.login("user@example.com", "a-password")).thenReturn(new LoginResult.Success(login));
+        doThrow(new IllegalStateException("session store down")).when(sessions).open(any(), any(), any());
+
+        assertThatThrownBy(() -> controller.login(body, request, response))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessageContaining("session store down");
+
+        InOrder order = inOrder(logins, sessions);
+        order.verify(logins).recordLoginFailure(userId);
+        order.verify(sessions).abandon(request, response);
+        order.verify(logins).endSessionQuietly("refresh-token");
+    }
+
+    @Test
+    void theOriginalErrorIsTheOneTheCallerSeesWhateverTheCleanupDoes() {
+        Login login = aLogin();
+        when(logins.login("user@example.com", "a-password")).thenReturn(new LoginResult.Success(login));
+        doThrow(new IllegalStateException("session store down")).when(sessions).open(any(), any(), any());
+
+        assertThatThrownBy(() -> controller.login(body, request, response))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("session store down");
+
+        // The cleanup is best effort inside LoginSessions / LoginService (their own tests): it is called, once
+        verify(sessions).abandon(request, response);
+        verify(logins).endSessionQuietly(anyString());
     }
 
     @Test
