@@ -52,6 +52,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/admin/users",              L, F, F, O),
             new Rule("POST",   "/api/admin/users",              L, F, F, O),
             new Rule("PUT",    "/api/admin/users/{id}/role",    L, F, F, O),
+            new Rule("PATCH",  "/api/admin/users/{id}/status",  L, F, F, O),
             new Rule("GET",    "/api/users",                    L, F, F, O),
             new Rule("GET",    "/api/users/{id}",               L, F, F, O),
             new Rule("DELETE", "/api/users/{id}",               L, F, F, O),
