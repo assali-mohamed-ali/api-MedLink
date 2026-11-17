@@ -81,6 +81,33 @@ public class MailService {
     }
 
     /**
+     * A staff account an admin created (MLink-71): its owner opens the link and chooses the first password.
+     * Throws like {@link #sendEmailVerification}.
+     */
+    public void sendAccountActivation(String to, String firstName, String token) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl)
+                .path("/activer-compte")
+                .queryParam("token", token)
+                .build()
+                .toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        String text = hello + "\n\n"
+                + "Un compte MedLink vient d'être créé pour vous. Pour l'activer, choisissez votre mot de passe "
+                + "en ouvrant ce lien :\n\n"
+                + link + "\n\n"
+                + "Ce lien est valable 24 heures et ne peut servir qu'une fois.\n"
+                + "Si vous n'attendiez pas ce message, ignorez-le.\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Un compte MedLink vient d'être créé pour vous. Pour l'activer, choisissez votre mot de passe :</p>"
+                + "<p><a href=\"" + HtmlUtils.htmlEscape(link) + "\">Activer mon compte</a></p>"
+                + "<p>Ce lien est valable 24 heures et ne peut servir qu'une fois.<br>"
+                + "Si vous n'attendiez pas ce message, ignorez-le.</p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Activez votre compte MedLink", text, html);
+    }
+
+    /**
      * Someone tried to sign up with an address that already has an account. Only the owner learns
      * it; the person who tried sees the usual "check your mailbox" answer.
      */
