@@ -131,6 +131,7 @@ services:
       - 'CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:4200'
       - 'TRUSTED_PROXIES=127\.0\.0\.1|0:0:0:0:0:0:0:1'
       - 'APP_MFA_ENCRYPTION_KEY=devOnlyMfaKeyNotForProductionUseLocalOnlyMA=' # gitleaks:allow
+      - 'APP_REPORT_ENCRYPTION_KEY=devOnlyReportKeyNotForProductionUseLocalOnA=' # gitleaks:allow
       - 'MAIL_HOST=mailpit'
       - 'MAIL_PORT=1025'
       - 'MAIL_USERNAME='

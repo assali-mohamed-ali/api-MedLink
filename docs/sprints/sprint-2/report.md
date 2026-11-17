@@ -48,6 +48,18 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-12:** MLink-32 (`feat/MLink-32-consultation-report`): 32.1 `V16__consultation_reports.sql` (immutable rows, content sealed only), 32.2 `ReportCipher` (AES-256-GCM, own key `APP_REPORT_ENCRYPTION_KEY`, report and patient ids as associated data), 32.3 `POST`/`GET /api/patients/{id}/reports` for the practitioners the patient is attached to (the record's rule, MLink-31): body `{ content }` (not blank, 10 000 characters at most, `details.content` on a 400), answer `{ id, createdAt, content }`, newest first; any other caller gets the record's 403, checked before the text; a failed save answers 500 `REPORT_SAVE_FAILED` and keeps nothing. Shared files: `SecurityConfig` (one URL rule, `/api/patients/*/reports` for PRACTITIONER, so a patient's bad body is 403, not 400), two rows in `AccessMatrixFunctionalTest`, Postman folder 11. The migration is V16: this branch merges after #116 (V15).
+
+**2026-11-12:** MLink-32 32.4: every report written adds one `REPORT_CREATED` row (resource `CONSULTATION_REPORT`, the report id), in the same transaction as the report: a report is never kept without its trace, and a failed row answers `REPORT_SAVE_FAILED`. Every read adds one `REPORT_VIEWED` row (resource `PATIENT_REPORTS`, the patient id) before the list leaves, like the record's `RECORD_VIEWED`. Ids only, never a text. Refusals stay `ACCESS_DENIED`. `AuditService.recordWithin` is the same method as on #116 (identical lines, so the two branches merge cleanly there); `AuditAction` gains two values (an additive conflict with #116's `SLOT_OPENED`/`SLOT_CLOSED` when both merge).
+
+**2026-11-15:** MLink-32, code owner's second review on #123. (1) `ReportWriteGuard` refuses every write of unknown length with 411, not only a chunked one: an HTTP/2 hop may forward a body with neither `Content-Length` nor `Transfer-Encoding`, and only a stated length is a bound Tomcat enforces. Tests: `ReportWriteGuardTest` (HTTP/2 and HTTP/1.1 forms, unit), `aWriteWithNeitherContentLengthNorTransferEncodingIsRefusedWith411` (raw socket, real API). (2) `report_encryption_key` is in the three `terraform.tfvars.*.example` files and in the README's required settings (distinct from the MFA key, back it up); `TerraformExamplesTest` checks that every variable without a default is in each example and in the README. Red first.
+
+**2026-11-14:** MLink-32, code owner's review on #123. (1) A report write is checked before Spring reads its body: `ReportWriteGuard`, a handler interceptor on `/api/patients/*/reports` (registered in the new `WebConfig`), checks the attachment first (403 for a malformed, huge or unsized body from a practitioner who is not attached), then a hard size: no `Content-Length` (chunked) is 411 `LENGTH_REQUIRED`, over 64 KiB is 413 `PAYLOAD_TOO_LARGE` (10 000 characters at their longest JSON escape still fit). The service keeps its own checks. (2) A traced read no longer holds its read transaction's connection while its audit row is written in its own (`REQUIRES_NEW`): `list` reads in a read-only `TransactionTemplate`, then calls `audit.record`. Same fix for `PatientRecordService.read` (MLink-31, same pattern). Tests, red first: three in `ConsultationReportFunctionalTest`, and `ReadAuditConnectionTest` (a pool of one connection: a read holding two would time out; the committed row is read back; a read whose trace fails is not answered). No migration, no new route; `SecurityConfig` unchanged.
+
+**2026-11-13:** MLink-32, CI of #123: a report's `createdAt` is kept to the microsecond, as PostgreSQL stores it. Linux clocks (the CI's) give nanoseconds, so the POST answered a time the GET never gave back (green on macOS, red on Linux). Test `theCreationTimeKeptByTheEntityIsTheOneTheDatabaseStores`.
+
+**2026-11-12:** MLink-32 32.7, the acceptance criteria and their tests: (1) the content column is not the text: `theContentIsSealedInTheDatabaseNeverInPlainText`, and `theSameTextIsSealedDifferentlyEachTimeAndNeverAsItsPlainBase64` (a new IV each time, no plain base64); (2) writing for a patient not attached is 403 and saves nothing: `aPractitionerWhoIsNotAttachedGetsTheRecordsSame403AndNothingIsSaved`; (3) a failing save answers `REPORT_SAVE_FAILED` and stores nothing: `ReportSaveFailureTest` (the database cannot fail on demand through the API, so the service is called with its repository, then its audit, made to fail); (4) write and read are audited: `everyWriteAddsOneReportCreatedEntryWithTheIdsOnly`, `everyReadAddsOneReportViewedEntryForThePatient`. `./mvnw -B verify` and the reversed class order green before the push.
+
 **2026-11-12:** MLink-26, code owner's second review on #116: a slot change and its audit row are now one unit. The slot was committed before its audit row (written in its own `REQUIRES_NEW` transaction), so a failed audit could answer 500 after a kept change, with no trace. `AuditService.recordWithin` (new, `MANDATORY`) writes the row in the change's transaction; `AgendaService` calls it for an opening, a closing and a reopening, and the controller no longer audits. If the row cannot be written, the change rolls back. `AuditService.record` (own transaction) is unchanged for refusals. New test `AgendaAuditAtomicityTest` (audit repository made to fail). Shared file: `AuditService` (one method added). No migration, no new route.
 
 **2026-11-10:** MLink-26, code owner's review on #116: `SecurityConfig` gains a role rule for `/api/practitioner/**` (the role is checked before Spring converts dates and JSON: 403, never 400, for a patient). Shared file: no other route changes. Also fixed: two overlapping slot openings at once could end in a 500 (Postgres deadlock), now 409. No migration, no new route.
@@ -1153,6 +1165,19 @@ refuses to start.
 different hash case (PowerShell `Get-FileHash` upper case, `sha256sum` lower case). On one clone used
 with both scripts the stamps never match, so every switch of script wipes the dev volumes (the realm is
 saved first). One user runs one script, so it only bites when both are used on one machine.
+
+## MLink-115 — audit-log query API
+
+**Built:** staff-only `GET /api/admin/audit-entries`, with inclusive ISO-8601 `from`/`to` timestamps,
+`userId` and `action` filters. Results are sorted newest first (timestamp, then id) and returned as
+`items` plus `page`, `size`, `totalElements` and `totalPages`; page size defaults to 50 and is capped at
+100. Invalid date ranges, page values, page sizes and action names return `400 VALIDATION_FAILED`.
+The query service only reads from the append-only audit repository.
+
+**Proof:** `AuditQueryFunctionalTest` checks all filters together, inclusive date bounds, stable ordering,
+pagination, invalid parameters and actions; `AccessMatrixFunctionalTest` verifies anonymous `401`,
+patient/practitioner `403`, and staff access. `.\mvnw -B "-Dtest=AuditQueryFunctionalTest,AuditFunctionalTest,AccessMatrixFunctionalTest" test`:
+**101 tests, 0 failures**.
 
 ## MLink-59 — audit trail, every refusal recorded (2026-10-17, epic/MLink-6)
 

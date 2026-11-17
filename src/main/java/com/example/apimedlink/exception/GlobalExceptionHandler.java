@@ -14,6 +14,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /**
  * Error body: {@code {timestamp, status, error, code, message, details}}. React reacts to
@@ -58,6 +59,16 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(HttpMessageNotReadableException.class)
     public ResponseEntity<Map<String, Object>> unreadable(HttpMessageNotReadableException ex) {
         return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "La requête est mal formée.", null);
+    }
+
+    /**
+     * A request parameter of the wrong type (page=abc, a userId that is not a UUID, a date that is not
+     * ISO): the documented 400, naming the parameter but never echoing the value.
+     */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<Map<String, Object>> parameterTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        return body(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Certains paramètres sont invalides.",
+                Map.of(ex.getName(), "La valeur de ce paramètre est invalide."));
     }
 
     /** Logged in full here; the client only learns that something went wrong (no SQL, no values). */

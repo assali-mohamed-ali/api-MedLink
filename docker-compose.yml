@@ -42,6 +42,7 @@ services:
       # Staging/prod: the reverse proxy's address, as a regex (GitHub #51). Never empty: empty trusts everyone.
       TRUSTED_PROXIES: '${TRUSTED_PROXIES:-127\.0\.0\.1|0:0:0:0:0:0:0:1}'
       APP_MFA_ENCRYPTION_KEY: ${APP_MFA_ENCRYPTION_KEY:?APP_MFA_ENCRYPTION_KEY must be set}
+      APP_REPORT_ENCRYPTION_KEY: ${APP_REPORT_ENCRYPTION_KEY:?APP_REPORT_ENCRYPTION_KEY must be set}
       # Dev and local runs: Mailpit below. Staging/prod: the real SMTP server.
       MAIL_HOST: ${MAIL_HOST:-mailpit}
       MAIL_PORT: ${MAIL_PORT:-1025}
