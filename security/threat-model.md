@@ -78,7 +78,7 @@ flowchart LR
 | # | Threat | Controls (where) | Status | Open work |
 |---|---|---|---|---|
 | T1 | SQL injection | JPA with bound parameters, Bean Validation on every request DTO (`dto/`) | ✅ | |
-| T2 | Audit trail changed or deleted | triggers refuse `UPDATE`, `DELETE`, `TRUNCATE` (`V7__audit_entries.sql`, `AuditFunctionalTest`) | 🟡 | the table's owner is also the runtime role and can drop the triggers: separate roles, GitHub #57 |
+| T2 | Audit trail changed or deleted | the API connects as `medlink_app`, which may only `INSERT` and `SELECT` on `audit_entries` and owns nothing, so it cannot alter, drop or disable the triggers; Flyway alone migrates as the owner, and staging/prod refuse to start when both are the same user (`V18__app_role_grants.sql`, `docker/postgres/initdb/10-app-role.sh`, `config/DatabaseCredentialsCheck`, `RuntimeRoleGrantsTest`, `DatabaseCredentialsStartupTest`; GitHub #57). Second wall: triggers refuse `UPDATE`, `DELETE`, `TRUNCATE` (`V7__audit_entries.sql`, `AuditFunctionalTest`) | ✅ | Flyway runs inside the API, so code execution in the API process would reach the owner's password: a one-shot migration container would remove it. The dev API on the host still runs as the owner |
 | T3 | Schema changed outside review | Flyway only, `ddl-auto: validate` in every profile | ✅ | |
 | T4 | Realm changed by hand and lost or unreviewed | the realm is code (`keycloak/realm-medlink.json`), reviewed in PRs; the setup script re-imports it in dev | 🟡 | in staging and prod the console stays the source of truth after the first import |
 
@@ -142,8 +142,8 @@ be triggered by someone else (D2).
 | Priority | Item | Tracked |
 |---|---|---|
 | 1 | MFA for admin identities (E4); the staff and practitioner second factor (S2) is in place (MLink-62/63) | GitHub #68 |
-| 2 | Separate database roles for the audit trail (T2) | GitHub #57 |
 | 2 | Logins and account operations in the audit trail (R2) | MLink-114, MLink-72 |
 | 2 | Backups with a tested restore (O3) | GitHub #67 |
+| 3 | Migrations in a one-shot container, so the API holds only the runtime role's password (T2 residual) | to open (after GitHub #57) |
 | 3 | Reverse proxy described: TLS, HSTS, CSP, `TRUSTED_PROXIES` (S3, S7, D1) | Terraform GitHub #53 |
 | 3 | Alert routing and a central log store (O4) | not tracked yet |

@@ -48,6 +48,13 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-17:** MLink-165 (GitHub #57) on `fix/db-hardening`: two database roles. Flyway migrates as the owner
+(`POSTGRES_USER`), the API connects as `medlink_app`, which may only append to and read the audit trail and cannot
+change the schema. **Migration V18** (`V18__app_role_grants.sql`; V17 is MLink-37's, open). **Every test now runs as
+`medlink_app`** (`TestcontainersConfiguration`, shared file): a new test that needs a privilege the API does not have
+will fail, as the API would. New env key `APP_DB_PASSWORD` (the setup scripts add it to `.env`); staging/prod also need
+`SPRING_FLYWAY_USER` / `SPRING_FLYWAY_PASSWORD`. No `-Reset` needed. No endpoint. See the MLink-165 section.
+
 **2026-11-12:** MLink-32 (`feat/MLink-32-consultation-report`): 32.1 `V16__consultation_reports.sql` (immutable rows, content sealed only), 32.2 `ReportCipher` (AES-256-GCM, own key `APP_REPORT_ENCRYPTION_KEY`, report and patient ids as associated data), 32.3 `POST`/`GET /api/patients/{id}/reports` for the practitioners the patient is attached to (the record's rule, MLink-31): body `{ content }` (not blank, 10 000 characters at most, `details.content` on a 400), answer `{ id, createdAt, content }`, newest first; any other caller gets the record's 403, checked before the text; a failed save answers 500 `REPORT_SAVE_FAILED` and keeps nothing. Shared files: `SecurityConfig` (one URL rule, `/api/patients/*/reports` for PRACTITIONER, so a patient's bad body is 403, not 400), two rows in `AccessMatrixFunctionalTest`, Postman folder 11. The migration is V16: this branch merges after #116 (V15).
 
 **2026-11-12:** MLink-32 32.4: every report written adds one `REPORT_CREATED` row (resource `CONSULTATION_REPORT`, the report id), in the same transaction as the report: a report is never kept without its trace, and a failed row answers `REPORT_SAVE_FAILED`. Every read adds one `REPORT_VIEWED` row (resource `PATIENT_REPORTS`, the patient id) before the list leaves, like the record's `RECORD_VIEWED`. Ids only, never a text. Refusals stay `ACCESS_DENIED`. `AuditService.recordWithin` is the same method as on #116 (identical lines, so the two branches merge cleanly there); `AuditAction` gains two values (an additive conflict with #116's `SLOT_OPENED`/`SLOT_CLOSED` when both merge).
@@ -223,6 +230,54 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
 
+## MLink-165 — two database roles, the audit trail out of the API's reach, GitHub #57 (2026-11-17, fix/db-hardening)
+
+Plan and step-by-step history: [db-hardening.md](db-hardening.md) (Part B).
+
+**Built:**
+- `docker/postgres/initdb/10-app-role.sh`: the one place that creates the runtime role `medlink_app` (login, password
+  from `APP_DB_PASSWORD`, no superuser or create rights). Run by the postgres image on a new volume (both compose
+  files and the tests' container), and by the setup scripts on an existing one. Safe to run again.
+- `V18__app_role_grants.sql`: `SELECT, INSERT, UPDATE, DELETE` on the app's tables, **only `SELECT, INSERT` on
+  `audit_entries`**, nothing on `flyway_schema_history`, sequences, and default privileges for the tables of later
+  migrations. No ownership, so no `ALTER`, `DROP`, `TRUNCATE` or `TRIGGER`; no `CREATE` in the schema. It creates
+  the role without login when missing (an old volume), so it never fails there.
+- Staging and prod: `spring.flyway.user/password` (`SPRING_FLYWAY_USER` / `_PASSWORD`, no default) is the owner,
+  `spring.datasource.*` the runtime role. `DatabaseCredentialsCheck` applies the #64 rules to the Flyway values too,
+  and **refuses to start when the datasource user is the Flyway owner** (the protection would be gone silently).
+- `docker-compose.yml`: the app connects as `medlink_app` with `APP_DB_PASSWORD` (required), Flyway as
+  `POSTGRES_USER`; postgres mounts the init script. `compose.yaml` the same with dev values. Terraform:
+  `db_flyway_username` / `db_flyway_password`. Setup scripts: generate `APP_DB_PASSWORD`, run the init script before
+  the API starts.
+- Tests: `TestcontainersConfiguration` limits the service connection to Flyway (owner) and gives the datasource its own
+  `JdbcConnectionDetails` as `medlink_app`.
+
+**Found on the way:**
+- A plain `@ServiceConnection` (and Spring Boot's compose integration) gives the container's owner to **both** the
+  datasource and Flyway; connection details win over `spring.flyway.user`. Hence `type = FlywayConnectionDetails.class`.
+- A `DynamicPropertyRegistrar` comes too late for a `RANDOM_PORT` test: the embedded server opens the pool in
+  `onRefresh`, before registrars run. Hence a connection-details bean.
+- Git Bash on Windows rewrites `/docker-entrypoint-initdb.d/...` into a Windows path: `MSYS_NO_PATHCONV=1`.
+
+**Proof:** `RuntimeRoleGrantsTest` (the app's own datasource): INSERT and SELECT on the trail work; UPDATE, DELETE,
+TRUNCATE, DROP TRIGGER, DISABLE TRIGGER, DROP TABLE, CREATE TABLE are refused for a missing privilege (SQLState
+42501, not the trigger's P0001). Red first (7 of 8). `DatabaseCredentialsStartupTest` 44 cases (16 new, red first);
+`compose-credentials.test.sh` 9 cases (2 new, red first). Mutations: no `REVOKE` on `audit_entries` turns UPDATE and
+DELETE red; no same-user check turns its 2 cases red. The whole suite runs as `medlink_app`. Setup scripts, 0
+failures: `setup-dev.ps1 -KeepData` on a pre-#57 volume, `setup-dev.sh --full-stack`, `setup-dev.ps1 -FullStack`.
+
+**For whoever deploys:** the deploy secret must also hold `APP_DB_PASSWORD` (docker-compose.yml requires it). A
+server whose volume predates #57 needs the init script once (`terraform/README.md`, "Database roles"); a fresh one
+gets the role from the image.
+
+**Limits:**
+- The API on the host (`mvnw spring-boot:run`, dev) still connects as the owner: Spring Boot's compose integration
+  gives the container's user to both. The tests, the full stack, staging and prod use `medlink_app`.
+- Flyway runs inside the API, so the API process holds the owner's password in its environment: an SQL injection
+  runs as `medlink_app`, but code execution inside the API would reach the owner. Next step: migrate in a one-shot
+  container and give the API only the runtime role.
+- A later append-only table needs its own `REVOKE` (the default privileges grant DML).
+
 ## MLink-164 — no default database credentials outside dev, GitHub #64 (2026-11-11, fix/db-hardening)
 
 Plan and step-by-step history: [db-hardening.md](db-hardening.md) (Part A).
@@ -252,7 +307,8 @@ make it pass. Both setup scripts pass in full-stack mode (2026-11-11).
 values, or the deploy stops at `docker compose` (on purpose). Staging and prod tests that start a staging/prod
 profile must pass `TestcontainersConfiguration.UNUSED_DB_CREDENTIAL`.
 
-**Limits:** Flyway and the API still share one database user, the owner of every table: GitHub #57 (MLink-165).
+**Limits:** ~~Flyway and the API still share one database user, the owner of every table~~: closed by GitHub #57
+(MLink-165, section above, 2026-11-17).
 
 ## MLink-31 — Accéder au dossier du patient (back-end)
 
@@ -1217,7 +1273,8 @@ failures**, and no audit error in the logs.
 disable the triggers, and today Flyway and the application run as the same database role. Protecting the
 trail from a compromised application role needs separate roles (an owner for migrations, a runtime role
 with only `INSERT` and `SELECT` on `audit_entries`); it touches compose, the environment, the setup
-scripts and Terraform, so it is a separate GitHub issue. Behind a reverse proxy the recorded IP is the proxy's until forwarded headers are configured
+scripts and Terraform, so it is a separate GitHub issue. **Closed 2026-11-17 by GitHub #57 (MLink-165):** the API
+runs as `medlink_app`, which can only append to and read the trail (see the MLink-165 section). Behind a reverse proxy the recorded IP is the proxy's until forwarded headers are configured
 (`server.forward-headers-strategy`, with the proxy trusted). Anonymous refusals are recorded with no
 rate limit, so a flood of forged writes grows the table (per-IP limits: GitHub #51). Reading the trail
 (MLink-33) and account operations (MLink-72) are other tasks; they add their own `AuditAction` values.
