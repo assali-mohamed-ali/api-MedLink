@@ -14,16 +14,20 @@ import java.sql.Timestamp;
 import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessResourceFailureException;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.authentication.TestingAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 /**
- * MLink-104, code owner's review on #120: a booking and its audit row are one unit. If the audit row cannot be
+ * MLink-104, code owner's review on #120: a booking and its audit row are one unit; so are a cancel (MLink-106,
+ * {@code APPOINTMENT_CANCELLED}) and a move (MLink-107, {@code APPOINTMENT_RESCHEDULED}, on the new appointment). If the audit row cannot be
  * written, the booking is not kept either: no appointment, the slot stays free, so the patient's retry can book it and
  * never meets a SLOT_TAKEN for a booking that answered 500. The audit store's failure cannot be caused through the API
  * on demand, so this test calls the service with the audit repository made to fail (as AgendaAuditAtomicityTest); the
@@ -62,12 +66,90 @@ class AppointmentAuditAtomicityTest {
         assertThat(jdbc.queryForObject("select status from slots where id = ?", String.class, slot)).isEqualTo("FREE");
     }
 
+    @AfterEach
+    void noCaller() {
+        SecurityContextHolder.clearContext();
+    }
+
+    @Test
+    void aCancelWhoseAuditCannotBeWrittenLeavesTheAppointmentBookedAndTheSlotTaken() {
+        UUID patient = patient();
+        UUID slot = freeSlot();
+        UUID booked = appointments.book(patient, slot).getId();
+        auditFailsFor("APPOINTMENT_CANCELLED");
+        callerIs(patient);
+
+        assertThatThrownBy(() -> appointments.cancel(booked)).isInstanceOf(DataAccessResourceFailureException.class);
+
+        assertThat(appointmentStatus(booked)).isEqualTo("BOOKED");
+        assertThat(slotStatus(slot)).isEqualTo("BOOKED");
+    }
+
+    @Test
+    void aMoveWhoseAuditCannotBeWrittenKeepsTheOldAppointmentAndLeavesTheNewSlotFree() {
+        UUID patient = patient();
+        UUID oldSlot = freeSlot();
+        UUID newSlot = freeSlot();
+        UUID booked = appointments.book(patient, oldSlot).getId();
+        auditFailsFor("APPOINTMENT_RESCHEDULED");
+        callerIs(patient);
+
+        assertThatThrownBy(() -> appointments.reschedule(booked, newSlot))
+                .isInstanceOf(DataAccessResourceFailureException.class);
+
+        assertThat(appointmentStatus(booked)).isEqualTo("BOOKED");
+        assertThat(slotStatus(oldSlot)).isEqualTo("BOOKED");
+        assertThat(slotStatus(newSlot)).isEqualTo("FREE");
+        assertThat(jdbc.queryForObject("select count(*) from appointments where slot_id = ?", Integer.class, newSlot)).isZero();
+    }
+
+    /** One row per change, on the appointment it concerns: the move's row is on the new appointment. */
+    @Test
+    void aCancelAndAMoveEachWriteOneAuditRow() {
+        UUID patient = patient();
+        UUID moved = appointments.book(patient, freeSlot()).getId();
+        UUID cancelled = appointments.book(patient, freeSlot()).getId();
+        callerIs(patient);
+
+        UUID replacement = appointments.reschedule(moved, freeSlot()).getId();
+        appointments.cancel(cancelled);
+        appointments.cancel(cancelled);
+
+        assertThat(actions(replacement)).containsExactly("APPOINTMENT_RESCHEDULED");
+        assertThat(actions(cancelled)).containsExactly("APPOINTMENT_BOOKED", "APPOINTMENT_CANCELLED");
+    }
+
     @Test
     void aBookingAndItsAuditRowAreWrittenTogether() {
         UUID booked = appointments.book(patient(), freeSlot()).getId();
 
         assertThat(jdbc.queryForList("select action from audit_entries where resource_id = ?", String.class,
                 booked.toString())).containsExactly("APPOINTMENT_BOOKED");
+    }
+
+    /** Matched by name: the test also compiles (and fails) on code without the cancel and move events. */
+    private void auditFailsFor(String action) {
+        doThrow(new DataAccessResourceFailureException("audit store unavailable"))
+                .when(entries).save(argThat((AuditEntry entry) -> entry != null && entry.getAction().name().equals(action)));
+    }
+
+    /** The holder is the caller, as after a login: cancel and move check the ownership. */
+    private static void callerIs(UUID patient) {
+        SecurityContextHolder.getContext().setAuthentication(
+                new TestingAuthenticationToken(patient.toString(), null, "ROLE_PATIENT"));
+    }
+
+    private java.util.List<String> actions(UUID appointment) {
+        return jdbc.queryForList("select action from audit_entries where resource_id = ? order by timestamp, id",
+                String.class, appointment.toString());
+    }
+
+    private String appointmentStatus(UUID appointment) {
+        return jdbc.queryForObject("select status from appointments where id = ?", String.class, appointment);
+    }
+
+    private String slotStatus(UUID slot) {
+        return jdbc.queryForObject("select status from slots where id = ?", String.class, slot);
     }
 
     private UUID patient() {
