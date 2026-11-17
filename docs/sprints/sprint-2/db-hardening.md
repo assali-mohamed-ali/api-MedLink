@@ -5,12 +5,14 @@ the bottom: it says what is done, the last commit and the next step.
 
 GitHub #68 (MFA for the Keycloak bootstrap admin) is **not** part of this plan.
 
-## Hand-over for the next session (2026-11-17): Part B done up to B5, B6 (the PR) next
+## Hand-over for the next session (2026-11-17): Parts A and B done, in PR #126; Part C (#67) next
 
-**State.** Part A (#64) is done, tested and committed on `fix/db-hardening`, **pushed to GitHub on 2026-11-12 with no
-PR** (the plan is one PR for #64 + #57; start with `git pull --no-rebase`). `master` was merged in four times (last
-`4008692` on 2026-11-17, master at `55ec17b`, PR #93); 20 commits ahead, 0 behind. On that head: **722 tests green**.
-Clean tree.
+**State.** Parts A (#64) and B (#57) are done and pushed; **PR [#126](https://github.com/assali-mohamed-ali/api-MedLink/pull/126)
+`fix/db-hardening` → `master`** is open (2026-11-17), waiting for Mohamed's review box and the code owner. Final run on
+`bbb6d66`: `clean verify` 746 tests, 0 failures; reversed class order 746, 0 failures; 0 commits behind `master`.
+#64 and #57 are commented. Before the merge: #125 (V17) first, and the deploy secret needs `APP_DB_PASSWORD`,
+`SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD`. A review fix goes on this branch (pull, fix, both orders, push).
+**Next: Part C (#67)** on a new branch `chore/db-backup-restore` from `master` (see Part C below).
 
 **`master` builds again (2026-11-17).** The red `master` of 2026-11-16 (#118 + #119, `setEnabled` twice in
 `AdminUserService`) was fixed by #93 and merged into this branch. Before each later `git merge origin/master`, still
@@ -23,7 +25,7 @@ check that `master` compiles (`./mvnw -B -q compile` on a worktree); if it is re
    reports, MLink-32) are on `master`, V17 on `feat/MLink-37-cancellation-alerts`. Check `master` and the open PRs
    again before committing it (`git ls-tree --name-only origin/<branch> src/main/resources/db/migration/`, sort -V).
    `epic/MLink-9` (lead) still holds `V14__patient_documents.sql`, clashing with master's V14: not ours, tell the lead.
-3. ~~The spike, then B1 red~~ done 2026-11-17 (result under Part B). B2 to B5 done the same day. Next: **B6**.
+3. ~~The spike, then B1 red~~ done 2026-11-17 (result under Part B). B2 to B6 done the same day (PR #126).
 
 **Machine traps (lead's Windows laptop, 16 GB):**
 - `JAVA_HOME` defaults to JDK 11: `export JAVA_HOME=/c/Users/ASUS/.jdks/ms-17.0.16 PATH=$JAVA_HOME/bin:$PATH` (Git
@@ -206,7 +208,7 @@ Tasks:
 - [x] **B5** Docs: `report.md` (MLink-59 "Limits" entry closed), `docs/ARCHITECTURE.md`, threat model, README
   dev-stack section (`-Reset` not needed thanks to B3). Comment on #57. Postman: no endpoint changes, nothing to do.
   Done 2026-11-17, plus `docs/DEPLOYMENT.md` (the deploy secret needs `APP_DB_PASSWORD`) and `terraform/README.md`.
-- [ ] **B6** PR `fix/db-hardening` → `master` (AI section honest, review box left for Mohamed). Before it:
+- [x] **B6** PR `fix/db-hardening` → `master` (AI section honest, review box left for Mohamed). Before it:
   pull, verify + reversed order, both setup scripts. **The PR description must carry the section
   "PR notes" below** (Mohamed asked for it on 2026-11-09), plus the findings Part B adds to it.
 
@@ -311,4 +313,6 @@ Added by Part B (#57):
 - [x] 2026-11-17: `master` merged in (`4008692`, master `55ec17b`, PR #93 fixed the red `master`); 722 tests green.
 - [x] 2026-11-17: spike done (see Part B), B1 red committed, not pushed (pushed with B2).
 - [x] 2026-11-17: B2, B3, B4, B5 committed (see the tasks above).
-- Next step: **B6**: pull, `clean verify` + reversed order, push, PR to `master` with the PR notes.
+- [x] 2026-11-17: B6: `clean verify` 746/0 and reversed order 746/0 on `bbb6d66`, pushed, PR #126 to `master` with the
+  PR notes; #64 and #57 commented.
+- Next step: **Part C (#67)** on `chore/db-backup-restore` from `master`; MLink-164/165 to *To Verify* (YouTrack, by hand).
