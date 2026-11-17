@@ -195,9 +195,25 @@ class AppointmentSchemaTest {
                 .isEqualTo(2);
     }
 
+      @Test
+    void aSlotCanBeClosed() {
+        UUID practitioner = insertPractitioner();
+        UUID clinic = insertClinic();
+
+        insertSlot(practitioner, clinic, NINE_AM, NINE_AM.plus(30, ChronoUnit.MINUTES), "CLOSED");
+
+        assertThat(jdbc.queryForObject("select status from slots where practitioner_id = ?", String.class, practitioner))
+                .isEqualTo("CLOSED");
+    }
+
+    /**
+     * V15 (MLink-26) holds the three reference clinics, in every environment: no endpoint creates a clinic. The dev
+     * practitioners and slots still come from the dev seed only.
+     */
     @Test
-    void outsideTheDevProfileThereIsNoSeedData() {
-        assertThat(jdbc.queryForObject("select count(*) from clinics", Integer.class)).isZero();
+    void outsideTheDevProfileOnlyTheThreeReferenceClinicsExist() {
+        assertThat(jdbc.queryForList("select city from clinics order by city", String.class))
+                .containsExactly("Sfax", "Sousse", "Tunis");
         assertThat(jdbc.queryForObject("select count(*) from practitioners", Integer.class)).isZero();
         assertThat(jdbc.queryForObject("select count(*) from slots", Integer.class)).isZero();
     }

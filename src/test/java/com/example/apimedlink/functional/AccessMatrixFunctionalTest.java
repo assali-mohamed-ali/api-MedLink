@@ -24,7 +24,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
  */
 class AccessMatrixFunctionalTest extends FunctionalTestBase {
 
-    enum Expect { OPEN, LOGIN, FORBIDDEN } // OPEN: past security, no server error (2xx-4xx but 401/403) · LOGIN: 401 · FORBIDDEN: 403
+    enum Expect { OPEN, LOGIN, FORBIDDEN } // OPEN: past security, no server error (2xx-4xx but 401/403) | LOGIN: 401 | FORBIDDEN: 403
 
     record Rule(String method, String path, Expect anonymous, Expect patient, Expect practitioner, Expect staff) {
         @Override
@@ -42,6 +42,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("POST",   "/api/auth/verify-email",        O, O, O, O),
             new Rule("POST",   "/api/auth/verify-email/resend", O, O, O, O),
             new Rule("POST",   "/api/auth/account/activate",    O, O, O, O),
+            new Rule("POST",   "/api/auth/account/activate/resend", O, O, O, O),
             new Rule("POST",   "/api/auth/login",               O, O, O, O),
             new Rule("GET",    "/api/auth/me",                  L, O, O, O),
             new Rule("POST",   "/api/auth/logout",              L, O, O, O),
@@ -53,6 +54,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/admin/users",              L, F, F, O),
             new Rule("POST",   "/api/admin/users",              L, F, F, O),
             new Rule("PUT",    "/api/admin/users/{id}/role",    L, F, F, O),
+            new Rule("GET",    "/api/admin/audit-entries",      L, F, F, O),
             new Rule("PATCH",  "/api/admin/users/{id}/status",  L, F, F, O),
             new Rule("GET",    "/api/users",                    L, F, F, O),
             new Rule("GET",    "/api/users/{id}",               L, F, F, O),
@@ -60,7 +62,18 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/users/_health",            L, O, O, O),
             new Rule("GET",    "/api/slots",                    L, O, F, F), // MLink-98: patients search slots
             new Rule("GET",    "/api/slots/filters",            L, O, F, F), // MLink-163: the search form's lists
-            new Rule("POST",   "/api/appointments",             L, O, F, F)); // MLink-102: patients book a slot
+            new Rule("POST",   "/api/appointments",             L, O, F, F), // MLink-102: patients book a slot
+            // MLink-26: the practitioner's agenda. The matrix practitioner (practitioner.dev) has no practitioner
+            // profile and sends no dates or an empty body: a 4xx that is not 403 is "open" here. {id} is a random
+            // UUID that is nobody's slot: refused (403) even for a practitioner, like /api/users/{id}.
+            new Rule("GET",    "/api/practitioner/agenda",      L, F, O, F),
+            new Rule("POST",   "/api/practitioner/slots",       L, F, O, F),
+            new Rule("PATCH",  "/api/practitioner/slots/{id}",  L, F, F, F),
+            // MLink-31: a random id is nobody's attached patient, so a practitioner gets 403 too
+            new Rule("GET",    "/api/patients/{id}/record",     L, F, F, F),
+            // MLink-32: the same attachment rule as the record; a random id is nobody's patient, so 403 for all
+            new Rule("GET",    "/api/patients/{id}/reports",    L, F, F, F),
+            new Rule("POST",   "/api/patients/{id}/reports",    L, F, F, F));
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")
@@ -82,7 +95,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
 
     enum Who { ANONYMOUS, PATIENT, PRACTITIONER, STAFF }
 
-    /** Every cell of the matrix: each route × 4 callers. */
+    /** Every cell of the matrix: each route x 4 callers. */
     static Stream<Arguments> cells() {
         return MATRIX.stream().flatMap(rule -> Stream.of(
                 Arguments.of(rule, Who.ANONYMOUS, rule.anonymous()),
@@ -91,7 +104,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
                 Arguments.of(rule, Who.STAFF, rule.staff())));
     }
 
-    @ParameterizedTest(name = "{1} {0} → {2}")
+    @ParameterizedTest(name = "{1} {0} -> {2}")
     @MethodSource("cells")
     void eachCallerGetsWhatTheMatrixSays(Rule rule, Who who, Expect expect) throws Exception {
         HttpResponse<String> response = send(as(who), rule.method(), rule.path());
