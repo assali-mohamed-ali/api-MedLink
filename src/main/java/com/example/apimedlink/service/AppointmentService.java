@@ -56,7 +56,8 @@ public class AppointmentService {
     /**
      * MLink-106: the holder cancels their appointment, up to the H-03 deadline before it starts. An unknown id is refused
      * like someone else's appointment (never tell whether it exists); a cancelled one stays as it is. One transaction,
-     * the appointment and then its slot locked: the appointment becomes CANCELLED and the slot FREE again.
+     * the appointment and then its slot locked: the appointment becomes CANCELLED and the slot FREE again, and the
+     * APPOINTMENT_CANCELLED audit row is written in that same transaction (review on #120). Nothing changed, no row.
      */
     @Transactional
     public void cancel(UUID appointmentId) {
@@ -72,6 +73,8 @@ public class AppointmentService {
         appointment.setStatus(AppointmentStatus.CANCELLED);
         appointment.setCancelledAt(now);
         slot.setStatus(SlotStatus.FREE);
+        audit.recordWithin(AuditAction.APPOINTMENT_CANCELLED, "APPOINTMENT", appointmentId.toString(),
+                AuditOutcome.SUCCESS);
     }
 
     /**
@@ -79,6 +82,7 @@ public class AppointmentService {
      * of a cancel. One transaction: the old appointment is cancelled and its slot freed first, then the new slot is
      * booked; when the new slot is taken (409) or unknown (404), the whole move is rolled back and the patient keeps the
      * appointment they had. Both slots are locked in one order (lower id first), so two crossed moves never deadlock.
+     * The new appointment's APPOINTMENT_RESCHEDULED audit row is part of the move (review on #120).
      */
     @Transactional
     public Appointment reschedule(UUID appointmentId, UUID newSlotId) {
@@ -106,7 +110,10 @@ public class AppointmentService {
         oldSlot.setStatus(SlotStatus.FREE);
         appointments.saveAndFlush(old);
         slots.saveAndFlush(oldSlot);
-        return bookLocked(newSlot, old.getPatientId(), now);
+        Appointment moved = bookLocked(newSlot, old.getPatientId(), now);
+        audit.recordWithin(AuditAction.APPOINTMENT_RESCHEDULED, "APPOINTMENT", moved.getId().toString(),
+                AuditOutcome.SUCCESS);
+        return moved;
     }
 
     private Slot slotToBook(UUID slotId) {

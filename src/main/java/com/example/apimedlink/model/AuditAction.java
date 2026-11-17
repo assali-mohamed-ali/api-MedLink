@@ -8,6 +8,10 @@ public enum AuditAction {
     ACCESS_DENIED,
     /** A patient booked a slot; the resource is the appointment (MLink-104). */
     APPOINTMENT_BOOKED,
+    /** The holder cancelled their appointment; the resource is the appointment (MLink-106, review on #120). */
+    APPOINTMENT_CANCELLED,
+    /** The holder moved their appointment; the resource is the new appointment (MLink-107, review on #120). */
+    APPOINTMENT_RESCHEDULED,
     SLOT_OPENED,
     SLOT_CLOSED,
     /** A practitioner read a patient's record (MLink-31): ids only, never medical content. */
