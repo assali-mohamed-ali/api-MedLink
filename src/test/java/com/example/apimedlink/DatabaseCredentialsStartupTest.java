@@ -27,15 +27,29 @@ import org.springframework.core.env.StandardEnvironment;
  * fails on the connection, and that failure does not name the variables. Why not "Could not resolve placeholder":
  * {@code spring.datasource.*} is bound as configuration properties, and the binder keeps an unresolved
  * {@code ${...}} as plain text instead of failing.
+ *
+ * <p>GitHub #57 (MLink-165): two roles. Flyway migrates as the schema owner ({@code SPRING_FLYWAY_USER} /
+ * {@code SPRING_FLYWAY_PASSWORD}, same rules), the API connects as the runtime role. The API refuses to start when
+ * both are the same user: it would run as the owner, and the audit trail would lose its protection silently.
  */
 class DatabaseCredentialsStartupTest {
 
     static final String USERNAME = "SPRING_DATASOURCE_USERNAME";
     static final String PASSWORD = "SPRING_DATASOURCE_PASSWORD";
+    static final String FLYWAY_USER = "SPRING_FLYWAY_USER";
+    static final String FLYWAY_PASSWORD = "SPRING_FLYWAY_PASSWORD";
 
-    /** Looks like a real value: not a placeholder, never used anywhere. */
-    static final String REAL_USERNAME = "medlink_owner";
+    /** Look like real values: not placeholders, never used anywhere. */
+    static final String REAL_USERNAME = "medlink_app";
     static final String REAL_PASSWORD = "q8Vt3nLw-test-only-9fK2";
+    static final String REAL_OWNER = "medlink_owner";
+    static final String REAL_OWNER_PASSWORD = "Zp4mR7sx-test-only-2hQ6";
+
+    /** Every database variable set to a real-looking value. */
+    static Map<String, Object> allReal() {
+        return new HashMap<>(Map.of(USERNAME, REAL_USERNAME, PASSWORD, REAL_PASSWORD,
+                FLYWAY_USER, REAL_OWNER, FLYWAY_PASSWORD, REAL_OWNER_PASSWORD));
+    }
 
     @ParameterizedTest
     @ValueSource(strings = {"prod", "staging"})
@@ -72,7 +86,7 @@ class DatabaseCredentialsStartupTest {
     @ParameterizedTest(name = "{0}: {1}=\"{2}\"")
     @MethodSource("placeholders")
     void aPlaceholderStopsTheStartWithoutEchoingIt(String profile, String variable, String placeholder) {
-        Map<String, Object> env = new HashMap<>(Map.of(USERNAME, REAL_USERNAME, PASSWORD, REAL_PASSWORD));
+        Map<String, Object> env = allReal();
         env.put(variable, placeholder);
 
         String message = rootMessage(start(profile, env));
@@ -83,13 +97,66 @@ class DatabaseCredentialsStartupTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"prod", "staging"})
+    void noFlywayUserStopsTheStartAndNamesTheVariable(String profile) {
+        Throwable failure = start(profile, Map.of(USERNAME, REAL_USERNAME, PASSWORD, REAL_PASSWORD));
+
+        assertThat(rootMessage(failure)).contains(FLYWAY_USER);
+    }
+
+    @ParameterizedTest
+    @ValueSource(strings = {"prod", "staging"})
+    void noFlywayPasswordStopsTheStartAndNamesTheVariable(String profile) {
+        Throwable failure = start(profile, Map.of(USERNAME, REAL_USERNAME, PASSWORD, REAL_PASSWORD,
+                FLYWAY_USER, REAL_OWNER));
+
+        assertThat(rootMessage(failure)).contains(FLYWAY_PASSWORD);
+    }
+
+    static Stream<Arguments> flywayPlaceholders() {
+        return Stream.of("prod", "staging").flatMap(profile -> Stream.of(
+                Arguments.of(profile, FLYWAY_USER, "myuser"),
+                Arguments.of(profile, FLYWAY_USER, "change-me-owner"),
+                Arguments.of(profile, FLYWAY_PASSWORD, "secret"),
+                Arguments.of(profile, FLYWAY_PASSWORD, "change-me-prod-use-vault-or-gh-secrets"),
+                Arguments.of(profile, FLYWAY_PASSWORD, "")));
+    }
+
+    @ParameterizedTest(name = "{0}: {1}=\"{2}\"")
+    @MethodSource("flywayPlaceholders")
+    void aFlywayPlaceholderStopsTheStartWithoutEchoingIt(String profile, String variable, String placeholder) {
+        Map<String, Object> env = allReal();
+        env.put(variable, placeholder);
+
+        String message = rootMessage(start(profile, env));
+
+        assertThat(message).contains(variable);
+        if (!placeholder.isEmpty()) {
+            assertThat(message).doesNotContain(placeholder);
+        }
+    }
+
+    /** The API connecting as the owner would keep every privilege of Flyway: the two roles must differ. */
+    @ParameterizedTest
+    @ValueSource(strings = {"prod", "staging"})
+    void theOwnerAsRuntimeUserStopsTheStartWithoutEchoingIt(String profile) {
+        Map<String, Object> env = allReal();
+        env.put(USERNAME, REAL_OWNER);
+
+        String message = rootMessage(start(profile, env));
+
+        assertThat(message).contains(USERNAME).contains(FLYWAY_USER).doesNotContain(REAL_OWNER);
+    }
+
     /** Control: real-looking credentials pass the check, so the start goes on and fails on the closed port. */
     @ParameterizedTest
     @ValueSource(strings = {"prod", "staging"})
     void realCredentialsAreNotRefused(String profile) {
-        Throwable failure = start(profile, Map.of(USERNAME, REAL_USERNAME, PASSWORD, REAL_PASSWORD));
+        Throwable failure = start(profile, allReal());
 
-        assertThat(rootMessage(failure)).doesNotContain(USERNAME).doesNotContain(PASSWORD);
+        assertThat(rootMessage(failure)).doesNotContain(USERNAME).doesNotContain(PASSWORD)
+                .doesNotContain(FLYWAY_USER).doesNotContain(FLYWAY_PASSWORD);
     }
 
     /** Starts the API under {@code profile} with {@code env} as the whole process environment; returns why it failed. */

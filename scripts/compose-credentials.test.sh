@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # GitHub #64 (MLink-164), offline: docker-compose.yml (the full stack, also what a server runs) has no fallback
-# database credentials. With POSTGRES_DB, POSTGRES_USER or POSTGRES_PASSWORD missing or empty, `docker compose`
-# refuses the file and names the variable; with all of them set, it accepts it. Only `docker compose config`:
-# no daemon, no container, no network.
+# database credentials. With POSTGRES_DB, POSTGRES_USER, POSTGRES_PASSWORD or APP_DB_PASSWORD (the runtime role,
+# GitHub #57) missing or empty, `docker compose` refuses the file and names the variable; with all of them set,
+# it accepts it. Only `docker compose config`: no daemon, no container, no network.
 set -uo pipefail
 
 COMPOSE_FILE="$(cd "$(dirname "$0")/.." && pwd)/docker-compose.yml"
@@ -11,7 +11,7 @@ trap 'rm -rf "$WORK"' EXIT
 # An empty env file: compose would otherwise read the developer's .env next to the compose file
 : > "$WORK/empty.env"
 
-DB_VARIABLES="POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD"
+DB_VARIABLES="POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD APP_DB_PASSWORD"
 
 # Every other variable the file already requires (${NAME:?...}) gets a dummy value, so that a refusal can only
 # come from the database variables. Test values only, never real ones.
@@ -31,7 +31,7 @@ run() {
     local name="$1" expected="$2"
     shift 2
     local out status
-    out="$(env -u POSTGRES_DB -u POSTGRES_USER -u POSTGRES_PASSWORD "${others[@]}" "$@" \
+    out="$(env -u POSTGRES_DB -u POSTGRES_USER -u POSTGRES_PASSWORD -u APP_DB_PASSWORD "${others[@]}" "$@" \
         docker compose --env-file "$WORK/empty.env" -f "$COMPOSE_FILE" config --quiet 2>&1)"
     status=$?
     cases=$((cases + 1))
@@ -49,7 +49,8 @@ run() {
     fi
 }
 
-ALL_SET=(POSTGRES_DB=medlink POSTGRES_USER=medlink_owner POSTGRES_PASSWORD=test-only-password)
+ALL_SET=(POSTGRES_DB=medlink POSTGRES_USER=medlink_owner POSTGRES_PASSWORD=test-only-password
+    APP_DB_PASSWORD=test-only-app-password)
 
 run 'all database variables set' accept "${ALL_SET[@]}"
 
