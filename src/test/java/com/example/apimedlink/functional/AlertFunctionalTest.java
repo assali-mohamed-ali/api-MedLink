@@ -177,6 +177,67 @@ class AlertFunctionalTest extends FunctionalTestBase {
         assertThat(jdbc.queryForObject("select read_at from alerts where id = ?", Timestamp.class, alert)).isNull();
     }
 
+    // ---- Review on #125: the list is bounded (the bell asks every minute) ----
+
+    /**
+     * 25 unread alerts: the default page is the 20 newest, page 1 the 5 others; never the whole backlog in one answer.
+     * Both the unread list and the full history (unread=false) are paged.
+     */
+    @Test
+    void theListIsPagedTwentyAtATimeByDefaultNewestFirst() throws Exception {
+        Pro pro = practitioner();
+        Instant now = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        List<String> newestFirst = new java.util.ArrayList<>();
+        for (int i = 0; i < 25; i++) {
+            newestFirst.add(0, insertAlert(pro.id(), appointment(pro.id()), "Annulé " + i + ".", now.minus(25 - i, ChronoUnit.MINUTES), false).toString());
+        }
+
+        List<Map<String, Object>> first = list(pro.browser().call("/api/practitioner/alerts"));
+        List<Map<String, Object>> second = list(pro.browser().call("/api/practitioner/alerts?page=1"));
+        List<Map<String, Object>> history = list(pro.browser().call("/api/practitioner/alerts?unread=false&page=0"));
+
+        assertThat(first).extracting(alert -> alert.get("id")).containsExactlyElementsOf(newestFirst.subList(0, 20));
+        assertThat(second).extracting(alert -> alert.get("id")).containsExactlyElementsOf(newestFirst.subList(20, 25));
+        assertThat(history).hasSize(20);
+    }
+
+    /** Alerts created at the same instant keep one order (newest first, then by id): pages never repeat or skip one. */
+    @Test
+    void alertsOfTheSameInstantArePagedInOneStableOrder() throws Exception {
+        Pro pro = practitioner();
+        Instant same = Instant.now().truncatedTo(ChronoUnit.SECONDS);
+        List<String> ids = new java.util.ArrayList<>();
+        for (int i = 0; i < 5; i++) {
+            ids.add(insertAlert(pro.id(), appointment(pro.id()), "Même instant.", same, false).toString());
+        }
+        ids.sort(java.util.Comparator.reverseOrder());
+
+        List<Object> paged = new java.util.ArrayList<>();
+        for (int page = 0; page < 3; page++) {
+            list(pro.browser().call("/api/practitioner/alerts?size=2&page=" + page)).forEach(alert -> paged.add(alert.get("id")));
+        }
+
+        assertThat(paged).containsExactlyElementsOf(ids);
+    }
+
+    /** 50 at most per page; a size or page out of range is a 400 naming the parameter, as on /api/admin/users. */
+    @Test
+    void aPageSizeAboveFiftyOrAPageOutOfRangeIsRefusedNamingTheParameter() throws Exception {
+        Pro pro = practitioner();
+        for (int i = 0; i < 3; i++) {
+            insertAlert(pro.id(), appointment(pro.id()), "Annulé.", Instant.now(), false);
+        }
+
+        assertThat(list(pro.browser().call("/api/practitioner/alerts?size=50"))).hasSize(3);
+        for (String query : List.of("size=51", "size=0", "page=-1", "size=abc")) {
+            HttpResponse<String> refused = pro.browser().call("/api/practitioner/alerts?" + query);
+            assertThat(refused.statusCode()).as(query + " " + refused.body()).isEqualTo(400);
+            assertThat(Browser.json(refused).get("code")).isEqualTo("VALIDATION_FAILED");
+            Map<?, ?> details = (Map<?, ?>) Browser.json(refused).get("details");
+            assertThat(details.keySet()).as(query).hasSize(1).allMatch(key -> key.equals(query.substring(0, query.indexOf('='))));
+        }
+    }
+
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> list(HttpResponse<String> response) {
         return mapper.readValue(response.body(), List.class);
