@@ -38,7 +38,7 @@ class DeployComposeActionTest {
     @Test
     void theRoleScriptKeepsItsExecutableModeOnTheServer() {
         // Postgres's entrypoint runs an executable *.sh but sources any other one into its own shell
-        assertThat(lineCopying(ROLE_SCRIPT)).contains("scp -p ");
+        assertThat(lineCopying(ROLE_SCRIPT)).as("scp with -p").containsPattern("\\bscp( -\\w+)* -p ");
     }
 
     @Test
