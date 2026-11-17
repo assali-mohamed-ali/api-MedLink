@@ -5,25 +5,25 @@ the bottom: it says what is done, the last commit and the next step.
 
 GitHub #68 (MFA for the Keycloak bootstrap admin) is **not** part of this plan.
 
-## Hand-over for the next session (2026-11-12): start Part B
+## Hand-over for the next session (2026-11-17): Part B in progress
 
 **State.** Part A (#64) is done, tested and committed on `fix/db-hardening`, **pushed to GitHub on 2026-11-12 with no
-PR** (the plan is one PR for #64 + #57; start with `git pull --no-rebase`). `master` was merged in three times (last `b7e1bee`, master at `048e6f9`, PR #116);
-16 commits ahead, 0 behind. On that head: `./mvnw -B clean verify` **619 tests, 0 failures** and
-`./mvnw -B test -Dsurefire.runOrder=reversealphabetical` 619/0 (2026-11-12). Clean tree.
+PR** (the plan is one PR for #64 + #57; start with `git pull --no-rebase`). `master` was merged in four times (last
+`4008692` on 2026-11-17, master at `55ec17b`, PR #93); 20 commits ahead, 0 behind. On that head: **722 tests green**.
+Clean tree.
 
-**Warning (2026-11-16): `master` does not compile** since #118 + #119 were squash-merged (`setEnabled` twice in
-`AdminUserService`; reported on #119, fix is theirs). Check `master` builds (`./mvnw -B -q compile` on a worktree)
-before step 1; while it is red, skip the merge and work on this branch as it is (it compiles).
+**`master` builds again (2026-11-17).** The red `master` of 2026-11-16 (#118 + #119, `setEnabled` twice in
+`AdminUserService`) was fixed by #93 and merged into this branch. Before each later `git merge origin/master`, still
+check that `master` compiles (`./mvnw -B -q compile` on a worktree); if it is red, skip the merge.
 
 **Do first, in order:**
-1. `git checkout fix/db-hardening && git fetch origin && git merge origin/master` (never rebase; `report.md` status
-   notes conflict often: keep both, newest first). Run the suite once to start from green.
-2. **Migration number: V18** (`V18__app_role_grants.sql`). Taken: V15 on `master` (agenda), V16
-   `feat/MLink-32-consultation-report`, V17 `feat/MLink-37-cancellation-alerts`. Check `master` and the open PRs
+1. ~~Merge `master`~~ done 2026-11-17 (`4008692`). Later merges: `git fetch origin && git merge origin/master` (never
+   rebase; `report.md` status notes conflict often: keep both, newest first), then run the suite.
+2. **Migration number: V18** (`V18__app_role_grants.sql`). Checked 2026-11-17: V15 (agenda) and V16 (consultation
+   reports, MLink-32) are on `master`, V17 on `feat/MLink-37-cancellation-alerts`. Check `master` and the open PRs
    again before committing it (`git ls-tree --name-only origin/<branch> src/main/resources/db/migration/`, sort -V).
    `epic/MLink-9` (lead) still holds `V14__patient_documents.sql`, clashing with master's V14: not ours, tell the lead.
-3. The 30-minute spike below (`@ServiceConnection` + `spring.flyway.user`), no commit, then **B1** red.
+3. ~~The spike, then B1 red~~ done 2026-11-17 (result under Part B). Next: **B2** green.
 
 **Machine traps (lead's Windows laptop, 16 GB):**
 - `JAVA_HOME` defaults to JDK 11: `export JAVA_HOME=/c/Users/ASUS/.jdks/ms-17.0.16 PATH=$JAVA_HOME/bin:$PATH` (Git
@@ -159,9 +159,25 @@ To check first (spike, 30 min, no commit): how Spring Boot 4.1 `@ServiceConnecti
 `spring.flyway.user` is set. Flyway must connect as the container's owner and the datasource as `medlink_app`.
 If `@ServiceConnection` forces one user on both, set the datasource with a `@DynamicPropertySource` instead.
 
+**Spike result (2026-11-17, throwaway test, not committed).** A plain `@ServiceConnection` on `PostgreSQLContainer`
+does force one user on both: Boot 4.1 registers `JdbcConnectionDetails` *and* `FlywayConnectionDetails`
+(`FlywayContainerConnectionDetailsFactory`), and connection details win over `spring.flyway.user`. Two set-ups
+checked, both give `current_user = medlink_app` on the datasource and `installed_by = <owner>` in
+`flyway_schema_history`:
+- **Tests (B2):** `@ServiceConnection(type = FlywayConnectionDetails.class)` (the owner, Flyway only) + a
+  `DynamicPropertyRegistrar` bean setting `spring.datasource.url/username/password` to the container URL and
+  `medlink_app`.
+- **Prod/staging (B4):** no service connection; `spring.datasource.*` = runtime role, `spring.flyway.user/password`
+  = owner, no `spring.flyway.url`: Flyway reuses the datasource URL with the owner's credentials.
+
 Tasks:
-- [ ] **B1** Red: a functional test connected as the runtime role: `UPDATE audit_entries`, `DROP TRIGGER`,
+- [x] **B1** Red: a functional test connected as the runtime role: `UPDATE audit_entries`, `DROP TRIGGER`,
   `ALTER TABLE audit_entries` and `TRUNCATE` all fail; `INSERT` and `SELECT` work.
+  Done 2026-11-17: `repository/RuntimeRoleGrantsTest` (`@DataJpaTest`, the app's own datasource; privileges cannot
+  be driven over HTTP). A refusal must be SQLState `42501` (missing privilege), not the V7 trigger's `P0001`. Cases:
+  UPDATE, DELETE, TRUNCATE, DROP TRIGGER, DISABLE TRIGGER, DROP TABLE, CREATE TABLE; each runs in a transaction that
+  is always rolled back, so the red run (app = owner) leaves the shared database intact. Red run: 7 of 8 fail
+  (`accepted`, TRUNCATE `P0001`), INSERT + SELECT passes.
 - [ ] **B2** Green: the init script, the Testcontainers container using it, the migration with the grants,
   `spring.flyway.user/password` + `spring.datasource.*` per profile. The whole suite runs as the runtime role:
   `./mvnw -B verify` + reversed order green.
@@ -256,5 +272,6 @@ Critical findings, to put in front of the reviewers, not only in the commits:
 - [x] A5 red + green + docs committed (2026-11-11). Part A done; push and the #64 comment wait for Mohamed's go.
 - [x] 2026-11-12: `master` merged in twice more (`865ae6b` MLink-31, `b7e1bee` MLink-26 / V15); dev stack checked by
   hand (register, mail, verify, login); `clean verify` + reversed order 619/0. Branch pushed (no PR yet).
-- Next step: **Part B** (see "Hand-over for the next session" at the top: merge master, V18, the spike, then **B1**).
-- Last commit: the hand-over commit of 2026-11-12.
+- [x] 2026-11-17: `master` merged in (`4008692`, master `55ec17b`, PR #93 fixed the red `master`); 722 tests green.
+- [x] 2026-11-17: spike done (see Part B), B1 red committed, not pushed (pushed with B2).
+- Next step: **B2** green (V18 still free on 2026-11-17: check again before committing it).
