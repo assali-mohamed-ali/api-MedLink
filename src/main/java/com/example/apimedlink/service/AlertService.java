@@ -17,6 +17,8 @@ import java.util.Locale;
 import java.util.UUID;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Sort;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -109,12 +111,28 @@ public class AlertService {
         }
     }
 
-    /** The caller's alerts, newest first: the unread ones (the bell), or all of them. */
-    @Transactional(readOnly = true)
+    /** Alerts per page when none is asked (what the bell reads every minute); {@link #MAX_PAGE_SIZE} at most. */
+    public static final int DEFAULT_PAGE_SIZE = 20;
+    public static final int MAX_PAGE_SIZE = 50;
+
+    /** Newest first, then by id: alerts of the same instant keep one order, so pages never repeat or skip one. */
+    private static final Sort NEWEST_FIRST = Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id"));
+
+    /** The first page of the caller's alerts: the unread ones (the bell), or all of them. */
     public List<Alert> list(UUID practitionerId, boolean unreadOnly) {
+        return list(practitionerId, unreadOnly, 0, DEFAULT_PAGE_SIZE);
+    }
+
+    /**
+     * One page of the caller's alerts, newest first (review on #125): never the whole backlog in one answer, since the
+     * bell polls every minute and unread alerts are kept until read. The controller checks the page and size.
+     */
+    @Transactional(readOnly = true)
+    public List<Alert> list(UUID practitionerId, boolean unreadOnly, int page, int size) {
+        PageRequest request = PageRequest.of(page, size, NEWEST_FIRST);
         return unreadOnly
-                ? alerts.findByPractitionerIdAndReadAtIsNullOrderByCreatedAtDesc(practitionerId)
-                : alerts.findByPractitionerIdOrderByCreatedAtDesc(practitionerId);
+                ? alerts.findByPractitionerIdAndReadAtIsNull(practitionerId, request)
+                : alerts.findByPractitionerId(practitionerId, request);
     }
 
     /**

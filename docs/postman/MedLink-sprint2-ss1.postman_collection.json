@@ -6495,6 +6495,46 @@
           ]
         },
         {
+          "name": "200 · practitioner: one page at most (size=50 is the largest)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/alerts?size=50&page=0"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"a list\", () => pm.expect(pm.response.json()).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · practitioner: a page of 51 (the bell's list is bounded)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/alerts?size=51"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"names size\", () => pm.expect(pm.response.json().details).to.have.all.keys(\"size\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "403 · practitioner: an alert that is not theirs (same as one that does not exist)",
           "request": {
             "method": "POST",

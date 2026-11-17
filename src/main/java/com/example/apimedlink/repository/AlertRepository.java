@@ -5,16 +5,17 @@ import com.example.apimedlink.model.AlertType;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 
 /** A practitioner's alerts (MLink-37). */
 public interface AlertRepository extends JpaRepository<Alert, UUID> {
 
-    /** The unread alerts of a practitioner, newest first (partial index idx_alerts_unread). */
-    List<Alert> findByPractitionerIdAndReadAtIsNullOrderByCreatedAtDesc(UUID practitionerId);
+    /** One page of a practitioner's unread alerts (partial index idx_alerts_unread), in the page's order. */
+    List<Alert> findByPractitionerIdAndReadAtIsNull(UUID practitionerId, Pageable page);
 
-    /** All the alerts of a practitioner, read or not, newest first. */
-    List<Alert> findByPractitionerIdOrderByCreatedAtDesc(UUID practitionerId);
+    /** One page of all the alerts of a practitioner, read or not, in the page's order. */
+    List<Alert> findByPractitionerId(UUID practitionerId, Pageable page);
 
     /** The alert if it is this practitioner's: another one's looks like one that does not exist (37.3). */
     Optional<Alert> findByIdAndPractitionerId(UUID id, UUID practitionerId);

@@ -62,7 +62,9 @@ class AlertSchemaTest {
         alerts.saveAndFlush(read);
         alerts.saveAndFlush(new Alert(other, AlertType.APPOINTMENT_CANCELLED, insertAppointment(other), "Pas à lui"));
 
-        List<Alert> unread = alerts.findByPractitionerIdAndReadAtIsNullOrderByCreatedAtDesc(pro);
+        List<Alert> unread = alerts.findByPractitionerIdAndReadAtIsNull(pro,
+                org.springframework.data.domain.PageRequest.of(0, 20, org.springframework.data.domain.Sort.by(
+                        org.springframework.data.domain.Sort.Order.desc("createdAt"), org.springframework.data.domain.Sort.Order.desc("id"))));
 
         assertThat(unread).extracting(Alert::getId).containsExactly(newer.getId(), older.getId());
         assertThat(unread.get(0).getMessage()).isEqualTo("Annulé 2");
