@@ -16,7 +16,8 @@ profile in CI.
 | Variable | Secret | Notes |
 |---|---|---|
 | `app_image` | no | Immutable reference: digest or `sha-<commit>`, never `latest` |
-| `db_url`, `db_username`, `db_password` | password yes | JDBC URL reachable from the container |
+| `db_url`, `db_username`, `db_password` | password yes | JDBC URL reachable from the container; `db_username` is the runtime role `medlink_app` (GitHub #57) |
+| `db_flyway_username`, `db_flyway_password` | yes | The schema owner Flyway migrates as; must differ from `db_username` or the API refuses to start |
 | `keycloak_public_url` | no | URL the browser reaches |
 | `keycloak_internal_url` | no | URL the container reaches (e.g. `http://keycloak:8080`) |
 | `keycloak_client_secret` | yes | `medlink-bff` client secret |
@@ -28,6 +29,20 @@ profile in CI.
 
 The examples (`terraform.tfvars.*.example`) show every value. Never commit a
 real `terraform.tfvars`; it is git-ignored.
+
+## Database roles (GitHub #57)
+
+The API connects as `medlink_app`, which can use the tables but not change them;
+Flyway, inside the API, migrates as the schema owner. This stack does not create
+PostgreSQL, so create the role once on the server, as its admin, with the init
+script the compose files use (the password comes from `APP_DB_PASSWORD`, never
+from the command line):
+
+```sh
+docker exec -i -e APP_DB_PASSWORD <postgres-container> bash < docker/postgres/initdb/10-app-role.sh
+```
+
+The grants come with the migrations (`V18__app_role_grants.sql`).
 
 ## Secrets and state
 

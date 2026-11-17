@@ -29,6 +29,8 @@ import org.testcontainers.postgresql.PostgreSQLContainer;
             "keycloak.admin.client-secret=unused",
             "spring.datasource.username=" + TestcontainersConfiguration.UNUSED_DB_CREDENTIAL,
             "spring.datasource.password=" + TestcontainersConfiguration.UNUSED_DB_CREDENTIAL,
+            "spring.flyway.user=" + TestcontainersConfiguration.UNUSED_OWNER_CREDENTIAL,
+            "spring.flyway.password=" + TestcontainersConfiguration.UNUSED_OWNER_CREDENTIAL,
             "management.server.port=0",
             "spring.datasource.hikari.connection-timeout=2000",
             "spring.datasource.hikari.validation-timeout=1000"

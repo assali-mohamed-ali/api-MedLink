@@ -34,6 +34,12 @@ public class TestcontainersConfiguration {
      */
     public static final String UNUSED_DB_CREDENTIAL = "unused-container-gives-its-own";
 
+    /**
+     * For {@code spring.flyway.user/password} in the same tests (GitHub #57: required there, and different from
+     * the datasource user). Never used to connect: the service connection gives Flyway the container's owner.
+     */
+    public static final String UNUSED_OWNER_CREDENTIAL = "unused-container-owner-runs-flyway";
+
     @Bean
     @ServiceConnection(type = FlywayConnectionDetails.class)
     PostgreSQLContainer postgresContainer() {
