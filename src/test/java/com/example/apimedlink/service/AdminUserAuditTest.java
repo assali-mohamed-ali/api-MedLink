@@ -3,8 +3,12 @@ package com.example.apimedlink.service;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -21,19 +25,26 @@ import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import java.time.LocalDate;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.mail.javamail.JavaMailSender;
 import org.springframework.test.context.bean.override.mockito.MockitoBean;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 
-/** MLink-72: every account operation, done or refused, leaves an audit entry. Real database; Keycloak is a mock. */
+/**
+ * MLink-72 (review of #121): no account change without its audit entry, and no silent gap. A new account is saved
+ * with its entry in one transaction. A role or status change is traced first (ATTEMPTED, committed before anything
+ * is touched), then sealed (SUCCESS or FAILURE); when an entry cannot be written the answer is a 503, never a
+ * silent success. Real database; Keycloak is a mock.
+ */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
 class AdminUserAuditTest {
@@ -49,6 +60,9 @@ class AdminUserAuditTest {
 
     @Autowired
     JdbcTemplate jdbc;
+
+    @Autowired
+    PlatformTransactionManager txManager;
 
     @MockitoBean
     KeycloakAdminService keycloak;
@@ -75,9 +89,10 @@ class AdminUserAuditTest {
         users.save(User.builder().id(keycloakId).username(email).email(email).build());
     }
 
-    private List<Map<String, Object>> entriesFor(UUID id) {
-        return jdbc.queryForList(
-                "select action, outcome, resource_type from audit_entries where resource_id = ?", id.toString());
+    /** The outcomes written for this account and this action, oldest first. */
+    private List<String> outcomes(AuditAction action) {
+        return jdbc.queryForList("select outcome from audit_entries where resource_id = ? and action = ? "
+                + "order by timestamp", String.class, keycloakId.toString(), action.name());
     }
 
     private long failedCreations() {
@@ -86,19 +101,32 @@ class AdminUserAuditTest {
         return count == null ? 0 : count;
     }
 
-    private void assertSingleEntry(UUID id, AuditAction action, AuditOutcome outcome) {
-        List<Map<String, Object>> entries = entriesFor(id);
-        assertThat(entries).hasSize(1);
-        assertThat(entries.get(0)).containsEntry("action", action.name())
-                .containsEntry("outcome", outcome.name())
-                .containsEntry("resource_type", "USER");
+    // ---- creation: the entry is saved with the account, in one transaction ----
+
+    @Test
+    void aCreatedAccountIsSavedWithItsAuditEntry() {
+        admin.create(email, "Salma", "Trabelsi", Roles.ADMINISTRATIVE_STAFF, null, null);
+
+        assertThat(users.existsById(keycloakId)).isTrue();
+        assertThat(outcomes(AuditAction.ACCOUNT_CREATED)).containsExactly("SUCCESS");
     }
 
     @Test
-    void aCreatedAccountIsAudited() {
-        admin.create(email, "Salma", "Trabelsi", Roles.ADMINISTRATIVE_STAFF, null, null);
+    void anAccountWhoseAuditEntryCannotBeWrittenIsNotCreatedAtAll() {
+        // recordWithin is MANDATORY: even to prepare the fake failure, the call must happen inside a transaction
+        new TransactionTemplate(txManager).executeWithoutResult(status ->
+                doThrow(new IllegalStateException("audit down")).when(auditService)
+                        .recordWithin(eq(AuditAction.ACCOUNT_CREATED), anyString(), anyString(),
+                                any(AuditOutcome.class)));
 
-        assertSingleEntry(keycloakId, AuditAction.ACCOUNT_CREATED, AuditOutcome.SUCCESS);
+        assertThatThrownBy(() -> admin.create(email, "Salma", "Trabelsi", Roles.ADMINISTRATIVE_STAFF, null, null))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("audit down");
+
+        // The rows and the entry were one transaction: none is kept, and the Keycloak user is deleted again
+        assertThat(users.existsById(keycloakId)).isFalse();
+        assertThat(outcomes(AuditAction.ACCOUNT_CREATED)).isEmpty();
+        verify(keycloak).deleteUser(keycloakId);
     }
 
     @Test
@@ -112,17 +140,19 @@ class AdminUserAuditTest {
         assertThat(failedCreations()).isEqualTo(before + 1);
     }
 
+    // ---- role change: traced, then sealed ----
+
     @Test
-    void aRoleChangeIsAudited() {
+    void aRoleChangeIsTracedThenSealed() {
         saveUser();
 
         admin.changeRole(keycloakId, Roles.ADMINISTRATIVE_STAFF, null, null);
 
-        assertSingleEntry(keycloakId, AuditAction.ROLE_CHANGED, AuditOutcome.SUCCESS);
+        assertThat(outcomes(AuditAction.ROLE_CHANGED)).containsExactly("ATTEMPTED", "SUCCESS");
     }
 
     @Test
-    void aRefusedRoleChangeIsAudited() {
+    void aRefusedRoleChangeIsAuditedAndNeverAttempted() {
         Patient patient = new Patient("Amel", "Ben Salah", LocalDate.of(1990, 1, 1), null, null);
         patient.setId(keycloakId);
         patient.setUsername(email);
@@ -132,23 +162,27 @@ class AdminUserAuditTest {
         assertThatThrownBy(() -> admin.changeRole(keycloakId, Roles.PRACTITIONER, null, null))
                 .isInstanceOf(ApiException.class);
 
-        assertSingleEntry(keycloakId, AuditAction.ROLE_CHANGED, AuditOutcome.FAILURE);
+        assertThat(outcomes(AuditAction.ROLE_CHANGED)).containsExactly("FAILURE");
     }
 
+    // ---- enable and disable: traced, then sealed ----
+
     @Test
-    void disablingAnAccountIsAudited() {
+    void disablingAnAccountIsTracedThenSealed() {
         saveUser();
 
         admin.setEnabled(keycloakId, false, UUID.randomUUID());
 
-        assertSingleEntry(keycloakId, AuditAction.ACCOUNT_DISABLED, AuditOutcome.SUCCESS);
+        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("ATTEMPTED", "SUCCESS");
+        verify(keycloak).setEnabled(keycloakId, false);
     }
 
     @Test
-    void enablingAnAccountIsAudited() {
+    void enablingAnAccountIsTracedThenSealed() {
         admin.setEnabled(keycloakId, true, UUID.randomUUID());
 
-        assertSingleEntry(keycloakId, AuditAction.ACCOUNT_ENABLED, AuditOutcome.SUCCESS);
+        assertThat(outcomes(AuditAction.ACCOUNT_ENABLED)).containsExactly("ATTEMPTED", "SUCCESS");
+        verify(keycloak).setEnabled(keycloakId, true);
     }
 
     @Test
@@ -157,17 +191,72 @@ class AdminUserAuditTest {
                 .isInstanceOfSatisfying(ApiException.class,
                         e -> assertThat(e.getCode()).isEqualTo("CANNOT_DISABLE_SELF"));
 
-        assertSingleEntry(keycloakId, AuditAction.ACCOUNT_DISABLED, AuditOutcome.FAILURE);
+        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("FAILURE");
     }
 
     @Test
-    void anAuditWriteFailureDoesNotBreakTheOperation() {
+    void aFailureInKeycloakIsSealedAsAFailure() {
+        saveUser();
+        doThrow(new IllegalStateException("keycloak down")).when(keycloak).setEnabled(keycloakId, false);
+
+        assertThatThrownBy(() -> admin.setEnabled(keycloakId, false, UUID.randomUUID()))
+                .isInstanceOf(IllegalStateException.class)
+                .hasMessage("keycloak down");
+
+        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("ATTEMPTED", "FAILURE");
+    }
+
+    // ---- no trace, no change; no silent success ----
+
+    @Test
+    void whenTheAttemptCannotBeWrittenNothingIsDone() {
         saveUser();
         doThrow(new IllegalStateException("audit down")).when(auditService)
-                .record(any(AuditAction.class), anyString(), anyString(), any(AuditOutcome.class));
+                .record(eq(AuditAction.ACCOUNT_DISABLED), anyString(), anyString(), eq(AuditOutcome.ATTEMPTED));
 
+        assertThatThrownBy(() -> admin.setEnabled(keycloakId, false, UUID.randomUUID()))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                    assertThat(e.getCode()).isEqualTo("AUDIT_UNAVAILABLE");
+                });
+
+        verify(keycloak, never()).setEnabled(any(), anyBoolean());
+        verify(keycloak, never()).endSessions(any());
+        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).isEmpty();
+    }
+
+    @Test
+    void whenTheClosingEntryCannotBeWrittenTheAnswerIsAnErrorAndARetryCompletesIt() {
+        saveUser();
+        doThrow(new IllegalStateException("audit down")).when(auditService)
+                .record(eq(AuditAction.ACCOUNT_DISABLED), anyString(), anyString(), eq(AuditOutcome.SUCCESS));
+
+        assertThatThrownBy(() -> admin.setEnabled(keycloakId, false, UUID.randomUUID()))
+                .isInstanceOfSatisfying(ApiException.class, e -> {
+                    assertThat(e.getStatus()).isEqualTo(HttpStatus.SERVICE_UNAVAILABLE);
+                    assertThat(e.getCode()).isEqualTo("AUDIT_UNAVAILABLE");
+                });
+
+        // Never a silent success: the change was made, the trail shows the attempt, and the caller was told
+        verify(keycloak).setEnabled(keycloakId, false);
+        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("ATTEMPTED");
+
+        // The audit store is back: staff send the same request again and the trail is closed
+        doCallRealMethod().when(auditService)
+                .record(eq(AuditAction.ACCOUNT_DISABLED), anyString(), anyString(), eq(AuditOutcome.SUCCESS));
         admin.setEnabled(keycloakId, false, UUID.randomUUID());
 
-        verify(keycloak).setEnabled(keycloakId, false);
+        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("ATTEMPTED", "ATTEMPTED", "SUCCESS");
+    }
+
+    @Test
+    void aRefusalWhoseEntryCannotBeWrittenKeepsTheOriginalError() {
+        doThrow(new IllegalStateException("audit down")).when(auditService)
+                .record(eq(AuditAction.ACCOUNT_DISABLED), anyString(), anyString(), eq(AuditOutcome.FAILURE));
+
+        assertThatThrownBy(() -> admin.setEnabled(keycloakId, false, keycloakId))
+                .isInstanceOfSatisfying(ApiException.class,
+                        e -> assertThat(e.getCode()).isEqualTo("CANNOT_DISABLE_SELF"))
+                .hasSuppressedException(new IllegalStateException("audit down"));
     }
 }

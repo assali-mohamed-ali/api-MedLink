@@ -2,6 +2,41 @@
 
 Updated by every sub-sprint PR. Newest information first inside each section.
 
+## MLink-26 — Agenda multi-sites (back-end)
+
+**Tickets:** MLink-133, 134, 135, 136, 137, 138, 141. Front (MLink-139, 140) in `web-MedLink`.
+
+**Routes** (class-level `@PreAuthorize(PRACTITIONER)`; the practitioner is always the caller):
+
+| Route | Answer |
+|---|---|
+| `GET /api/practitioner/agenda?from=&to=` | `{clinics, items}`; period up to 31 days; past slots included; patient names only |
+| `POST /api/practitioner/slots` | 201 + the slot; 409 `SLOT_OVERLAP`; 400 `VALIDATION_FAILED` |
+| `PATCH /api/practitioner/slots/{id}` | `{"status":"OPEN"\|"CLOSED"}`; 409 `SLOT_BOOKED`, `SLOT_IN_PAST`; 403 if not the caller's slot |
+
+**Decisions**
+- V15 inserts the three reference clinics (no endpoint creates a clinic) and adds the `CLOSED` slot status.
+- The overlap is enforced by the database (`slots_no_overlap`); the application check only names the slot in the way, and a lost race is translated to the same 409 (never a 500).
+- A closed slot keeps its time range: reopening it frees the time (decision D4, to confirm).
+- Closing is one conditional `UPDATE` (free and no active appointment): a concurrent booking cannot end on a closed slot. The booking (MLink-102, merged with #87) locks the slot (`SELECT … FOR UPDATE`) and refuses any slot that is not `FREE`, so a closed slot answers 409 `SLOT_TAKEN`; in a race, Postgres's row lock makes one side see the other's status.
+- Spring converts query parameters and the JSON body before `@PreAuthorize` runs, so a patient sending `from=not-a-date` got 400 instead of 403 (code owner's review on #116). **`SecurityConfig` now limits `/api/practitioner/**` to `PRACTITIONER`** in the filter chain, before any conversion (shared file, changed at the code owner's request); the class-level `@PreAuthorize` stays as a second check. Nothing is `@Valid` or required either: a patient or staff member gets 403, never 400, whatever they send.
+- Two overlapping openings at once: the exclusion constraint can make each insert wait for the other, and Postgres aborts one with a deadlock (40P01), which reached the client as 500. `AgendaService.open` retries once after a `PessimisticLockingFailureException`: the overlap check or the constraint then answers 409 `SLOT_OVERLAP`; a second deadlock also answers 409. Found while revalidating the review fix.
+- The agenda is not audited per read (it is not the medical record); slot changes are (`SLOT_OPENED`, `SLOT_CLOSED`); refusals are (`ACCESS_DENIED`).
+- Duration 10 min to 8 h and horizon 180 days are assumptions (constants in `AgendaService`), not in the cahier des charges.
+
+**Proofs**
+- Repository queries: `SlotRepositoryAgendaTest` (9 tests) with `AppointmentSchemaTest`, `AppointmentDomainRepositoryTest` and `SlotSearchFunctionalTest` still green (39 tests).
+- Access matrix: 3 new lines, 73 cases green.
+- `AgendaFunctionalTest`: 21 tests green, including `aClosedSlotCannotBeBookedEvenByItsIdAndNoAppointmentIsCreated` (added after the merge of `master`): checked once that it turns red when the booking refuses only `BOOKED` slots.
+- Postman: new folder 9 "Practitioner agenda (MLink-26)", 25 requests: anonymous 401 and patient 403 on every route (403, never 400, even without dates or body); a disposable practitioner through the code step gets 400 without dates, 409 `PRACTITIONER_PROFILE_MISSING` and 403 on a slot that is not theirs. Folder alone: 26 requests, 41 assertions, 0 failures. Whole collection, `npx newman@6.2.1 run`: **158 requests, 355 assertions, 0 failures**, twice in a row. The full flow (three clinics, overlap, close, reopen) needs a practitioner profile, which no endpoint creates yet (SS5): it stays proven by `AgendaFunctionalTest`.
+- Review on #116 (2026-11-10): `patientsAndStaffGet403EvenWithMalformedDatesOrJson` (malformed dates, malformed JSON, an id that is not a UUID, on the three routes, for a patient and a staff member) committed red first: `expected: 403 but was: 400`; green with the `SecurityConfig` rule. `twoSimultaneousOverlappingOpeningsLeaveExactlyOneSlotAndNoServerError` was red 4 runs out of 5 (201 + 500, SQLSTATE 40P01), green 10 runs out of 10 with the retry. Full suite `./mvnw -B verify`: **519 tests, 0 failures**; reverse class order: 519 tests, 0 failures. Postman folder 9 on the rebuilt dev stack: 26 requests, 41 assertions, 0 failures.
+- Full suite `./mvnw -B verify`: 476 tests, 0 failures; reverse class order (`-Dsurefire.runOrder=reversealphabetical`): 476 tests, 0 failures.
+- After merging `master` (2026-11-10, booking and slot search index included): `./mvnw -B verify` 517 tests, 0 failures; reverse class order 517 tests, 0 failures (before the closed-slot booking test was added).
+- `pre-commit run --all-files`: all 14 hooks passed (gitleaks, checkov, detect-private-key included).
+- One isolated failure of `QrCodesTest` (MLink-62) was seen once in a full run; not reproduced in 10 separate runs nor in the next full runs; unrelated to this PR.
+
+**Follow-ups:** `AuditService.recordInCurrentTransaction` (MLink-114) to write the audit in the business transaction; `SlotRepository` is shared with MLink-98; the enum conflict with MLink-114 is to be resolved at rebase (keep all values).
+
 ## Status
 
 | Sub-sprint | Scope | State | PR | Date |
@@ -12,6 +47,26 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 3 | Staff code, TOTP (endpoints 8–9) | **Done** (MLink-62/63): #97, review round 1 in #99; see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), [#99](https://github.com/assali-mohamed-ali/api-MedLink/pull/99) | 2026-10-29 |
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
+
+**2026-11-12:** MLink-32 (`feat/MLink-32-consultation-report`): 32.1 `V16__consultation_reports.sql` (immutable rows, content sealed only), 32.2 `ReportCipher` (AES-256-GCM, own key `APP_REPORT_ENCRYPTION_KEY`, report and patient ids as associated data), 32.3 `POST`/`GET /api/patients/{id}/reports` for the practitioners the patient is attached to (the record's rule, MLink-31): body `{ content }` (not blank, 10 000 characters at most, `details.content` on a 400), answer `{ id, createdAt, content }`, newest first; any other caller gets the record's 403, checked before the text; a failed save answers 500 `REPORT_SAVE_FAILED` and keeps nothing. Shared files: `SecurityConfig` (one URL rule, `/api/patients/*/reports` for PRACTITIONER, so a patient's bad body is 403, not 400), two rows in `AccessMatrixFunctionalTest`, Postman folder 11. The migration is V16: this branch merges after #116 (V15).
+
+**2026-11-12:** MLink-32 32.4: every report written adds one `REPORT_CREATED` row (resource `CONSULTATION_REPORT`, the report id), in the same transaction as the report: a report is never kept without its trace, and a failed row answers `REPORT_SAVE_FAILED`. Every read adds one `REPORT_VIEWED` row (resource `PATIENT_REPORTS`, the patient id) before the list leaves, like the record's `RECORD_VIEWED`. Ids only, never a text. Refusals stay `ACCESS_DENIED`. `AuditService.recordWithin` is the same method as on #116 (identical lines, so the two branches merge cleanly there); `AuditAction` gains two values (an additive conflict with #116's `SLOT_OPENED`/`SLOT_CLOSED` when both merge).
+
+**2026-11-15:** MLink-32, code owner's second review on #123. (1) `ReportWriteGuard` refuses every write of unknown length with 411, not only a chunked one: an HTTP/2 hop may forward a body with neither `Content-Length` nor `Transfer-Encoding`, and only a stated length is a bound Tomcat enforces. Tests: `ReportWriteGuardTest` (HTTP/2 and HTTP/1.1 forms, unit), `aWriteWithNeitherContentLengthNorTransferEncodingIsRefusedWith411` (raw socket, real API). (2) `report_encryption_key` is in the three `terraform.tfvars.*.example` files and in the README's required settings (distinct from the MFA key, back it up); `TerraformExamplesTest` checks that every variable without a default is in each example and in the README. Red first.
+
+**2026-11-14:** MLink-32, code owner's review on #123. (1) A report write is checked before Spring reads its body: `ReportWriteGuard`, a handler interceptor on `/api/patients/*/reports` (registered in the new `WebConfig`), checks the attachment first (403 for a malformed, huge or unsized body from a practitioner who is not attached), then a hard size: no `Content-Length` (chunked) is 411 `LENGTH_REQUIRED`, over 64 KiB is 413 `PAYLOAD_TOO_LARGE` (10 000 characters at their longest JSON escape still fit). The service keeps its own checks. (2) A traced read no longer holds its read transaction's connection while its audit row is written in its own (`REQUIRES_NEW`): `list` reads in a read-only `TransactionTemplate`, then calls `audit.record`. Same fix for `PatientRecordService.read` (MLink-31, same pattern). Tests, red first: three in `ConsultationReportFunctionalTest`, and `ReadAuditConnectionTest` (a pool of one connection: a read holding two would time out; the committed row is read back; a read whose trace fails is not answered). No migration, no new route; `SecurityConfig` unchanged.
+
+**2026-11-13:** MLink-32, CI of #123: a report's `createdAt` is kept to the microsecond, as PostgreSQL stores it. Linux clocks (the CI's) give nanoseconds, so the POST answered a time the GET never gave back (green on macOS, red on Linux). Test `theCreationTimeKeptByTheEntityIsTheOneTheDatabaseStores`.
+
+**2026-11-12:** MLink-32 32.7, the acceptance criteria and their tests: (1) the content column is not the text: `theContentIsSealedInTheDatabaseNeverInPlainText`, and `theSameTextIsSealedDifferentlyEachTimeAndNeverAsItsPlainBase64` (a new IV each time, no plain base64); (2) writing for a patient not attached is 403 and saves nothing: `aPractitionerWhoIsNotAttachedGetsTheRecordsSame403AndNothingIsSaved`; (3) a failing save answers `REPORT_SAVE_FAILED` and stores nothing: `ReportSaveFailureTest` (the database cannot fail on demand through the API, so the service is called with its repository, then its audit, made to fail); (4) write and read are audited: `everyWriteAddsOneReportCreatedEntryWithTheIdsOnly`, `everyReadAddsOneReportViewedEntryForThePatient`. `./mvnw -B verify` and the reversed class order green before the push.
+
+**2026-11-12:** MLink-26, code owner's second review on #116: a slot change and its audit row are now one unit. The slot was committed before its audit row (written in its own `REQUIRES_NEW` transaction), so a failed audit could answer 500 after a kept change, with no trace. `AuditService.recordWithin` (new, `MANDATORY`) writes the row in the change's transaction; `AgendaService` calls it for an opening, a closing and a reopening, and the controller no longer audits. If the row cannot be written, the change rolls back. `AuditService.record` (own transaction) is unchanged for refusals. New test `AgendaAuditAtomicityTest` (audit repository made to fail). Shared file: `AuditService` (one method added). No migration, no new route.
+
+**2026-11-10:** MLink-26, code owner's review on #116: `SecurityConfig` gains a role rule for `/api/practitioner/**` (the role is checked before Spring converts dates and JSON: 403, never 400, for a patient). Shared file: no other route changes. Also fixed: two overlapping slot openings at once could end in a 500 (Postgres deadlock), now 409. No migration, no new route.
+
+**2026-11-10:** MLink-26 (`feat/MLink-26-agenda`): `master` merged after #87 and #113, so the agenda migration is renumbered **V15** (`V15__agenda_reference_data.sql`; V14 is MLink-99's slot search index). Dev databases that ran the branch's old V14 need the setup script with `--reset` (`-Reset`) once. Conflicts kept both sides (`SlotRepository`, access matrix). New test: a closed slot cannot be booked. See the MLink-26 section.
+
+**2026-11-10:** MLink-31 (`feat/MLink-31-patient-record`): `GET /api/patients/{id}/record` for the practitioners the patient is attached to (a `BOOKED` appointment). No migration. **One new line in `AccessMatrixFunctionalTest`**, one new rule in `SecurityConfig`. See the MLink-31 section.
 
 **2026-10-31, updated 2026-11-08:** MLink-65 (sub-sprint 3 part, `feat/ss3-setup-staff-code-check`): both setup
 scripts check the session with `GET /api/auth/me` (#107): `patient.dev` gets 200 with exactly the roles `["PATIENT"]`, and
@@ -162,6 +217,29 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-31 — Accéder au dossier du patient (back-end)
+
+**Tickets:** 31.1, 31.2, 31.3, 31.6 (story MLink-31, epic MLink-10). Front (31.4, 31.5) in `web-MedLink`.
+
+**Route:** `GET /api/patients/{id}/record` → 200 `{"patient": {"id", "firstName", "lastName", "birthDate", "phone"}, "reports": []}`. Practitioners only; the practitioner is always the caller.
+
+**Decisions** (agreed 2026-11-10, comment on 31.1)
+- D1 — "attached" = the practitioner has a `BOOKED` appointment with the patient, past or upcoming (`appointments → slots.practitioner_id`). A cancelled appointment does not attach: the patient was never seen (secret médical). No new table, no migration (`AppointmentRepository.existsByPractitionerAndPatient`).
+- D2 — not attached, unknown patient and an id that is not a UUID get the same 403 (`AccessDeniedException`, so the refusal is audited as `ACCESS_DENIED`); the link is checked before anything is read.
+- D3 — `RECORD_VIEWED` (`SUCCESS`, resource `PATIENT_RECORD`, ids only) is written before the record is returned: a read that cannot be traced is not answered. `AuditService` writes in its own transaction.
+- Identity only: no address, no email (31.2). `reports` stays empty until MLink-32 gives it its type.
+- `SecurityConfig` checks the `PRACTITIONER` role for `GET /api/patients/*/record` before Spring reads the request (lesson of the review on #116); the class-level `@PreAuthorize` stays. The id is read as text, so nothing is converted before the role check.
+- New enum values: `AuditAction.RECORD_VIEWED`, `AuditOutcome.SUCCESS` (#116 also adds `SUCCESS`: keep one at merge).
+
+**Proofs**
+- `PatientRecordFunctionalTest` (5 tests), committed red first (5 of 5 failing with 404), then green: attached practitioner 200 with identity only and `Cache-Control: no-store`; a past appointment attaches; not attached, cancelled only, unknown and malformed ids all get the same 403 and 4 `ACCESS_DENIED` rows, no `RECORD_VIEWED`; patient (even the one concerned) and staff 403, anonymous 401; two reads → two `RECORD_VIEWED` rows with the practitioner's id.
+- Mutation checks: any appointment instead of `BOOKED` → `expected: 403 but was: 200`; without the audit call → `Expected size: 2 but was: 0`.
+- Access matrix: one new line, `GET /api/patients/{id}/record` L,F,F,F.
+- `./mvnw -B clean verify`: **484 tests, 0 failures**; reverse class order: 484 tests, 0 failures. One earlier run had one error that did not come back in the next runs.
+- Postman folder 10 (access rules; the 200 needs a practitioner profile and an appointment, which no endpoint creates yet): 19 requests, 31 assertions, 0 failures. Whole collection: **151 requests, 345 assertions, 0 failures**, twice in a row, after `setup-dev.sh --reset`.
+
+**Found on the way:** after switching branches, `./mvnw verify` without `clean` kept another branch's `V15__agenda_reference_data.sql` in `target/classes`, and `AppointmentSchemaTest.outsideTheDevProfileThereIsNoSeedData` failed locally (3 clinics). Not a code issue (CI starts from an empty `target/`): use `./mvnw clean verify` after a branch switch when migrations differ.
 
 ## MLink-65 — setup scripts check the session and the staff code (2026-10-31, updated 2026-11-07, feat/ss3-setup-staff-code-check)
 
@@ -1051,6 +1129,19 @@ refuses to start.
 different hash case (PowerShell `Get-FileHash` upper case, `sha256sum` lower case). On one clone used
 with both scripts the stamps never match, so every switch of script wipes the dev volumes (the realm is
 saved first). One user runs one script, so it only bites when both are used on one machine.
+
+## MLink-115 — audit-log query API
+
+**Built:** staff-only `GET /api/admin/audit-entries`, with inclusive ISO-8601 `from`/`to` timestamps,
+`userId` and `action` filters. Results are sorted newest first (timestamp, then id) and returned as
+`items` plus `page`, `size`, `totalElements` and `totalPages`; page size defaults to 50 and is capped at
+100. Invalid date ranges, page values, page sizes and action names return `400 VALIDATION_FAILED`.
+The query service only reads from the append-only audit repository.
+
+**Proof:** `AuditQueryFunctionalTest` checks all filters together, inclusive date bounds, stable ordering,
+pagination, invalid parameters and actions; `AccessMatrixFunctionalTest` verifies anonymous `401`,
+patient/practitioner `403`, and staff access. `.\mvnw -B "-Dtest=AuditQueryFunctionalTest,AuditFunctionalTest,AccessMatrixFunctionalTest" test`:
+**101 tests, 0 failures**.
 
 ## MLink-59 — audit trail, every refusal recorded (2026-10-17, epic/MLink-6)
 

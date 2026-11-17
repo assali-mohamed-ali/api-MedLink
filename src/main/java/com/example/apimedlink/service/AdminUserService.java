@@ -36,18 +36,32 @@ import org.springframework.transaction.support.TransactionTemplate;
  * clinics, V13): it is created with the account, and a role change adds or removes it, so no practitioner account
  * exists without its profile. The Keycloak user and our rows are created in the same request, then the activation
  * mail goes out; when our rows fail, the Keycloak user is deleted, so no account is left half made. Patients are
- * never created here: they register. Every account operation, done or refused, leaves an audit entry.
+ * never created here: they register.
+ *
+ * <p>No change is made without its audit entry (MLink-72, review of #121). A new account is saved with its entry in
+ * one transaction: both or neither. A role change or a status change reaches Keycloak, which no transaction covers,
+ * so the entry comes first: an ATTEMPTED entry is committed before anything is touched (and when it cannot be
+ * written, nothing is done and the answer is 503), then the change is made, then a SUCCESS or FAILURE entry closes
+ * it. When that last entry cannot be written the answer is 503 too, never a silent success: the ATTEMPTED entry
+ * stays in the trail, and staff send the change again (every step is idempotent). A refusal changes nothing; its
+ * FAILURE entry is written, and if even that fails the original error is kept and the gap is logged.
  */
 @Service
 public class AdminUserService {
 
     private static final Logger log = LoggerFactory.getLogger(AdminUserService.class);
 
+    /** The resource type of every account entry in the audit trail. */
+    private static final String RESOURCE = "USER";
+
     /** The resource id of an audit entry for an account that was never created. */
     private static final String NEW_ACCOUNT = "NEW_ACCOUNT";
 
     /** What a practitioner needs besides their account: a specialty and at least one clinic. */
     private record Profile(Specialty specialty, Set<Clinic> clinics) {}
+
+    /** A role change that passed every check: what is left to do, in which order. */
+    private record RoleChange(String groupPath, Runnable profileChange, boolean demotion) {}
 
     private final KeycloakAdminService keycloak;
     private final UserRepository users;
@@ -92,12 +106,10 @@ public class AdminUserService {
     public KeycloakUserPage.Entry create(String email, String firstName, String lastName, String role,
                                          UUID specialtyId, Set<UUID> clinicIds) {
         try {
-            KeycloakUserPage.Entry created = createAccount(email, firstName, lastName, role, specialtyId, clinicIds);
-            record(AuditAction.ACCOUNT_CREATED, created.user().id().toString(), AuditOutcome.SUCCESS);
-            return created;
-        } catch (RuntimeException e) {
-            record(AuditAction.ACCOUNT_CREATED, NEW_ACCOUNT, AuditOutcome.FAILURE);
-            throw e;
+            return createAccount(email, firstName, lastName, role, specialtyId, clinicIds);
+        } catch (RuntimeException failed) {
+            recordFailure(AuditAction.ACCOUNT_CREATED, NEW_ACCOUNT, failed);
+            throw failed;
         }
     }
 
@@ -119,10 +131,12 @@ public class AdminUserService {
         }
         String token;
         try {
-            // The account and its activation token are saved together: both or neither
+            // The account, its activation token and its audit entry are saved together: all or nothing
             token = tx.execute(status -> {
                 saveAccount(id, normalized, firstName, lastName, profile);
-                return tokens.issue(id, Purpose.ACTIVATE_ACCOUNT);
+                String issued = tokens.issue(id, Purpose.ACTIVATE_ACCOUNT);
+                audit.recordWithin(AuditAction.ACCOUNT_CREATED, RESOURCE, id.toString(), AuditOutcome.SUCCESS);
+                return issued;
             });
         } catch (RuntimeException e) {
             deleteKeycloakUser(id);
@@ -140,25 +154,27 @@ public class AdminUserService {
      * moves the user to the new Keycloak group. A demotion moves the group first and deletes the profile only
      * after Keycloak succeeded, so a Keycloak failure never leaves a PRACTITIONER without their profile. Keycloak
      * then signs the user out: a session keeps the roles it was opened with. Every step is idempotent: after an
-     * error staff send the change again.
+     * error staff send the change again. The change is audited before it starts and sealed once it is done.
      *
      * @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404)
      * @throws ApiException 409 {@code PATIENT_ROLE_CHANGE_UNSUPPORTED} for a patient (a person holds one role; the
      *     history of a patient is not migrated), 409 {@code PRACTITIONER_HAS_SLOTS} when a practitioner who holds
      *     slots would lose their profile, 400 {@code VALIDATION_FAILED} when a new practitioner has no valid
-     *     specialty or clinics
+     *     specialty or clinics, 503 {@code AUDIT_UNAVAILABLE} when the audit entry cannot be written
      */
     public void changeRole(UUID id, String role, UUID specialtyId, Set<UUID> clinicIds) {
+        RoleChange change;
         try {
-            applyRoleChange(id, role, specialtyId, clinicIds);
-            record(AuditAction.ROLE_CHANGED, id.toString(), AuditOutcome.SUCCESS);
-        } catch (RuntimeException e) {
-            record(AuditAction.ROLE_CHANGED, id.toString(), AuditOutcome.FAILURE);
-            throw e;
+            change = checkRoleChange(id, role, specialtyId, clinicIds);
+        } catch (RuntimeException refused) {
+            recordFailure(AuditAction.ROLE_CHANGED, id.toString(), refused);
+            throw refused;
         }
+        traced(AuditAction.ROLE_CHANGED, id, () -> applyRoleChange(id, change));
     }
 
-    private void applyRoleChange(UUID id, String role, UUID specialtyId, Set<UUID> clinicIds) {
+    /** Every check of a role change: it throws before anything is touched. */
+    private RoleChange checkRoleChange(UUID id, String role, UUID specialtyId, Set<UUID> clinicIds) {
         String groupPath = staffGroupOf(role);
         if (patients.existsById(id)) {
             throw new ApiException(HttpStatus.CONFLICT, "PATIENT_ROLE_CHANGE_UNSUPPORTED",
@@ -193,51 +209,94 @@ public class AdminUserService {
             profileChange = () -> { };
             demotion = false;
         }
+        return new RoleChange(groupPath, profileChange, demotion);
+    }
+
+    private void applyRoleChange(UUID id, RoleChange change) {
         revocations.revoke(id);
-        if (demotion) {
-            keycloak.moveToGroup(id, groupPath);
-            tx.executeWithoutResult(status -> profileChange.run());
+        if (change.demotion()) {
+            keycloak.moveToGroup(id, change.groupPath());
+            tx.executeWithoutResult(status -> change.profileChange().run());
         } else {
-            tx.executeWithoutResult(status -> profileChange.run());
-            keycloak.moveToGroup(id, groupPath);
+            tx.executeWithoutResult(status -> change.profileChange().run());
+            keycloak.moveToGroup(id, change.groupPath());
         }
         keycloak.endSessions(id);
     }
 
     /**
-     * Enables or disables an account. Disabling signs the user out at once (the API's own mark, then Keycloak).
+     * Enables or disables an account. A disable writes the local revocation (session_revocations) first, as
+     * changeRole does: the API validates already-issued tokens locally, so if that write fails nothing has changed
+     * in Keycloak and staff send the request again, while a failure after it only leaves the account enabled with
+     * its sessions refused (the user logs in again). Keycloak then disables the account and ends its sessions.
+     * The change is audited before it starts and sealed once it is done.
      *
-     * @throws ApiException 409 {@code CANNOT_DISABLE_SELF} when staff disable their own account
+     * @throws ApiException 409 {@code CANNOT_DISABLE_SELF} when staff disable their own account, 503
+     *     {@code AUDIT_UNAVAILABLE} when the audit entry cannot be written
      */
     public void setEnabled(UUID id, boolean enabled, UUID actingUser) {
         AuditAction action = enabled ? AuditAction.ACCOUNT_ENABLED : AuditAction.ACCOUNT_DISABLED;
-        try {
-            applyEnabled(id, enabled, actingUser);
-            record(action, id.toString(), AuditOutcome.SUCCESS);
-        } catch (RuntimeException e) {
-            record(action, id.toString(), AuditOutcome.FAILURE);
-            throw e;
+        if (!enabled && id.equals(actingUser)) {
+            ApiException refused = new ApiException(HttpStatus.CONFLICT, "CANNOT_DISABLE_SELF",
+                    "Vous ne pouvez pas désactiver votre propre compte.");
+            recordFailure(action, id.toString(), refused);
+            throw refused;
         }
+        traced(action, id, () -> applyEnabled(id, enabled));
     }
 
-    private void applyEnabled(UUID id, boolean enabled, UUID actingUser) {
-        if (!enabled && id.equals(actingUser)) {
-            throw new ApiException(HttpStatus.CONFLICT, "CANNOT_DISABLE_SELF",
-                    "Vous ne pouvez pas désactiver votre propre compte.");
+    private void applyEnabled(UUID id, boolean enabled) {
+        if (!enabled) {
+            revocations.revoke(id);
         }
         keycloak.setEnabled(id, enabled);
         if (!enabled) {
-            revocations.revoke(id);
             keycloak.endSessions(id);
         }
     }
 
-    /** The audit trail never turns a finished operation into an error: a failed write is logged. */
-    private void record(AuditAction action, String resourceId, AuditOutcome outcome) {
+    /**
+     * Trace first, act, then seal. The ATTEMPTED entry is committed before anything is touched: without it nothing
+     * is done. If the change fails, a FAILURE entry closes it and the original error goes on. If it succeeds, a
+     * SUCCESS entry closes it, and when that entry cannot be written the caller gets a 503, never a silent success.
+     */
+    private void traced(AuditAction action, UUID id, Runnable change) {
+        String resourceId = id.toString();
         try {
-            audit.record(action, "USER", resourceId, outcome);
+            audit.record(action, RESOURCE, resourceId, AuditOutcome.ATTEMPTED);
         } catch (RuntimeException e) {
-            log.error("Audit entry {} {} could not be written ({})", action, outcome, e.getClass().getSimpleName());
+            log.error("AUDIT_UNAVAILABLE: {} for {} was not started, its entry cannot be written ({})",
+                    action, resourceId, e.getClass().getSimpleName());
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AUDIT_UNAVAILABLE",
+                    "L'opération n'a pas été exécutée : sa trace n'a pas pu être enregistrée. Réessayez.");
+        }
+        try {
+            change.run();
+        } catch (RuntimeException failed) {
+            recordFailure(action, resourceId, failed);
+            throw failed;
+        }
+        try {
+            audit.record(action, RESOURCE, resourceId, AuditOutcome.SUCCESS);
+        } catch (RuntimeException e) {
+            log.error("AUDIT_UNAVAILABLE: {} for {} was done but its closing entry cannot be written ({}): "
+                    + "check the ATTEMPTED entry", action, resourceId, e.getClass().getSimpleName());
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AUDIT_UNAVAILABLE",
+                    "L'opération a été exécutée mais sa trace n'a pas pu être finalisée : envoyez la demande à nouveau.");
+        }
+    }
+
+    /**
+     * The FAILURE entry of a refused or failed operation. The original error stays the one the caller gets; if even
+     * this entry cannot be written, that error is added to it and the gap is logged.
+     */
+    private void recordFailure(AuditAction action, String resourceId, RuntimeException cause) {
+        try {
+            audit.record(action, RESOURCE, resourceId, AuditOutcome.FAILURE);
+        } catch (RuntimeException auditFailure) {
+            cause.addSuppressed(auditFailure);
+            log.error("AUDIT_GAP: the FAILURE entry of {} for {} could not be written ({})",
+                    action, resourceId, auditFailure.getClass().getSimpleName());
         }
     }
 
