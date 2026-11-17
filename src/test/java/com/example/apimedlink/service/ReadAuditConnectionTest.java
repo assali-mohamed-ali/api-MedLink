@@ -23,10 +23,11 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.bean.override.mockito.MockitoSpyBean;
 
 /**
- * Review on #123: a traced read (the reports, MLink-32, and the record, MLink-31) must not keep its read transaction,
- * and so its database connection, open while the audit row is written in its own transaction. Proven with a pool of
- * ONE connection: a read that still held its connection while asking for the audit's would wait for itself until the
- * pool's timeout and fail. The row is read back afterwards through the same pool, so it is committed (durable).
+ * Review on #123 and on #90: a traced read (the reports, MLink-32, the record, MLink-31, and the users, MLink-114)
+ * must not keep its read transaction, and so its database connection, open while the audit row is written in its
+ * own transaction. Proven with a pool of ONE connection: a read that still held its connection while asking for the
+ * audit's would wait for itself until the pool's timeout and fail. The row is read back afterwards through the same
+ * pool, so it is committed (durable).
  */
 @SpringBootTest(properties = {
         "spring.datasource.hikari.maximum-pool-size=1",
@@ -40,6 +41,9 @@ class ReadAuditConnectionTest {
 
     @Autowired
     PatientRecordService records;
+
+    @Autowired
+    UserService userService;
 
     @Autowired
     JdbcTemplate jdbc;
@@ -68,6 +72,27 @@ class ReadAuditConnectionTest {
         assertThat(viewed("RECORD_VIEWED", patient)).isEqualTo(1);
     }
 
+    /** Review on #90: the list of users is read and traced with one connection at a time. */
+    @Test
+    void readingAllTheUsersNeedsOneConnectionAtATimeAndItsTraceIsCommitted() {
+        UUID pro = practitioner();
+        int before = traced("DATA_READ", "ALL");
+
+        assertThat(userService.findAll()).extracting(user -> user.getId()).contains(pro);
+
+        assertThat(traced("DATA_READ", "ALL")).isEqualTo(before + 1);
+    }
+
+    /** Review on #90: one user is read and traced with one connection at a time. */
+    @Test
+    void readingOneUserNeedsOneConnectionAtATimeAndItsTraceIsCommitted() {
+        UUID pro = practitioner();
+
+        assertThat(userService.findById(pro).getId()).isEqualTo(pro);
+
+        assertThat(traced("DATA_READ", pro.toString())).isEqualTo(1);
+    }
+
     /** Still the rule of 32.4: a read whose trace cannot be written is not answered. */
     @Test
     void aReadWhoseTraceCannotBeWrittenIsNotAnswered() {
@@ -81,9 +106,27 @@ class ReadAuditConnectionTest {
         assertThatThrownBy(() -> records.read(pro, patient)).isInstanceOf(DataAccessResourceFailureException.class);
     }
 
+    /** The same rule for the users (review on #90): no trace, no answer. */
+    @Test
+    void aUserReadWhoseTraceCannotBeWrittenIsNotAnswered() {
+        UUID pro = practitioner();
+        doThrow(new DataAccessResourceFailureException("audit store unavailable"))
+                .when(entries).save(argThat((AuditEntry entry) -> entry != null
+                        && entry.getAction() == AuditAction.DATA_READ));
+
+        assertThatThrownBy(() -> userService.findAll()).isInstanceOf(DataAccessResourceFailureException.class);
+        assertThatThrownBy(() -> userService.findById(pro)).isInstanceOf(DataAccessResourceFailureException.class);
+    }
+
     private Integer viewed(String action, UUID patient) {
         return jdbc.queryForObject("select count(*) from audit_entries where action = ? and resource_id = ?",
                 Integer.class, action, patient.toString());
+    }
+
+    private int traced(String action, String resourceId) {
+        Integer count = jdbc.queryForObject("select count(*) from audit_entries where action = ? and resource_id = ?",
+                Integer.class, action, resourceId);
+        return count == null ? 0 : count;
     }
 
     private UUID practitioner() {

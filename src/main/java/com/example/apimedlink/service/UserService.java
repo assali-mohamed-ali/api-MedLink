@@ -9,6 +9,7 @@ import jakarta.persistence.EntityNotFoundException;
 import java.util.List;
 import java.util.UUID;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -23,14 +24,21 @@ public class UserService {
         this.audit = audit;
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * The audit row is written in its own transaction (it must survive a refusal), so it needs its own database
+     * connection. This method therefore holds no transaction of its own: the repository reads in its short
+     * transaction and gives the connection back before the audit asks for one. Under load, reads that kept their
+     * connection while waiting for the audit's would use up the pool (review of #90).
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public List<User> findAll() {
         List<User> all = users.findAll();
         audit.record(AuditAction.DATA_READ, "USER", "ALL", AuditOutcome.SUCCESS);
         return all;
     }
 
-    @Transactional(readOnly = true)
+    /** Same rule as {@link #findAll()}: the read has ended, and released its connection, before the audit. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public User findById(UUID id) {
         User user = users.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("User " + id + " not found"));
