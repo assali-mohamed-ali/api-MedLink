@@ -554,6 +554,9 @@ fails leaves the appointment BOOKED and its slot taken; a move whose audit fails
 the new slot free with no appointment; a move and a cancel (twice) write exactly one row each. Red b49c4ef (the events
 are matched by name, so the test compiles on the previous code), green cab279b. The cancellation alert of MLink-37
 (#125, Ahlem) will be called right after these audit lines, for a cancel and for the old appointment of a move.
+Proof on b3b8640 (after `master` with #93 merged in): red 3 of 5 failing with the previous `AppointmentService`;
+green 5/5, with the cancel and move functional tests (21, 0 failures); `./mvnw -B verify` **745 tests, 0 failures**,
+reverse order 745, 0 failures; newman **204 requests, 431 assertions, 0 failures**.
 
 **Proof** (Ubuntu VM with Docker):
 - Red (4286db7, run with the code of the commit before): `AppointmentReminderRaceTest` fails (the cancelled one got
