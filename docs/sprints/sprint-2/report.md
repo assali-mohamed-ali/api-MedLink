@@ -266,9 +266,13 @@ TRUNCATE, DROP TRIGGER, DISABLE TRIGGER, DROP TABLE, CREATE TABLE are refused fo
 DELETE red; no same-user check turns its 2 cases red. The whole suite runs as `medlink_app`. Setup scripts, 0
 failures: `setup-dev.ps1 -KeepData` on a pre-#57 volume, `setup-dev.sh --full-stack`, `setup-dev.ps1 -FullStack`.
 
-**For whoever deploys:** the deploy secret must also hold `APP_DB_PASSWORD` (docker-compose.yml requires it). A
-server whose volume predates #57 needs the init script once (`terraform/README.md`, "Database roles"); a fresh one
-gets the role from the image.
+**For whoever deploys:** the deploy secret must also hold `APP_DB_PASSWORD` (docker-compose.yml requires it); it is
+the only new key (`docker-compose.yml` gives Flyway `POSTGRES_USER` / `POSTGRES_PASSWORD`). The deploy action copies the
+role script to the server and runs it before the API starts, on every deploy. At first it did not copy it: a fresh
+server could not have initialised its database, and an older one would have kept `medlink_app` without a login (found
+after the PR opened). Proof: `DeployComposeActionTest` (red first), and the action's remote steps replayed on a
+disposable compose project: fresh volume, a role left without login, a second run; `medlink_app` logs in each time. The
+Terraform path creates the role by hand (`terraform/README.md`, "Database roles").
 
 **Limits:**
 - The API on the host (`mvnw spring-boot:run`, dev) still connects as the owner: Spring Boot's compose integration

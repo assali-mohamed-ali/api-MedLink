@@ -10,8 +10,8 @@ GitHub #68 (MFA for the Keycloak bootstrap admin) is **not** part of this plan.
 **State.** Parts A (#64) and B (#57) are done and pushed; **PR [#126](https://github.com/assali-mohamed-ali/api-MedLink/pull/126)
 `fix/db-hardening` → `master`** is open (2026-11-17), waiting for Mohamed's review box and the code owner. Final run on
 `bbb6d66`: `clean verify` 746 tests, 0 failures; reversed class order 746, 0 failures; 0 commits behind `master`.
-#64 and #57 are commented. Before the merge: #125 (V17) first, and the deploy secret needs `APP_DB_PASSWORD`,
-`SPRING_FLYWAY_USER`, `SPRING_FLYWAY_PASSWORD`. A review fix goes on this branch (pull, fix, both orders, push).
+#64 and #57 are commented. Before the merge: #125 (V17) first, and the deploy secret needs `APP_DB_PASSWORD` (the only
+new key). After the PR opened, the deploy action was fixed to copy and run the role script (PR note 15). A review fix goes on this branch (pull, fix, both orders, push).
 **Next: Part C (#67)** on a new branch `chore/db-backup-restore` from `master` (see Part C below).
 
 **`master` builds again (2026-11-17).** The red `master` of 2026-11-16 (#118 + #119, `setEnabled` twice in
@@ -282,7 +282,8 @@ Added by Part B (#57):
    `@ServiceConnection` gives the owner to the datasource too, and a `DynamicPropertyRegistrar` is too late for a
    `RANDOM_PORT` context.
 10. **Deploy secret: one more key before merging.** `DEPLOY_ENV_FILE` must also hold `APP_DB_PASSWORD`, or the
-    deploy stops at `docker compose`. Nothing is deployed yet, so the image's init script will create the role.
+    deploy stops at `docker compose`. It is the only new key: `docker-compose.yml` passes `POSTGRES_USER` /
+    `POSTGRES_PASSWORD` to Flyway as `SPRING_FLYWAY_USER` / `_PASSWORD`.
 11. **Migration order with #125 (MLink-37, V17).** This PR brings V18. If it merges first, a database that ran V18
     will refuse V17 later (Flyway does not apply out of order): #125 should merge first, or renumber after this.
 12. **Setup A (the API on the host) still connects as the owner.** Spring Boot's compose integration gives the
@@ -292,6 +293,12 @@ Added by Part B (#57):
     container (threat model §6).
 14. **`scripts/ci/check-prod-config.sh` changed** (two variables added to its list): a CI script, same remark as
     note 7.
+15. **`.github/actions/deploy-compose/action.yml` changed** (found after the PR opened; a deploy file, same remark as
+    note 7). It now copies `docker/postgres/initdb/10-app-role.sh` (`scp -p`, so Postgres runs it rather than sourcing
+    it) and, before starting the API, runs `up -d --wait postgres` then the script. Without it a fresh server could not
+    initialise its database (the mounted file was missing) and an older one would keep `medlink_app` without a login.
+    `up -d postgres` recreates the database container once, because its config changed; the data volume stays.
+    Proof: `DeployComposeActionTest` (red first) and the remote steps replayed on a disposable compose project.
 
 ## Bookkeeping
 
