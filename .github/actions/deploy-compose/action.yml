@@ -66,7 +66,7 @@ runs:
         printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
         chmod 644 "$HOME/.ssh/known_hosts"
 
-    - name: Copy the compose file, realm and monitoring config
+    - name: Copy the compose file, realm, database role script and monitoring config
       shell: bash
       env:
         DEPLOY_HOST: ${{ inputs.host }}
@@ -75,8 +75,10 @@ runs:
       run: |
         SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i "$HOME/.ssh/deploy_key")
         ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-          "mkdir -p '$DEPLOY_PATH/keycloak' '$DEPLOY_PATH/monitoring/prometheus' '$DEPLOY_PATH/monitoring/alerts'"
+          "mkdir -p '$DEPLOY_PATH/keycloak' '$DEPLOY_PATH/docker/postgres/initdb' '$DEPLOY_PATH/monitoring/prometheus' '$DEPLOY_PATH/monitoring/alerts'"
         scp -q "${SSH_OPTS[@]}" docker-compose.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.yml"
+        # -p keeps the executable mode: Postgres's entrypoint sources a non-executable *.sh into its own shell (GitHub #57)
+        scp -q -p "${SSH_OPTS[@]}" docker/postgres/initdb/10-app-role.sh "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker/postgres/initdb/10-app-role.sh"
         scp -q "${SSH_OPTS[@]}" keycloak/realm-medlink.json "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/keycloak/realm-medlink.json"
         scp -q "${SSH_OPTS[@]}" monitoring/prometheus/prometheus.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/prometheus/prometheus.yml"
         scp -q "${SSH_OPTS[@]}" monitoring/alerts/alert-rules.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/alerts/alert-rules.yml"
@@ -126,6 +128,10 @@ runs:
         set -euo pipefail
         cd "$1"
         docker compose --env-file .env -f docker-compose.yml pull app
+        # The API connects as medlink_app (GitHub #57). The image creates that role only on an empty volume, so give it
+        # its login (APP_DB_PASSWORD) on every deploy, before the API starts. The script is safe to run again.
+        docker compose --env-file .env -f docker-compose.yml up -d --wait postgres
+        docker compose --env-file .env -f docker-compose.yml exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh
         docker compose --env-file .env -f docker-compose.yml up -d --no-build --remove-orphans app
         REMOTE
 

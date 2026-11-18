@@ -29,6 +29,10 @@ jobs:
       - name: Test the lockout script's target guard
         run: bash scripts/check-lockout.test.sh
 
+      # GitHub #64: docker-compose.yml refuses to run without the database credentials (offline, compose config only).
+      - name: Test that the full-stack compose file requires the database credentials
+        run: bash scripts/compose-credentials.test.sh
+
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.9.x
