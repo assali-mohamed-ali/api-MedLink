@@ -5,14 +5,15 @@ the bottom: it says what is done, the last commit and the next step.
 
 GitHub #68 (MFA for the Keycloak bootstrap admin) is **not** part of this plan.
 
-## Hand-over for the next session (2026-11-17): Parts A and B done, in PR #126; Part C (#67) next
+## Hand-over for the next session (2026-11-18): all three parts done, in PRs #126 (A, B) and #129 (C)
 
 **State.** Parts A (#64) and B (#57) are done and pushed; **PR [#126](https://github.com/assali-mohamed-ali/api-MedLink/pull/126)
 `fix/db-hardening` → `master`** is open (2026-11-17), waiting for Mohamed's review box and the code owner. Final run on
-`bbb6d66`: `clean verify` 746 tests, 0 failures; reversed class order 746, 0 failures; 0 commits behind `master`.
+`18e4e1f` (master with #120 merged in, 2026-11-18): `clean verify` 780 tests, 0 failures; reversed class order 780,
+0 failures; 0 commits behind `master`.
 #64 and #57 are commented. Before the merge: #125 (V17) first, and the deploy secret needs `APP_DB_PASSWORD` (the only
 new key). After the PR opened, the deploy action was fixed to copy and run the role script (PR note 15). A review fix goes on this branch (pull, fix, both orders, push).
-**Next: Part C (#67)** on a new branch `chore/db-backup-restore` from `master` (see Part C below).
+**Part C (#67) is done: PR [#129](https://github.com/assali-mohamed-ali/api-MedLink/pull/129)** (`chore/db-backup-restore`, 724/0 both orders, drill done). Merge #126 before #129 (its runbook uses `10-app-role.sh`); both add a step at the same place in `ci.yml`: keep both. Next: GitHub #68 (admin MFA), not in this plan.
 
 **`master` builds again (2026-11-17).** The red `master` of 2026-11-16 (#118 + #119, `setEnabled` twice in
 `AdminUserService`) was fixed by #93 and merged into this branch. Before each later `git merge origin/master`, still
@@ -220,20 +221,23 @@ Design (keep it small and repeatable):
   `BACKUP_PASSPHRASE` (env only, never an argument, never logged). Output to a directory given as an argument,
   outside the repo and the Docker volumes; `*.dump.enc` in `.gitignore`. File names carry the UTC time.
 - `scripts/db-restore.sh`: decrypt and `pg_restore --clean --if-exists` into a given database.
+- **Done differently (2026-11-18):** gpg (AES-256, integrity-protected) instead of `openssl enc -aes-256-cbc`: CBC
+  cannot detect a damaged file. Files are `*.dump.gpg`; the restore is a single transaction. See the MLink-166
+  section of `report.md` (in #129).
 - Servers are Linux: bash only (the "both setup scripts" rule is for `setup-dev.*`, not these).
 
 Tasks:
-- [ ] **C1** Red: an offline test (fake `docker`, like `check-lockout.test.sh`) checks that the scripts refuse to
+- [x] **C1** Red: an offline test (fake `docker`, like `check-lockout.test.sh`) checks that the scripts refuse to
   run without `BACKUP_PASSPHRASE`, never print it, and never write inside the repo.
-- [ ] **C2** Green: the two scripts.
-- [ ] **C3** Restore drill on the dev stack: write a marker row; back up both DBs; `setup-dev -Reset`; restore;
+- [x] **C2** Green: the two scripts.
+- [x] **C3** Restore drill on the dev stack: write a marker row; back up both DBs; `setup-dev -Reset`; restore;
   check the marker row and that `patient.dev` can still log in (Keycloak DB restored); write down the measured time.
   **Needs ~2.5 GB of free RAM** (close Ollama and Chrome tabs first; stop the stack with `-Stop` after).
-- [ ] **C4** Runbook `docs/operations/backup-restore.md`: frequency (daily), retention (7 daily, 4 weekly),
+- [x] **C4** Runbook `docs/operations/backup-restore.md`: frequency (daily), retention (7 daily, 4 weekly),
   RPO 24 h, RTO = the measured drill time, where backups live (off the host), who can read them, the passphrase in
   the secret store, consistency (both DBs in the same run), verification steps. Link from `docs/ARCHITECTURE.md`
   (backup line goes from "Gap" to "Done").
-- [ ] **C5** PR `chore/db-backup-restore` → `master`. Comment on #67.
+- [x] **C5** PR `chore/db-backup-restore` → `master`. Comment on #67.
 
 ## PR notes (copy into the PR description of `fix/db-hardening`)
 
@@ -322,4 +326,8 @@ Added by Part B (#57):
 - [x] 2026-11-17: B2, B3, B4, B5 committed (see the tasks above).
 - [x] 2026-11-17: B6: `clean verify` 746/0 and reversed order 746/0 on `bbb6d66`, pushed, PR #126 to `master` with the
   PR notes; #64 and #57 commented.
-- Next step: **Part C (#67)** on `chore/db-backup-restore` from `master`; MLink-164/165 to *To Verify* (YouTrack, by hand).
+- [x] 2026-11-17: MLink-164/165 moved to *To Verify* in YouTrack, with the PR link.
+- [x] 2026-11-18: `master` merged in (`18e4e1f`, #120), 780/0 both orders, pushed; PR body updated.
+- [x] 2026-11-18: Part C done on `chore/db-backup-restore`: C1 red `bf1f80e`, C2 green `8e615d4` (+ `3e2d420`
+  shellcheck), C3 drill (restore 2 s, API checked in 53 s), C4 docs `8cd5930`, C5 PR #129, #67 commented.
+- Next step: reviews of #126 and #129; then GitHub #68.
