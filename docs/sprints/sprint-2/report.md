@@ -307,9 +307,9 @@ RAM for API + Keycloak + two Postgres: staging and api to resize (t3.medium, 20 
 | Ticket | What | State |
 |---|---|---|
 | MLink-168 | Vault as code: `vault/` (policies, `setup.sh`, `seed-env.sh`, `install-host.sh`, `snapshot.sh`), runbook [vault.md](../../operations/vault.md) | pushed green, *To Verify*; to apply on the host with a setup token |
-| MLink-171 | Host preparation: `deploy/prepare-host.sh` (deploy user, restricted key, SSH keys only, security updates, Docker log rotation, daily backup job), runbook [servers.md](../../operations/servers.md) | committed green |
-| MLink-169 | API deploy reads Vault; staging deploy job (master's `cd.yml` has none); prod split across api and front | waits for #126 (same `action.yml`) |
-| MLink-170 | Front deploy workflow (`medlink-dashboard` has no CD) | to do |
+| MLink-171 | Host preparation: `deploy/prepare-host.sh` (deploy user, restricted key, SSH keys only, security updates, Docker log rotation, daily backup job), runbook [servers.md](../../operations/servers.md) | pushed green, *To Verify*; to apply on the hosts |
+| MLink-169 | API deploy reads Vault; staging deploy job (master's `cd.yml` has none); prod split across api and front | to do (#126 merged) |
+| MLink-170 | Front deploy: extend the CD already in `medlink-dashboard` (`container-security.yml`), container on `127.0.0.1:8081` only | to do |
 | MLink-172 | Mail through the team Gmail account (SMTP, app password typed by its holder into `seed-env.sh`) | config ready; real test on staging |
 | MLink-173 | First staging deploy checked end to end, then production | after the repo owner's part |
 
@@ -326,9 +326,9 @@ RAM for API + Keycloak + two Postgres: staging and api to resize (t3.medium, 20 
   each turned a test red.
 - **Found on the way:** `docker-compose.yml` has no `restart:` policy, so containers do not come back after a reboot
   (fix with MLink-169).
-- **Waiting on the repo owner:** Elastic IPs, then the resize; a `medlink-setup` token; merges #125 → #126 → #129;
+- **Waiting on the repo owner** (#125, #126, #129 merged 2026-11-18): the resize and the new IPs; a `medlink-setup` token;
   `staging` brought up to `master`, branch rules, GitHub environments in both repositories; an S3 bucket for the
-  backups and Vault snapshots; one production branch name for both repositories (`prod` vs the front's `Production`).
+  backups and Vault snapshots; the front's `Production` branch renamed `prod`. He proposes Terraform for the hosts (scope not agreed yet).
 
 ## MLink-166 — backup and tested restore of both databases, GitHub #67 (2026-11-18, chore/db-backup-restore)
 
