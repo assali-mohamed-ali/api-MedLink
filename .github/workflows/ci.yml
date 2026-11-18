@@ -37,6 +37,10 @@ jobs:
       - name: Test the host preparation script
         run: bash deploy/test/prepare-host.test.sh
 
+      # GitHub #67: backup and restore refuse unsafe use, encrypt, never leak the passphrase (offline, real gpg).
+      - name: Test the database backup and restore scripts
+        run: bash scripts/db-backup.test.sh
+
       # GitHub #64: docker-compose.yml refuses to run without the database credentials (offline, compose config only).
       - name: Test that the full-stack compose file requires the database credentials
         run: bash scripts/compose-credentials.test.sh
