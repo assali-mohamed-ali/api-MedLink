@@ -78,7 +78,11 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/patients/{id}/record",     L, F, F, F),
             // MLink-32: the same attachment rule as the record; a random id is nobody's patient, so 403 for all
             new Rule("GET",    "/api/patients/{id}/reports",    L, F, F, F),
-            new Rule("POST",   "/api/patients/{id}/reports",    L, F, F, F));
+            new Rule("POST",   "/api/patients/{id}/reports",    L, F, F, F),
+            // MLink-37: the practitioner's own alerts; the matrix practitioner has none (an empty list), and a random
+            // {id} is nobody's alert, so marking it is refused like another practitioner's
+            new Rule("GET",    "/api/practitioner/alerts",      L, F, O, F),
+            new Rule("POST",   "/api/practitioner/alerts/{id}/read", L, F, F, F));
 
     @Autowired
     @Qualifier("requestMappingHandlerMapping")

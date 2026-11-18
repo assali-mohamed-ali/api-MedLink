@@ -84,6 +84,28 @@ class ComposeFilesTest {
         assertThat(topLevelVolumes("docker-compose.yml")).isEqualTo(namedVolumes(full));
     }
 
+    /**
+     * The API container sees only what docker-compose.yml passes it: a variable the configuration reads but
+     * the file does not pass silently takes its fallback, whatever .env says. CORS_ALLOWED_ORIGINS and
+     * TRUSTED_PROXIES were in .env.prod.example but never reached the container: prod would allow only the
+     * placeholder origin and, behind the proxy, every client would share the proxy's IP (one rate-limit bucket).
+     */
+    @Test
+    void theApiContainerReceivesEveryVariableItsConfigurationReads() throws IOException {
+        Set<String> read = new TreeSet<>();
+        Pattern placeholder = Pattern.compile("\\$\\{([A-Z][A-Z0-9_]*)");
+        for (String file : List.of("application.properties", "application-staging.yml", "application-prod.yml")) {
+            Matcher matcher = placeholder.matcher(Files.readString(Path.of("src/main/resources", file)));
+            while (matcher.find()) {
+                read.add(matcher.group(1));
+            }
+        }
+
+        read.removeAll(environment(full.get("app")).keySet());
+
+        assertThat(read).as("variables the API reads that docker-compose.yml does not pass to the app container").isEmpty();
+    }
+
     @Test
     void springBootComposeIntegrationIsPinnedToTheDevFile() throws IOException {
         Properties properties = new Properties();
