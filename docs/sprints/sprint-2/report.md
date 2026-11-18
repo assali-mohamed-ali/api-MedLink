@@ -265,6 +265,7 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
 The repo owner created four EC2 hosts (staging, production API, production front, Vault; Ubuntu 26.04, t3.micro)
 and gave Mohamed their launch keys to prepare the deploys of both repositories. Only the repo owner has the AWS
 console and Vault's root token. Hosts, roles and edges: [docs/operations/servers.md](../../operations/servers.md).
+**Plan and hand-over for the next session: [deploy-prep.md](deploy-prep.md).**
 
 Found on the hosts (read-only check, 2026-11-18): Vault 1.21.0 already initialised and unsealed behind Caddy (TLS via
 sslip.io), Caddy edges on staging and front, ufw active, Docker 29 on the app hosts, empty `/opt/medlink`, nothing

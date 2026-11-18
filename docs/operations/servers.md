@@ -9,6 +9,16 @@ MLink-171. Four EC2 instances in eu-north-1, Ubuntu 26.04, created by the repo o
 | frontend-medlink | `front`: production front and TLS edge | 51.20.3.234 | 172.31.40.60 | Caddy `https://51.20.3.234.sslip.io`: `/api/*` → 172.31.33.183:8080, the rest → 127.0.0.1:8081 |
 | vault | secrets (see [vault.md](vault.md)) | 13.48.56.245 | 172.31.44.172 | Caddy → Vault |
 
+Host keys seen at the first admin login (2026-11-18, ED25519). They stay the same when the IP changes; check them
+before trusting a host or filling `DEPLOY_KNOWN_HOSTS`:
+
+| Host | SHA256 fingerprint |
+|---|---|
+| staging-server | `SHA256:SDzsgu9NJhpNiPOsoHtYdwC/pG9t6PbNs/tLeQTfsDo` |
+| api-medlink | `SHA256:y80orC3jaIG8IGQ7SG4EBoXk9Xt0A8iZVH9y6kGDTw8` |
+| frontend-medlink | `SHA256:r+uqLOeCDdK63zwNMhBU4aoRQAyPwO5jenFmrXLeyyY` |
+| vault | `SHA256:5cbT/Vv58Nng9FJUy6/WY+v9kEL8GjwO8zsyqiYGqkA` |
+
 The public IPs change when an instance is stopped, unless Elastic IPs are attached: attach them before any stop or
 resize, then update this table, the Caddy names (`<ip>.sslip.io`) and the pinned host keys.
 
