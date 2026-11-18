@@ -14,8 +14,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
-import com.example.apimedlink.repository.AppointmentRepository;
-import com.example.apimedlink.service.AlertService;
 import tools.jackson.databind.json.JsonMapper;
 
 /**
@@ -38,12 +36,6 @@ class AlertFunctionalTest extends FunctionalTestBase {
     @Autowired
     JdbcTemplate jdbc;
 
-    @Autowired
-    AlertService alertService;
-
-    @Autowired
-    AppointmentRepository appointments;
-
     record Pro(UUID id, String email, Browser browser) {}
 
     // ---- 37.8: the three acceptance criteria of MLink-37, end to end ----
@@ -51,18 +43,20 @@ class AlertFunctionalTest extends FunctionalTestBase {
     /**
      * The whole story (H-06): the practitioner is logged out, a patient cancels, the practitioner gets the alert and
      * the mail; logged in again, the alert is still there, unread; once marked read it leaves the list; another
-     * practitioner can neither see it nor mark it. The cancel route is US-15's (not merged yet): its cancel code calls
-     * AlertService.onAppointmentCancelled, called here the same way after the appointment is set CANCELLED.
+     * practitioner can neither see it nor mark it. The patient books and cancels through the real routes of US-15
+     * (review on #125): the alert comes from the cancellation itself.
      */
     @Test
     void anAlertReceivedWhileLoggedOutIsThereAtTheNextLoginWithItsMailThenMarkedRead() throws Exception {
         Pro pro = practitioner();
         Pro other = practitioner();
-        UUID appointment = appointment(pro.id());
+        Patient patient = patient();
+        UUID appointment = UUID.fromString(book(patient, freeSlot(pro.id())));
         assertThat(pro.browser().logout().statusCode()).isIn(204, 401);
 
         // The patient cancels while the practitioner is away
-        alertService.onAppointmentCancelled(appointments.findById(appointment).orElseThrow());
+        HttpResponse<String> cancelled = cancel(patient, appointment.toString());
+        assertThat(cancelled.statusCode()).as(cancelled.body()).isEqualTo(204);
 
         // Criterion 1: an alert row for the practitioner, and the mail in Mailpit
         assertThat(jdbc.queryForObject("select count(*) from alerts where practitioner_id = ? and appointment_id = ?",
@@ -177,6 +171,53 @@ class AlertFunctionalTest extends FunctionalTestBase {
         assertThat(jdbc.queryForObject("select read_at from alerts where id = ?", Timestamp.class, alert)).isNull();
     }
 
+    // ---- Review on #125: the alert comes from the real cancellation paths of US-15 ----
+
+    /** A move cancels the old appointment: the practitioner of the old slot gets its alert and its mail. */
+    @Test
+    void movingAnAppointmentWarnsThePractitionerOfTheOldSlotWithAMail() throws Exception {
+        Pro pro = practitioner();
+        Patient patient = patient();
+        String old = book(patient, freeSlot(pro.id()));
+        UUID newSlot = freeSlot(pro.id());
+
+        HttpResponse<String> moved = patient.browser().postJson("/api/appointments/" + old + "/reschedule",
+                "{\"newSlotId\":\"" + newSlot + "\"}");
+
+        assertThat(moved.statusCode()).as(moved.body()).isEqualTo(200);
+        assertThat(jdbc.queryForList("select appointment_id from alerts where practitioner_id = ?", UUID.class, pro.id()))
+                .containsExactly(UUID.fromString(old));
+        assertThat(new Mailbox().to(pro.email(), "Un rendez-vous a été annulé")).hasSize(1);
+    }
+
+    /** A cancel the API refuses (less than 12 hours before) changes nothing, so no alert and no mail. */
+    @Test
+    void aCancelRefusedByTheDeadlineGivesNoAlert() throws Exception {
+        Pro pro = practitioner();
+        Patient patient = patient();
+        String appointment = book(patient, freeSlot(pro.id(), Instant.now().plus(6, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MINUTES)));
+
+        HttpResponse<String> refused = cancel(patient, appointment);
+
+        assertThat(refused.statusCode()).as(refused.body()).isEqualTo(422);
+        assertThat(jdbc.queryForObject("select count(*) from alerts where practitioner_id = ?", Integer.class, pro.id())).isZero();
+    }
+
+    /** Cancelling twice is one cancellation (the second changes nothing): one alert, one mail. */
+    @Test
+    void cancellingTwiceGivesOneAlert() throws Exception {
+        Pro pro = practitioner();
+        Patient patient = patient();
+        String appointment = book(patient, freeSlot(pro.id()));
+
+        assertThat(cancel(patient, appointment).statusCode()).isEqualTo(204);
+        assertThat(cancel(patient, appointment).statusCode()).isEqualTo(204);
+
+        assertThat(jdbc.queryForObject("select count(*) from alerts where practitioner_id = ?", Integer.class, pro.id()))
+                .isEqualTo(1);
+        assertThat(new Mailbox().to(pro.email(), "Un rendez-vous a été annulé")).hasSize(1);
+    }
+
     // ---- Review on #125: the list is bounded (the bell asks every minute) ----
 
     /**
@@ -251,6 +292,45 @@ class AlertFunctionalTest extends FunctionalTestBase {
         jdbc.update("insert into users (id, username, email) values (?, ?, ?) on conflict (id) do nothing", id, email, email);
         jdbc.update("insert into practitioners (id, first_name, last_name, specialty_id) values (?, 'Sami', 'Dev', ?)", id, specialty);
         return new Pro(id, email, new Browser().login(email, PASSWORD));
+    }
+
+    /** A logged-in patient as registration leaves them (users row at login, patients row), as US-15's tests do. */
+    record Patient(UUID id, Browser browser) {}
+
+    private Patient patient() throws Exception {
+        String email = email("alert-patient");
+        UUID id = console.createUser(email, PASSWORD);
+        Browser browser = new Browser();
+        assertThat(browser.apiLogin(email, PASSWORD).statusCode()).as("patient logged in").isEqualTo(200);
+        jdbc.update("insert into patients (id, first_name, last_name, birth_date) values (?, 'Amel', 'Ben Salah', ?)",
+                id, Date.valueOf("1990-04-12"));
+        return new Patient(id, browser);
+    }
+
+    /** Books through the API, as the patient would; returns the appointment's id. */
+    private String book(Patient patient, UUID slot) throws Exception {
+        HttpResponse<String> response = patient.browser().postJson("/api/appointments", "{\"slotId\":\"" + slot + "\"}");
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
+        return (String) mapper.readValue(response.body(), Map.class).get("id");
+    }
+
+    private static HttpResponse<String> cancel(Patient patient, String appointment) throws Exception {
+        return patient.browser().postJson("/api/appointments/" + appointment + "/cancel", "");
+    }
+
+    /** A free slot of the practitioner, one hour after the previous test slot (never two at once). */
+    private UUID freeSlot(UUID practitioner) {
+        return freeSlot(practitioner, FIRST_SLOT.plus(NEXT_SLOT.getAndIncrement(), ChronoUnit.HOURS));
+    }
+
+    private UUID freeSlot(UUID practitioner, Instant start) {
+        UUID clinic = UUID.randomUUID();
+        jdbc.update("insert into clinics (id, name, city) values (?, ?, 'Sousse')", clinic, "Clinique " + clinic);
+        jdbc.update("insert into practitioner_clinics (practitioner_id, clinic_id) values (?, ?)", practitioner, clinic);
+        UUID slot = UUID.randomUUID();
+        jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) values (?, ?, ?, ?, ?, 'FREE')",
+                slot, practitioner, clinic, Timestamp.from(start), Timestamp.from(start.plus(30, ChronoUnit.MINUTES)));
+        return slot;
     }
 
     /** A cancelled appointment of one of the practitioner's slots. */
