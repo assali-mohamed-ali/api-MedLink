@@ -162,6 +162,22 @@ class AppointmentBookingFunctionalTest extends FunctionalTestBase {
         }
     }
 
+    /**
+     * Code owner's post-merge review on #87: a body Spring cannot even parse fails before any method-level check, so
+     * the role is checked in the filter chain, before the body is read. A non-patient always gets 403.
+     */
+    @Test
+    void aPractitionerAndStaffAreRefusedEvenWithMalformedJson() throws Exception {
+        Browser practitioner = new Browser().login("practitioner.dev@medlink.local", DEV_USERS_PASSWORD);
+        Browser staff = new Browser().login("staff.dev@medlink.local", DEV_USERS_PASSWORD);
+
+        for (String body : List.of("{\"slotId\":", "not json", "[]")) {
+            assertThat(practitioner.postJson("/api/appointments", body).statusCode()).as("practitioner " + body)
+                    .isEqualTo(403);
+            assertThat(staff.postJson("/api/appointments", body).statusCode()).as("staff " + body).isEqualTo(403);
+        }
+    }
+
     @Test
     void withoutTheCsrfHeaderTheBookingIsRefused() throws Exception {
         UUID slot = insertSlot(insertPractitioner("Hela", "Mansour", insertSpecialty("Dermatologie (CSRF)")),

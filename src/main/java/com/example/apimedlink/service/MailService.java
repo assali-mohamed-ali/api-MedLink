@@ -2,6 +2,12 @@ package com.example.apimedlink.service;
 
 import jakarta.mail.MessagingException;
 import jakarta.mail.internet.MimeMessage;
+import java.time.Instant;
+import java.time.ZoneId;
+import java.time.ZonedDateTime;
+import java.time.format.DateTimeFormatter;
+import java.util.Locale;
+import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.mail.MailPreparationException;
 import org.springframework.mail.javamail.JavaMailSender;
@@ -13,6 +19,11 @@ import org.springframework.web.util.UriComponentsBuilder;
 /** The mails the API sends, in French: plain text plus simple HTML. Links open React pages. */
 @Service
 public class MailService {
+
+    /** The clinics are in Tunisia: a reminder shows their local date and time. */
+    static final ZoneId CLINICS_ZONE = ZoneId.of("Africa/Tunis");
+    static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("EEEE d MMMM yyyy", Locale.FRENCH);
+    static final DateTimeFormatter TIME = DateTimeFormatter.ofPattern("HH'h'mm", Locale.FRENCH);
 
     private final JavaMailSender mailSender;
     private final String from;
@@ -129,9 +140,56 @@ public class MailService {
         send(to, "Tentative d'inscription avec votre adresse e-mail MedLink", text, html);
     }
 
+    /**
+     * MLink-110: the reminder before an appointment. Where, with whom and when only: never a medical detail. The date
+     * and time are Tunisia's, where the clinics are. Throws like {@link #sendEmailVerification}.
+     * MLink-111 (review on #120): the Message-ID is the appointment's, the same at every try, so a reminder sent again
+     * after a crash (at least once, never "exactly once" over SMTP) is the same message for the mail systems.
+     */
+    public void sendAppointmentReminder(String to, String firstName, String clinic, String practitioner, Instant startsAt,
+            UUID appointmentId) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl).path("/patient/rendez-vous").build().toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        ZonedDateTime local = startsAt.atZone(CLINICS_ZONE);
+        String day = local.format(DAY);
+        String time = local.format(TIME);
+        String text = hello + "\n\n"
+                + "Nous vous rappelons votre rendez-vous :\n\n"
+                + "Date : " + day + "\n"
+                + "Heure : " + time + " (heure de Tunisie)\n"
+                + "Praticien : " + practitioner + "\n"
+                + "Clinique : " + clinic + "\n\n"
+                + "Si vous ne pouvez pas venir, annulez ou reportez ce rendez-vous depuis votre espace :\n\n"
+                + link + "\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Nous vous rappelons votre rendez-vous :</p>"
+                + "<p>Date : <strong>" + HtmlUtils.htmlEscape(day) + "</strong><br>"
+                + "Heure : <strong>" + HtmlUtils.htmlEscape(time) + "</strong> (heure de Tunisie)<br>"
+                + "Praticien : " + HtmlUtils.htmlEscape(practitioner) + "<br>"
+                + "Clinique : " + HtmlUtils.htmlEscape(clinic) + "</p>"
+                + "<p>Si vous ne pouvez pas venir, annulez ou reportez ce rendez-vous depuis votre espace :</p>"
+                + "<p><a href=\"" + HtmlUtils.htmlEscape(link) + "\">Voir mes rendez-vous</a></p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Rappel de votre rendez-vous MedLink", text, html, reminderMessageId(appointmentId));
+    }
+
+    /** The Message-ID of an appointment's reminder: one per appointment, whatever the try. */
+    public static String reminderMessageId(UUID appointmentId) {
+        return "<appointment-reminder-" + appointmentId + "@medlink.local>";
+    }
+
     private void send(String to, String subject, String text, String html) {
+        send(to, subject, text, html, null);
+    }
+
+    /** {@code messageId} null: the mail library makes one. Spring keeps a Message-ID set before sending. */
+    private void send(String to, String subject, String text, String html, String messageId) {
         MimeMessage message = mailSender.createMimeMessage();
         try {
+            if (messageId != null) {
+                message.setHeader("Message-ID", messageId);
+            }
             MimeMessageHelper helper = new MimeMessageHelper(message, true, "UTF-8");
             helper.setFrom(from);
             helper.setTo(to);
