@@ -98,7 +98,7 @@ expect 'backup into the repository' 2
 call env BACKUP_PASSPHRASE="$PASSPHRASE" bash "$BACKUP" "$REPO"
 expect 'backup into the repository root' 2
 [ "$(files_in "$WORK/out")" = 0 ] || fail 'a refused backup wrote a file'
-stray_in_repo | grep -q . && fail "a backup file was written in the repository: $(stray_in_repo | head -n 1)"
+stray_in_repo -print | grep -q . && fail "a backup file was written in the repository: $(stray_in_repo -print | head -n 1)"
 
 # ---------------------------------------------------------------- backup: both databases, encrypted
 call env BACKUP_PASSPHRASE="$PASSPHRASE" bash "$BACKUP" "$WORK/out"

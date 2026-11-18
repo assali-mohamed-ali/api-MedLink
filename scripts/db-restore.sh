@@ -23,8 +23,9 @@ case "$1" in
     *) die 2 "unknown database '$1': app or keycloak. $usage" ;;
 esac
 FILE="$2"
-[ "${3:-}" = --yes-overwrite ] && [ $# -eq 3 ] ||
+if [ $# -ne 3 ] || [ "$3" != --yes-overwrite ]; then
     die 2 "this replaces the current $1 database (service $SERVICE): add --yes-overwrite. $usage"
+fi
 [ -n "${BACKUP_PASSPHRASE:-}" ] || die 2 'BACKUP_PASSPHRASE must be set (environment only, never an argument)'
 [ -f "$FILE" ] || die 2 "no such backup file: $FILE"
 
