@@ -80,6 +80,9 @@ class DatabaseCredentialsStartupTest {
                 Arguments.of(profile, PASSWORD, "change-me-prod-use-vault-or-gh-secrets"),
                 Arguments.of(profile, PASSWORD, "change-me-in-local-env"),
                 Arguments.of(profile, USERNAME, "CHANGE-ME-user"),
+                // The fixed dev values of compose.yaml (code owner's review of #126): anything "dev-only..."
+                Arguments.of(profile, PASSWORD, "dev-only-app-role-password"),
+                Arguments.of(profile, PASSWORD, "DEV-ONLY-copied-from-a-dev-file"),
                 Arguments.of(profile, PASSWORD, "")));
     }
 
@@ -120,6 +123,7 @@ class DatabaseCredentialsStartupTest {
                 Arguments.of(profile, FLYWAY_USER, "change-me-owner"),
                 Arguments.of(profile, FLYWAY_PASSWORD, "secret"),
                 Arguments.of(profile, FLYWAY_PASSWORD, "change-me-prod-use-vault-or-gh-secrets"),
+                Arguments.of(profile, FLYWAY_PASSWORD, "dev-only-app-role-password"),
                 Arguments.of(profile, FLYWAY_PASSWORD, "")));
     }
 
