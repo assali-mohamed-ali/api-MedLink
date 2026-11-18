@@ -29,6 +29,10 @@ jobs:
       - name: Test the lockout script's target guard
         run: bash scripts/check-lockout.test.sh
 
+      # MLink-168: Vault roles read only their own repository's and environment's secrets (throwaway Vault in Docker).
+      - name: Test the Vault configuration
+        run: bash vault/test/vault.test.sh
+
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.9.x

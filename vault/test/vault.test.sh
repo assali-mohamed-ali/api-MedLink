@@ -6,8 +6,10 @@
 #   - the audit log records requests without the secret values; seed-env.sh fills a path once and never overwrites.
 # GitHub tokens are signed here with a throwaway key (openssl), replacing the GitHub discovery URL in the copy only.
 # Needs docker and openssl. Usage: bash vault/test/vault.test.sh
+# shellcheck disable=SC2015  # "check && pass || fail": pass only echoes and always succeeds
 set -euo pipefail
-export MSYS_NO_PATHCONV=1   # Git Bash: keep container paths as they are
+# Git Bash: keep container paths as they are for docker only (openssl still needs its host paths translated)
+docker() { MSYS_NO_PATHCONV=1 command docker "$@"; }
 
 HERE="$(cd "$(dirname "$0")" && pwd -P)"
 VAULT_DIR="$(cd "$HERE/.." && pwd -P)"
@@ -40,12 +42,13 @@ run_setup() { in_vault -e VAULT_TOKEN="$SETUP_TOKEN" "$NAME" sh /medlink-vault/s
 if run_setup > "$WORK/setup1.log" 2>&1; then pass "setup.sh runs with the setup token"; else
     fail "setup.sh with the setup token"; cat "$WORK/setup1.log" >&2; fi
 state() { as_root secrets list; as_root auth list; as_root audit list; as_root policy list;
-    for r in api-staging api-production front-staging front-production; do as_root read -format=json "auth/jwt-github/role/$r"; done; }
+    for r in api-staging api-production front-staging front-production; do
+        as_root read -format=json "auth/jwt-github/role/$r" | grep -v '"request_id"'; done; }
 state > "$WORK/state1" 2>&1
 if run_setup > "$WORK/setup2.log" 2>&1; then pass "setup.sh runs a second time"; else
     fail "setup.sh second run"; cat "$WORK/setup2.log" >&2; fi
 state > "$WORK/state2" 2>&1
-diff -q "$WORK/state1" "$WORK/state2" > /dev/null && pass "second run changes nothing" || fail "second run changed the configuration"
+diff "$WORK/state1" "$WORK/state2" > /dev/null && pass "second run changes nothing" || fail "second run changed the configuration"
 
 # 2. Secrets to read, then the GitHub login switched to a local test key (same issuer as GitHub's)
 for p in staging/api prod/api staging/front prod/front; do
@@ -89,8 +92,8 @@ check_role() { # $1 role $2 sub $3 own path, then the paths it must not read
     done
     if in_vault -e VAULT_TOKEN="$token" "$NAME" vault kv put "medlink/$own" MARKER=overwritten > /dev/null 2>&1; then
         fail "$role: writes medlink/$own"; else pass "$role: cannot write medlink/$own"; fi
-    local ttl; ttl="$(in_vault -e VAULT_TOKEN="$token" "$NAME" vault token lookup -field=ttl 2> /dev/null || echo 0)"
-    ttl="${ttl%s}"
+    local ttl; ttl="$(in_vault -e VAULT_TOKEN="$token" "$NAME" vault token lookup -format=json 2> /dev/null |
+        grep -oE '"ttl": *[0-9]+' | grep -oE '[0-9]+$' || echo 0)"
     [ "${ttl:-0}" -gt 0 ] && [ "${ttl:-0}" -le 600 ] && pass "$role: token lives at most 10 minutes" ||
         fail "$role: token ttl $ttl s, expected 1..600"
 }
@@ -152,6 +155,27 @@ seed staging > "$WORK/seed2.log" 2>&1 || fail "seed-env.sh second run"
 after="$(as_root kv get -field=POSTGRES_PASSWORD medlink/staging/api)"
 [ "$before" = "$after" ] && pass "seed never overwrites a value" || fail "seed overwrote POSTGRES_PASSWORD"
 if seed qa > /dev/null 2>&1; then fail "seed accepted environment qa"; else pass "seed refuses an unknown environment"; fi
+
+# 8. install-host.sh on a throwaway Ubuntu 26.04 (the vault host's release): files, owners, modes, a valid rotation,
+#    and a second run that changes nothing; snapshot.sh refuses to run without its token
+HOST="medlink-vault-host-test-$$"
+docker run -d --name "$HOST" -v "$(host_path "$VAULT_DIR"):/medlink-vault:ro" ubuntu:26.04 sleep 600 > /dev/null
+on_host() { docker exec "$HOST" sh -c "$1"; }
+trap 'docker rm -f "$HOST" > /dev/null 2>&1 || true; cleanup' EXIT
+on_host 'apt-get update -qq > /dev/null && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq logrotate > /dev/null && useradd --system vault && install -d -o vault -g vault -m 755 /etc/vault.d'
+listing='find /var/log/vault /var/backups/vault /etc/logrotate.d/vault-audit /etc/cron.d/medlink-vault-snapshot /usr/local/sbin/medlink-vault-snapshot /etc/vault.d -maxdepth 0 -printf "%p %u:%g %m\n"'
+if on_host 'sh /medlink-vault/install-host.sh' > "$WORK/host1.log" 2>&1; then pass "install-host.sh runs"; else
+    fail "install-host.sh"; cat "$WORK/host1.log" >&2; fi
+on_host "$listing" > "$WORK/host1.lst"
+grep -q '^/var/log/vault vault:vault 750$' "$WORK/host1.lst" && pass "audit log directory vault:vault 750" || fail "audit dir: $(head -1 "$WORK/host1.lst")"
+grep -q '^/var/backups/vault root:root 700$' "$WORK/host1.lst" && pass "snapshot directory root 700" || fail "snapshot directory owner or mode"
+grep -q '^/etc/vault.d vault:vault 755$' "$WORK/host1.lst" && pass "Vault's config directory left as it was" || fail "/etc/vault.d changed"
+on_host 'logrotate -d /etc/logrotate.d/vault-audit' > "$WORK/logrotate.log" 2>&1 && ! grep -qi 'error' "$WORK/logrotate.log" &&
+    pass "audit log rotation is valid" || { fail "logrotate rejects the rotation file"; cat "$WORK/logrotate.log" >&2; }
+on_host 'sh /medlink-vault/install-host.sh' > /dev/null 2>&1 || fail "install-host.sh second run"
+on_host "$listing" > "$WORK/host2.lst"
+diff -q "$WORK/host1.lst" "$WORK/host2.lst" > /dev/null && pass "install-host.sh second run changes nothing" || fail "second run changed the host"
+if on_host 'medlink-vault-snapshot' > /dev/null 2>&1; then fail "snapshot ran without a token"; else pass "snapshot refuses to run without its token"; fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then echo "vault configuration: all checks passed"; else echo "vault configuration: $FAILED check(s) failed"; exit 1; fi
