@@ -176,6 +176,37 @@ on_host 'sh /medlink-vault/install-host.sh' > /dev/null 2>&1 || fail "install-ho
 on_host "$listing" > "$WORK/host2.lst"
 diff -q "$WORK/host1.lst" "$WORK/host2.lst" > /dev/null && pass "install-host.sh second run changes nothing" || fail "second run changed the host"
 if on_host 'medlink-vault-snapshot' > /dev/null 2>&1; then fail "snapshot ran without a token"; else pass "snapshot refuses to run without its token"; fi
+on_host 'grep -q "docker kill --signal=HUP medlink-vault" /etc/logrotate.d/vault-audit' &&
+    pass "audit rotation signals the Vault container" || fail "audit rotation does not signal the container"
+
+# 9. Vault in a container (vault/docker): reachable from the host only, pinned, and its data survives a restart sealed
+COMPOSE="$VAULT_DIR/docker/docker-compose.yml"
+HCL="$VAULT_DIR/docker/vault.hcl"
+if [ -f "$COMPOSE" ] && [ -f "$HCL" ]; then
+    pass "vault/docker holds the compose file and the server configuration"
+    grep -q 'image: hashicorp/vault:1\.21\.0$' "$COMPOSE" && pass "image pinned to Vault 1.21.0" || fail "image not pinned"
+    grep -q "127\.0\.0\.1:8200:8200" "$COMPOSE" && pass "published on 127.0.0.1 only" || fail "port not bound to 127.0.0.1"
+    grep -q 'restart: unless-stopped' "$COMPOSE" && pass "comes back after a reboot" || fail "no restart policy"
+    grep -q 'tls_disable *= *1' "$HCL" && grep -q 'path *= *"/vault/file"' "$HCL" && pass "raft storage on the mounted volume" || fail "storage path"
+    BOOT="medlink-vault-boot-test-$$"
+    trap 'docker rm -f "$BOOT" "$HOST" > /dev/null 2>&1 || true; docker volume rm -f "$BOOT" > /dev/null 2>&1 || true; cleanup' EXIT
+    boot() { docker run -d --name "$BOOT" --user vault --entrypoint vault -e VAULT_API_ADDR=http://127.0.0.1:8200 \
+        -v "$BOOT:/vault/file" -v "$(host_path "$VAULT_DIR/docker"):/vault/config:ro" "$IMAGE" server -config=/vault/config/vault.hcl > /dev/null; }
+    in_boot() { docker exec -i -e VAULT_ADDR=http://127.0.0.1:8200 "$BOOT" vault "$@"; }
+    wait_api() { for _ in $(seq 1 30); do in_boot status > "$WORK/boot.status" 2>&1; [ $? -ne 1 ] && return 0; sleep 1; done; return 1; }
+    boot
+    wait_api || fail "the container's Vault did not answer"
+    in_boot operator init -key-shares=1 -key-threshold=1 -format=json > "$WORK/boot.json" 2> /dev/null || fail "operator init"
+    UNSEAL="$(sed -n '/unseal_keys_b64/,/]/p' "$WORK/boot.json" | sed -n 's/^ *"\(.*\)"$/\1/p' | head -1)"
+    in_boot operator unseal "$UNSEAL" > /dev/null 2>&1 || fail "operator unseal"
+    in_boot status 2> /dev/null | grep -q 'Sealed *false' && pass "the container initialises and unseals" || fail "still sealed after unseal"
+    docker restart "$BOOT" > /dev/null
+    wait_api || fail "the container's Vault did not come back"
+    grep -q 'Initialized *true' "$WORK/boot.status" && pass "its data survives a restart" || fail "data lost on restart"
+    grep -q 'Sealed *true' "$WORK/boot.status" && pass "it comes back sealed" || fail "not sealed after a restart"
+else
+    fail "vault/docker/docker-compose.yml or vault.hcl is missing"
+fi
 
 echo
 if [ "$FAILED" -eq 0 ]; then echo "vault configuration: all checks passed"; else echo "vault configuration: $FAILED check(s) failed"; exit 1; fi
