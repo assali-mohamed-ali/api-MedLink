@@ -125,7 +125,7 @@ flowchart LR
 |---|---|---|---|---|
 | O1 | A vulnerable dependency or image | Dependabot weekly; OWASP Dependency-Check fails on CVSS ≥ 7; Trivy fails on HIGH/CRITICAL; CodeQL (`.github/workflows/`) | ✅ | |
 | O2 | An unreviewed change reaches `master` | code-owner review and CodeQL required on `master` (ruleset); CODEOWNERS on security paths | ✅ | a version bump in compose is not covered by the tests (GitHub #74) |
-| O3 | Data lost | named volumes only | ❌ | backup and tested restore of both databases: GitHub #67 |
+| O3 | Data lost | daily encrypted backup of both databases, checked after writing, all-or-nothing restore, drill recorded (`scripts/db-backup.sh`, `scripts/db-restore.sh`, `docs/operations/backup-restore.md`, GitHub #67) | ✅ | RPO 24 h; the cron job and the off-host copy are set up on each server |
 | O4 | An attack goes unnoticed | Prometheus metrics and 4 alert rules | 🟡 | alerts reach no one (no Alertmanager target); no central log store |
 
 ## 5. Accepted risks
@@ -145,6 +145,5 @@ be triggered by someone else (D2).
 | 1 | No default database credentials outside dev (I7) | GitHub #64 |
 | 2 | Separate database roles for the audit trail (T2) | GitHub #57 |
 | 2 | Logins and account operations in the audit trail (R2) | MLink-114, MLink-72 |
-| 2 | Backups with a tested restore (O3) | GitHub #67 |
 | 3 | Reverse proxy described: TLS, HSTS, CSP, `TRUSTED_PROXIES` (S3, S7, D1) | Terraform GitHub #53 |
 | 3 | Alert routing and a central log store (O4) | not tracked yet |

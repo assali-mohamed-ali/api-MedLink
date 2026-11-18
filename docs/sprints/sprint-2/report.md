@@ -48,6 +48,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-18:** MLink-166 (GitHub #67) on `chore/db-backup-restore`: encrypted backup and all-or-nothing restore of
+both databases, scripts and a runbook, restore drill done on the dev stack. No migration, no endpoint, no Java change.
+`ci.yml` gains one step. See the MLink-166 section.
+
 **2026-11-17:** Code owner's review on #120, round 3: a cancel writes `APPOINTMENT_CANCELLED` and a move writes
 `APPOINTMENT_RESCHEDULED` (on the new appointment), each in its own transaction like a booking. `AuditAction` gains
 the two values (shared file, two lines). No migration, no new route. See the section "Review on #120".
@@ -254,6 +258,38 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-166 — backup and tested restore of both databases, GitHub #67 (2026-11-18, chore/db-backup-restore)
+
+Part C of the database hardening (Parts A and B, #64 and #57, are in PR #126). No migration, no endpoint, no Java
+change.
+
+- `scripts/db-backup.sh <dir>`: `pg_dump --format=custom` of the app database, then Keycloak's, inside each
+  container with its own credentials; encrypted on the way out with gpg (AES-256, integrity-protected), so nothing in
+  clear touches the disk; each file decrypted in full once and checked to be a pg_dump archive before it gets its
+  final name. Refuses a passphrase under 20 characters, a missing directory, or a directory inside the repository.
+- `scripts/db-restore.sh <app|keycloak> <file> --yes-overwrite`: decrypts and checks the whole file first (a wrong
+  passphrase or a damaged file never reaches the database), then `pg_restore --clean --if-exists --no-owner
+  --single-transaction --exit-on-error`: fully restored or unchanged.
+- **Change from the plan:** gpg instead of `openssl enc -aes-256-cbc`. CBC has no integrity check, so a damaged or
+  altered backup would only show up halfway through a restore; gpg refuses it before.
+- The passphrase comes from the environment only and reaches gpg through a file descriptor: never an argument, never
+  printed. The test checks this on every output, on docker's arguments and on gpg's.
+- **Tests:** `scripts/db-backup.test.sh`, 17 cases, offline with a fake `docker` and the real gpg; new CI step in
+  `ci.yml` (code owner's file: one step). Committed red, then green. Each rule broken once in a copy of the scripts
+  (passphrase as an argument, no check before restore, no repository guard, no partial file, no single
+  transaction): the test turned red every time. shellcheck 0.10.0: clean.
+- **Drill (2026-11-18, dev stack):** marker rows in both databases, backup (3 s), both volumes deleted with
+  `docker compose down -v`, restore into empty databases (2 s), the API up and its checks passed in 53 s:
+  `patient.dev` logs in, `practitioner.dev` is asked for its code, a signup works; the Keycloak id of `patient.dev`
+  is unchanged. First attempt refused: the dump grants rights to `medlink_app` (#57) and the empty database had no
+  such role. Nothing was restored (one transaction). After #126, a new volume gets the role from
+  `docker/postgres/initdb/10-app-role.sh`; the runbook has the fix.
+- **Runbook:** [docs/operations/backup-restore.md](../../operations/backup-restore.md): policy (daily, 7 daily + 4
+  weekly, RPO 24 h, RTO measured), cron line, off-host copy, restore and verification steps, drill log.
+- **For whoever runs the server:** install `gnupg`, put `BACKUP_PASSPHRASE` in the team's secret store and in a
+  root-only env file, add the cron line and the off-host copy (runbook, "Set up on a server"). None of this is in the
+  deploy action yet.
 
 ## MLink-31 — Accéder au dossier du patient (back-end)
 
