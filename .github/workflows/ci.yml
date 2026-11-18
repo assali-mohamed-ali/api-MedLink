@@ -29,6 +29,10 @@ jobs:
       - name: Test the lockout script's target guard
         run: bash scripts/check-lockout.test.sh
 
+      # GitHub #67: backup and restore refuse unsafe use, encrypt, never leak the passphrase (offline, real gpg).
+      - name: Test the database backup and restore scripts
+        run: bash scripts/db-backup.test.sh
+
       - uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: 1.9.x

@@ -12,7 +12,10 @@ BACKUP="$SCRIPTS/db-backup.sh"
 RESTORE="$SCRIPTS/db-restore.sh"
 REAL_GPG="$(command -v gpg)" || { echo "FAIL: gpg is needed for this test" >&2; exit 1; }
 WORK="$(mktemp -d)"
-trap 'rm -rf "$WORK"' EXIT
+touch "$WORK/start"
+# Backups this run wrote into the repository (only if its guard is broken): counted, then removed on exit
+stray_in_repo() { find "$REPO" "$REPO/docs" -maxdepth 1 -name 'medlink-*.dump.gpg*' -newer "$WORK/start" "$@"; }
+trap 'stray_in_repo -delete; rm -rf "$WORK"' EXIT
 CALLS="$WORK/docker-calls"
 GPG_CALLS="$WORK/gpg-calls"
 PASSPHRASE='test-only-backup-passphrase-0123456789'
@@ -95,9 +98,7 @@ expect 'backup into the repository' 2
 call env BACKUP_PASSPHRASE="$PASSPHRASE" bash "$BACKUP" "$REPO"
 expect 'backup into the repository root' 2
 [ "$(files_in "$WORK/out")" = 0 ] || fail 'a refused backup wrote a file'
-if git -C "$REPO" status --porcelain --untracked-files=all 2>/dev/null | grep -q '\.dump'; then
-    fail 'a dump file appeared in the repository'
-fi
+stray_in_repo | grep -q . && fail "a backup file was written in the repository: $(stray_in_repo | head -n 1)"
 
 # ---------------------------------------------------------------- backup: both databases, encrypted
 call env BACKUP_PASSPHRASE="$PASSPHRASE" bash "$BACKUP" "$WORK/out"
