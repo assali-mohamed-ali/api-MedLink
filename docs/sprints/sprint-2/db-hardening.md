@@ -303,6 +303,14 @@ Added by Part B (#57):
     initialise its database (the mounted file was missing) and an older one would keep `medlink_app` without a login.
     `up -d postgres` recreates the database container once, because its config changed; the data volume stays.
     Proof: `DeployComposeActionTest` (red first) and the remote steps replayed on a disposable compose project.
+16. **Code owner's review (2026-11-18), two security fixes** (red `7ccfbef`, green `5fdf58a`):
+    - `DatabaseCredentialsCheck` also refuses any value starting with `dev-only` (any case): `compose.yaml`'s fixed
+      dev credentials, such as `dev-only-app-role-password`, are public. `DatabaseCredentialsStartupTest` covers that
+      exact value for the API's and Flyway's passwords.
+    - `10-app-role.sh` no longer passes the password to psql on its command line (`-v app_password=...`, visible in
+      process listings): psql reads it from its environment with `\getenv`. `AppRoleInitScriptTest` checks that the
+      script expands the password only to check that it is set. Checked on postgres:16 and 18 from another
+      container: the role logs in with a password containing a quote, a wrong one is refused.
 
 ## Bookkeeping
 
@@ -330,4 +338,6 @@ Added by Part B (#57):
 - [x] 2026-11-18: `master` merged in (`18e4e1f`, #120), 780/0 both orders, pushed; PR body updated.
 - [x] 2026-11-18: Part C done on `chore/db-backup-restore`: C1 red `bf1f80e`, C2 green `8e615d4` (+ `3e2d420`
   shellcheck), C3 drill (restore 2 s, API checked in 53 s), C4 docs `8cd5930`, C5 PR #129, #67 commented.
-- Next step: reviews of #126 and #129; then GitHub #68.
+- [x] 2026-11-18: code owner's review of #126 (changes requested): both security points fixed (PR note 16); the
+  disclosure box (ticked by Mohamed) and the stale base (merged `18e4e1f`) were already done.
+- Next step: re-review of #126 by the code owner, review of #129; #125 (V17) merges before #126 (V18); then #68.
