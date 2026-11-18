@@ -55,6 +55,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("POST",   "/api/admin/users",              L, F, F, O),
             new Rule("PUT",    "/api/admin/users/{id}/role",    L, F, F, O),
             new Rule("GET",    "/api/admin/audit-entries",      L, F, F, O),
+            new Rule("GET",    "/api/admin/stats/export",       L, F, F, O), // MLink-95: staff only; no dates is a 400
             new Rule("PATCH",  "/api/admin/users/{id}/status",  L, F, F, O),
             new Rule("GET",    "/api/users",                    L, F, F, O),
             new Rule("GET",    "/api/users/{id}",               L, F, F, O),
