@@ -48,6 +48,10 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-18:** MLink-166 (GitHub #67) on `chore/db-backup-restore`: encrypted backup and all-or-nothing restore of
+both databases, scripts and a runbook, restore drill done on the dev stack. No migration, no endpoint, no Java change.
+`ci.yml` gains one step. See the MLink-166 section.
+
 **2026-11-18:** MLink-37, code owner's review on #125 (2/2), after #120 (US-15) merged: `master` merged in (conflicts in `report.md` and `MailService`, both sides kept: the cancellation mail and the reminder mail). A real cancellation now creates the practitioner's alert: `AppointmentService.cancel()` calls `alerts.onAppointmentCancelled(appointment)` right after its `APPOINTMENT_CANCELLED` audit row, and `reschedule()` calls it for the old appointment after its `APPOINTMENT_RESCHEDULED` row (a move cancels the old one), both inside the change's transaction; the mail still leaves after the commit and never blocks it. Coordinated with Ela on #120. Tests, red first, through the real routes: the 37.8 story now books and cancels with `POST /api/appointments` and `POST /api/appointments/{id}/cancel` (no direct service call), `movingAnAppointmentWarnsThePractitionerOfTheOldSlotWithAMail`, `aCancelRefusedByTheDeadlineGivesNoAlert`, `cancellingTwiceGivesOneAlert`.
 
 **2026-11-17:** MLink-37, code owner's review on #125 (1/2): the alert list is bounded, since the bell polls it every minute and unread alerts are kept until read. `GET /api/practitioner/alerts` takes `page` (from 0) and `size` (20 by default, 50 at most), sorted newest first then by id, so alerts of the same instant are never repeated or skipped across pages; a page or size out of range (or not a number) is 400 `VALIDATION_FAILED` naming the parameter, as on `/api/admin/users`. The answer is still a JSON array: the front's bell is unchanged. Tests, red first: `theListIsPagedTwentyAtATimeByDefaultNewestFirst`, `alertsOfTheSameInstantArePagedInOneStableOrder`, `aPageSizeAboveFiftyOrAPageOutOfRangeIsRefusedNamingTheParameter`; Postman folder 12 gains size=50 (200) and size=51 (400). (2/2), the wiring into the real cancellation, waits for #120 (US-15) to merge first.
@@ -282,6 +286,38 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-166 — backup and tested restore of both databases, GitHub #67 (2026-11-18, chore/db-backup-restore)
+
+Part C of the database hardening (Parts A and B, #64 and #57, are in PR #126). No migration, no endpoint, no Java
+change.
+
+- `scripts/db-backup.sh <dir>`: `pg_dump --format=custom` of the app database, then Keycloak's, inside each
+  container with its own credentials; encrypted on the way out with gpg (AES-256, integrity-protected), so nothing in
+  clear touches the disk; each file decrypted in full once and checked to be a pg_dump archive before it gets its
+  final name. Refuses a passphrase under 20 characters, a missing directory, or a directory inside the repository.
+- `scripts/db-restore.sh <app|keycloak> <file> --yes-overwrite`: decrypts and checks the whole file first (a wrong
+  passphrase or a damaged file never reaches the database), then `pg_restore --clean --if-exists --no-owner
+  --single-transaction --exit-on-error`: fully restored or unchanged.
+- **Change from the plan:** gpg instead of `openssl enc -aes-256-cbc`. CBC has no integrity check, so a damaged or
+  altered backup would only show up halfway through a restore; gpg refuses it before.
+- The passphrase comes from the environment only and reaches gpg through a file descriptor: never an argument, never
+  printed. The test checks this on every output, on docker's arguments and on gpg's.
+- **Tests:** `scripts/db-backup.test.sh`, 17 cases, offline with a fake `docker` and the real gpg; new CI step in
+  `ci.yml` (code owner's file: one step). Committed red, then green. Each rule broken once in a copy of the scripts
+  (passphrase as an argument, no check before restore, no repository guard, no partial file, no single
+  transaction): the test turned red every time. shellcheck 0.10.0: clean.
+- **Drill (2026-11-18, dev stack):** marker rows in both databases, backup (3 s), both volumes deleted with
+  `docker compose down -v`, restore into empty databases (2 s), the API up and its checks passed in 53 s:
+  `patient.dev` logs in, `practitioner.dev` is asked for its code, a signup works; the Keycloak id of `patient.dev`
+  is unchanged. First attempt refused: the dump grants rights to `medlink_app` (#57) and the empty database had no
+  such role. Nothing was restored (one transaction). After #126, a new volume gets the role from
+  `docker/postgres/initdb/10-app-role.sh`; the runbook has the fix.
+- **Runbook:** [docs/operations/backup-restore.md](../../operations/backup-restore.md): policy (daily, 7 daily + 4
+  weekly, RPO 24 h, RTO measured), cron line, off-host copy, restore and verification steps, drill log.
+- **For whoever runs the server:** install `gnupg`, put `BACKUP_PASSPHRASE` in the team's secret store and in a
+  root-only env file, add the cron line and the off-host copy (runbook, "Set up on a server"). None of this is in the
+  deploy action yet.
 
 ## MLink-165 — two database roles, the audit trail out of the API's reach, GitHub #57 (2026-11-17, fix/db-hardening)
 

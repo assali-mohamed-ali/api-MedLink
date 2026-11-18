@@ -309,7 +309,7 @@ treatment, Statement of Applicability, policies, awareness, internal audit, mana
 | 8.8 Management of technical vulnerabilities | Dependabot; Dependency-Check, Trivy and CodeQL blocking; private disclosure | `.github/dependabot.yml`, workflows, `SECURITY.md` | Covered | |
 | 8.9 Configuration management | Infrastructure and config as code; pinned versions; checkov and Trivy config scans; compose files kept alike by a test | `docker/`, compose files, `terraform/`, `ComposeFilesTest` | Covered | |
 | 8.12 Data leakage prevention | gitleaks before commit, in CI and daily; tokens never in the browser; no body or token in logs; audit paths redacted | `security/.gitleaks.toml`, `secrets-scan.yml`, `security/RouteWords.java` | Covered | |
-| 8.13 Information backup | Named volumes `pgdata` and `keycloak-db-data` | compose files | Gap | Backup and tested restore for both databases (GitHub #67) |
+| 8.13 Information backup | Daily encrypted backup of both databases (gpg AES-256), checked after writing; all-or-nothing restore; restore drill recorded; 7 daily + 4 weekly kept off the host | `scripts/db-backup.sh`, `scripts/db-restore.sh`, [backup and restore runbook](operations/backup-restore.md) | Covered | RPO 24 h (no WAL archiving); the cron job and the off-host copy are set up on the server |
 | 8.15 Logging | Append-only audit trail of refusals; Keycloak login and admin events (30 days); per-profile application logs | `V7__audit_entries.sql`, `AuditService`, realm events | Partial | Logins and account operations in the trail (MLink-114, MLink-72); central log store |
 | 8.16 Monitoring activities | Prometheus metrics; 4 alert rules | `monitoring/` | Gap | Route alerts: Alertmanager has no target |
 | 8.24 Use of cryptography | Tokens signed by Keycloak, checked via JWKS with issuer and `azp`; email tokens stored as SHA-256 hashes | `KeycloakLoginClient`, `V5__email_tokens.sql` | Partial | Document TLS and encryption at rest for both databases |
@@ -335,7 +335,7 @@ The prioritised list, with the threat behind each item, is in
 - [x] API docs (Scalar `/scalar`, `/v3/api-docs`) not public in production (GitHub #65)
 - [x] Separate database roles for the audit trail (GitHub #57)
 - [ ] Logins and account operations in the audit trail (MLink-114, MLink-72)
-- [ ] Backup and tested restore of both databases (GitHub #67)
+- [x] Backup and tested restore of both databases (GitHub #67, [runbook](operations/backup-restore.md))
 - [ ] CD rollout and Keycloak/`keycloak-db` in the deployment (GitHub #47); Terraform variables and container environment aligned with the production profile (GitHub #53)
 - [ ] Reverse proxy: TLS, HSTS, CSP, `TRUSTED_PROXIES`, Keycloak not public
 - [ ] Alert routing and a central log store; shared sessions before a second API instance
