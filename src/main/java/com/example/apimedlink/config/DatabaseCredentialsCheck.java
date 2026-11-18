@@ -25,7 +25,7 @@ import org.springframework.stereotype.Component;
 @Profile({"staging", "prod"})
 public class DatabaseCredentialsCheck implements BeanFactoryPostProcessor {
 
-    /** The dev values ({@code compose.yaml}, {@code application-dev.yml}) and the placeholders of the examples. */
+    /** The old dev values ({@code application-dev.yml}) and the placeholders of the examples. */
     static final Set<String> PLACEHOLDERS = Set.of("myuser", "secret", "change-me", "change-me-prod");
 
     /**
@@ -33,6 +33,12 @@ public class DatabaseCredentialsCheck implements BeanFactoryPostProcessor {
      * ({@code change-me-staging}, {@code change-me-prod-use-vault-or-gh-secrets}...), in any case.
      */
     static final String PLACEHOLDER_PREFIX = "change-me";
+
+    /**
+     * The fixed dev credentials of {@code compose.yaml} all start with it ({@code dev-only-app-role-password}...),
+     * in any case: copied into a deployment environment, they are public values (code owner's review of #126).
+     */
+    static final String DEV_ONLY_PREFIX = "dev-only";
 
     @Override
     public void postProcessBeanFactory(ConfigurableListableBeanFactory beanFactory) {
@@ -69,7 +75,11 @@ public class DatabaseCredentialsCheck implements BeanFactoryPostProcessor {
             return true;
         }
         String trimmed = value.trim();
-        return PLACEHOLDERS.contains(trimmed) || trimmed.regionMatches(true, 0, PLACEHOLDER_PREFIX, 0,
-                PLACEHOLDER_PREFIX.length());
+        return PLACEHOLDERS.contains(trimmed) || startsWithIgnoreCase(trimmed, PLACEHOLDER_PREFIX)
+                || startsWithIgnoreCase(trimmed, DEV_ONLY_PREFIX);
+    }
+
+    private static boolean startsWithIgnoreCase(String value, String prefix) {
+        return value.regionMatches(true, 0, prefix, 0, prefix.length());
     }
 }

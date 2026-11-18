@@ -8,13 +8,15 @@
 #   - by the setup scripts on an existing volume: docker compose exec -T postgres bash <this file>;
 #   - by hand on a server whose volume predates the role (same command).
 # Safe to run again: creates the role when missing, then (re)sets its login, attributes and password.
-# APP_DB_PASSWORD comes from the container's environment and is never printed.
+# APP_DB_PASSWORD comes from the container's environment and is never printed, nor put on a command line: psql reads
+# it from its own environment (\getenv, PostgreSQL 15+), so process listings never show it (code owner's review of #126).
 set -eu
 
 : "${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set (the password of the medlink_app role)}"
+export APP_DB_PASSWORD
 
-psql -v ON_ERROR_STOP=1 -q --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-$POSTGRES_USER}" \
-    -v app_password="$APP_DB_PASSWORD" <<'SQL'
+psql -v ON_ERROR_STOP=1 -q --username "$POSTGRES_USER" --dbname "${POSTGRES_DB:-$POSTGRES_USER}" <<'SQL'
+\getenv app_password APP_DB_PASSWORD
 SELECT 'CREATE ROLE medlink_app' WHERE NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'medlink_app')\gexec
 ALTER ROLE medlink_app WITH LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOREPLICATION NOBYPASSRLS
     PASSWORD :'app_password';
