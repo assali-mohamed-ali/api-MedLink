@@ -19,6 +19,8 @@ say() { echo "install-host: $*"; }
 
 install -d -o vault -g vault -m 750 /var/log/vault
 say "/var/log/vault ready (vault:vault 750)"
+install -d -o vault -g vault -m 700 /opt/vault-docker /opt/vault-docker/data
+say "/opt/vault-docker/data ready (vault:vault 700)"
 
 cat > /etc/logrotate.d/vault-audit <<'EOF'
 # Vault audit log (MedLink, vault/install-host.sh): daily, 30 days; Vault reopens the file on SIGHUP
@@ -31,7 +33,7 @@ cat > /etc/logrotate.d/vault-audit <<'EOF'
     notifempty
     create 0600 vault vault
     postrotate
-        systemctl kill --signal=HUP vault.service > /dev/null 2>&1 || true
+        docker kill --signal=HUP medlink-vault > /dev/null 2>&1 || true
     endscript
 }
 EOF
