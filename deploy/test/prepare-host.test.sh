@@ -6,7 +6,7 @@
 #     database, the daily backup job; the front host gets no backup job;
 #   - never overwrites a different Docker daemon.json; a second run changes nothing; a new key replaces the old one.
 # Needs docker. Usage: bash deploy/test/prepare-host.test.sh
-# shellcheck disable=SC2015  # "check && pass || fail": pass only echoes and always succeeds
+# shellcheck disable=SC2015,SC2016  # "check && pass || fail" (pass always succeeds); $(...) in single quotes runs in the container
 set -euo pipefail
 docker() { MSYS_NO_PATHCONV=1 command docker "$@"; }   # Git Bash: keep container paths as they are
 
