@@ -280,8 +280,10 @@ if [ -f .env ]; then
 else
     tr -d '\r' < .env.example | awk \
         -v pg="$(new_secret)" -v kcdb="$(new_secret)" -v kcadmin="$(new_secret)" \
-        -v bff="$(new_secret)" -v kcapi="$(new_secret)" -v mfa="$(new_key)" -v report="$(new_key)" -v users="$DEV_USERS_PASSWORD" '
+        -v bff="$(new_secret)" -v kcapi="$(new_secret)" -v mfa="$(new_key)" -v report="$(new_key)" -v users="$DEV_USERS_PASSWORD" \
+        -v app="$(new_secret)" '
         /^POSTGRES_PASSWORD=/       { print "POSTGRES_PASSWORD=" pg; next }
+        /^APP_DB_PASSWORD=/         { print "APP_DB_PASSWORD=" app; next }
         /^KEYCLOAK_DB_PASSWORD=/    { print "KEYCLOAK_DB_PASSWORD=" kcdb; next }
         /^KEYCLOAK_ADMIN_PASSWORD=/ { print "KEYCLOAK_ADMIN_PASSWORD=" kcadmin; next }
         /^KC_BFF_CLIENT_SECRET=/    { print "KC_BFF_CLIENT_SECRET=" bff; next }
@@ -307,7 +309,7 @@ for key in $(tr -d '\r' < .env.example | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.
 done
 [ -n "$ADDED" ] && ok "added to .env:$ADDED"
 if [ "$FULL_STACK" -eq 1 ]; then
-    for key in KC_BFF_CLIENT_SECRET KC_ADMIN_CLIENT_SECRET APP_MFA_ENCRYPTION_KEY APP_REPORT_ENCRYPTION_KEY KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD; do
+    for key in KC_BFF_CLIENT_SECRET KC_ADMIN_CLIENT_SECRET APP_MFA_ENCRYPTION_KEY APP_REPORT_ENCRYPTION_KEY KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD APP_DB_PASSWORD; do
         value="$(read_env "$key")"
         case "$value" in
             '' | change-me*) abort "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." ;;
@@ -360,6 +362,14 @@ for port in $PORTS; do
 done
 [ -n "$BUSY" ] && abort "Free these ports first:$BUSY"
 ok "ports $PORTS are free"
+
+# GitHub #57: the API's runtime role medlink_app. A new volume gets it from the init script; a volume made before
+# #57 (--keep-data) gets it here, from the same script, before the API starts. Safe to run again.
+docker compose -f "$COMPOSE_FILE" up -d --wait postgres >/dev/null || abort "docker compose -f $COMPOSE_FILE up postgres failed."
+# MSYS_NO_PATHCONV: Git Bash on Windows would rewrite the container path into a Windows one (ignored elsewhere)
+MSYS_NO_PATHCONV=1 docker compose -f "$COMPOSE_FILE" exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh ||
+    abort 'could not set up the database role medlink_app (docker/postgres/initdb/10-app-role.sh).'
+ok 'database role medlink_app ready (the API runtime role)'
 
 if [ "$FULL_STACK" -eq 1 ]; then
     KC_ADMIN_USER="$(read_env KEYCLOAK_ADMIN)"
