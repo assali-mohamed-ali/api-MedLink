@@ -30,6 +30,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class AppointmentService {
 
     static final String SLOT_TAKEN = "Ce créneau n'est plus disponible. Choisissez-en un autre.";
+    static final String PATIENT_BUSY = "Vous avez déjà un rendez-vous à ce moment-là.";
 
     /** V13: one BOOKED appointment per slot at most. */
     static final String ONE_ACTIVE_PER_SLOT = "appointments_one_active_per_slot";
@@ -93,6 +94,8 @@ public class AppointmentService {
             throw new ApiException(HttpStatus.CONFLICT, "APPOINTMENT_CANCELLED",
                     "Ce rendez-vous est annulé : réservez un nouveau créneau.");
         }
+        // MLink-167: the patient before the slots, as a booking does
+        patients.lockForBooking(old.getPatientId());
         UUID oldSlotId = old.getSlot().getId();
         Slot oldSlot;
         Slot newSlot;
@@ -147,7 +150,9 @@ public class AppointmentService {
     @Transactional
     public Appointment book(UUID patientId, UUID slotId) {
         // A patient account made outside registration (e.g. in the Keycloak console) has no profile to book with
-        if (!patients.existsById(patientId)) {
+        // MLink-167: the patient's row is locked first, so two bookings of one patient never pass the overlap
+        // check together; no row: an account made outside registration (e.g. in the Keycloak console)
+        if (patients.lockForBooking(patientId).isEmpty()) {
             throw new ApiException(HttpStatus.FORBIDDEN, "PATIENT_PROFILE_REQUIRED",
                     "Complétez votre profil patient avant de réserver.");
         }
@@ -162,6 +167,11 @@ public class AppointmentService {
     private Appointment bookLocked(Slot slot, UUID patientId, Instant now) {
         if (slot.getStatus() != SlotStatus.FREE || !slot.getStartsAt().isAfter(now)) {
             throw new ApiException(HttpStatus.CONFLICT, "SLOT_TAKEN", SLOT_TAKEN);
+        }
+        // MLink-167: one place at a time. A move has already cancelled (and flushed) the appointment it replaces,
+        // so that one does not count; a cancelled appointment never does.
+        if (appointments.existsOverlapping(patientId, AppointmentStatus.BOOKED, slot.getStartsAt(), slot.getEndsAt())) {
+            throw new ApiException(HttpStatus.CONFLICT, "PATIENT_BUSY", PATIENT_BUSY);
         }
         slot.setStatus(SlotStatus.BOOKED);
         Appointment appointment;
