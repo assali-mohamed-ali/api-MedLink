@@ -56,6 +56,18 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
             @Param("slotIds") Collection<UUID> slotIds, @Param("status") AppointmentStatus status);
 
     /**
+     * The cancelled appointments of these slots with their patient's names, latest cancellation first (MLink-37, 37.7):
+     * the agenda shows on a freed slot which appointment was cancelled.
+     */
+    @Query("""
+            select new com.example.apimedlink.repository.BookedAppointment(
+                a.slot.id, a.id, p.id, p.firstName, p.lastName)
+            from Appointment a join Patient p on p.id = a.patientId
+            where a.slot.id in :slotIds and a.status = com.example.apimedlink.model.AppointmentStatus.CANCELLED
+            order by a.cancelledAt desc nulls last, a.id""")
+    List<BookedAppointment> findCancelledWithPatient(@Param("slotIds") Collection<UUID> slotIds);
+
+    /**
      * Whether the patient is attached to the practitioner (MLink-31): a {@code BOOKED} appointment on one of the
      * practitioner's slots, past or upcoming. A cancelled appointment does not attach (the patient was never seen).
      */

@@ -29,12 +29,16 @@ public final class AgendaMapper {
 
     public static AgendaItemDto toItem(AgendaEntry entry) {
         Slot slot = entry.slot();
-        BookedAppointment booked = entry.appointment();
-        AgendaItemDto.AppointmentRef appointment = booked == null ? null
-                : new AgendaItemDto.AppointmentRef(booked.appointmentId(), "BOOKED",
-                        new AgendaItemDto.PatientRef(booked.patientId(), booked.firstName(), booked.lastName()));
+        AgendaItemDto.AppointmentRef appointment = entry.appointment() != null ? toRef(entry.appointment(), "BOOKED")
+                : entry.cancelled() != null ? toRef(entry.cancelled(), "CANCELLED")
+                : null;
         return new AgendaItemDto(slot.getId(), toApiStatus(slot.getStatus()), slot.getStartsAt(), slot.getEndsAt(),
                 toClinic(slot.getClinic()), appointment);
+    }
+
+    private static AgendaItemDto.AppointmentRef toRef(BookedAppointment found, String status) {
+        return new AgendaItemDto.AppointmentRef(found.appointmentId(), status,
+                new AgendaItemDto.PatientRef(found.patientId(), found.firstName(), found.lastName()));
     }
 
     /** A slot just created or changed: its appointment is not part of the answer. */
