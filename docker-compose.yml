@@ -53,6 +53,7 @@ services:
       # external object store overrides the endpoint/bucket flags and keeps the same credentials
       # (MINIO_ROOT_USER/PASSWORD) or the Terraform path (see terraform/variables.tf).
       APP_DOCUMENTS_ENCRYPTION_KEY: ${APP_DOCUMENTS_ENCRYPTION_KEY:?APP_DOCUMENTS_ENCRYPTION_KEY must be set}
+      APP_DOCUMENTS_ENCRYPTION_ACTIVE_VERSION: ${APP_DOCUMENTS_ENCRYPTION_ACTIVE_VERSION:-1}
       APP_DOCUMENTS_STORAGE_ENDPOINT: ${APP_DOCUMENTS_STORAGE_ENDPOINT:-http://minio:9100}
       APP_DOCUMENTS_STORAGE_ACCESS_KEY: ${MINIO_ROOT_USER:?MINIO_ROOT_USER must be set}
       APP_DOCUMENTS_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}

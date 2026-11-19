@@ -172,7 +172,7 @@ source of truth: the setup script re-imports it whenever it changed.
 Administrative staff upload PDF, PNG or JPEG files to a patient; the patient owner and staff list and
 download them. Practitioners have no access. The API identifies the type from the magic bytes, caps the file
 at 10 MiB, stores the bytes in MinIO under the key `{patientId}/{documentId}`, and keeps only metadata in
-Postgres (`V14__patient_documents.sql`; V13 is the appointment migration from MLink-8, merged first).
+Postgres (`V19__patient_documents.sql`, the next free migration after V18).
 
 Each object is AES-256-GCM encrypted by the API as `[key version][12-byte IV][ciphertext + tag]`, with
 `documentId|patientId|keyVersion` as associated data. The row's `key_version` chooses the key, so rotation
@@ -228,7 +228,7 @@ owner, and names the security-sensitive ones explicitly: the `config/` and `secu
 | `security/` | `Roles`, `CurrentUser`, `OwnershipGuard`, `LoginSessions`, `SessionValidityFilter`, `RateLimitFilter`, JSON 401/403 handlers, `RouteWords` | Changing sessions or access checks |
 | `exception/` | `GlobalExceptionHandler`, `ErrorBody` (the one error shape) | Adding an error type |
 | `resources/application*.properties/yml` | Base config; per-profile DB, cookies, CORS, actuator, logging | Environment-specific settings |
-| `resources/db/migration/` | Flyway `V1`–`V14`; `V14__patient_documents.sql` adds the document metadata table | Any schema change: the next free `V<N>__...`, never edit a merged file |
+| `resources/db/migration/` | Flyway `V1`–`V19`; `V19__patient_documents.sql` adds the document metadata table | Any schema change: the next free `V<N>__...`, never edit a merged file |
 | `keycloak/realm-medlink.json` | Realm, roles, groups, clients, lockout, events, dev users | Changing identity settings (in a PR) |
 | `compose.yaml` / `docker-compose.yml` | Dev dependencies (plus the API under the `full` profile) / full stack with secrets (kept alike by `ComposeFilesTest`) | Adding a service |
 | `docker/` | Multi-stage `Dockerfile` (non-root), `Dockerfile.dev` | Changing the image |

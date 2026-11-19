@@ -165,6 +165,7 @@ services:
       - 'APP_REPORT_ENCRYPTION_KEY=devOnlyReportKeyNotForProductionUseLocalOnA=' # gitleaks:allow
       # Patient documents (MLink-9): local MinIO above, fixed dev-only values.
       - 'APP_DOCUMENTS_ENCRYPTION_KEY=ZGV2T25seURvY3VtZW50c0tleU5vdEZvclByb2QhISE=' # gitleaks:allow
+      - 'APP_DOCUMENTS_ENCRYPTION_ACTIVE_VERSION=1'
       - 'APP_DOCUMENTS_STORAGE_ENDPOINT=http://minio:9100'
       - 'APP_DOCUMENTS_STORAGE_ACCESS_KEY=minioadmin' # gitleaks:allow
       - 'APP_DOCUMENTS_STORAGE_SECRET_KEY=minioadmin' # gitleaks:allow

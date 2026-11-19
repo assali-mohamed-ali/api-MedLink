@@ -33,7 +33,7 @@ public class AuditService {
     /** Its own transaction: kept even when the request's work rolls back. */
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(AuditAction action, String resourceType, String resourceId, AuditOutcome outcome) {
-        recordInCurrentTransaction(action, resourceType, resourceId, outcome);
+        record(action, resourceType, resourceId, outcome, currentUser.idOrNull());
     }
 
     /**
@@ -43,7 +43,7 @@ public class AuditService {
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public void record(
             AuditAction action, String resourceType, String resourceId, AuditOutcome outcome, UUID userId) {
-        recordInCurrentTransaction(action, resourceType, resourceId, outcome, userId);
+        entries.save(new AuditEntry(userId, action, resourceType, resourceId, clientIp(), outcome));
     }
 
     /**
