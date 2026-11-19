@@ -74,6 +74,8 @@ grep -q 'add-mask' "$ACTION" && pass "the secret values are masked in the logs" 
 grep -q 'render-env.py env' "$ACTION" && grep -q 'render-env.py backup' "$ACTION" && pass "the action renders .env and .backup.env" || fail "render not called"
 grep -q 'docker-compose.server.yml' "$ACTION" && pass "the action uses the server overlay" || fail "overlay not used"
 grep -q 'scripts/db-backup.sh' "$ACTION" && grep -q 'scripts/db-restore.sh' "$ACTION" && pass "the backup scripts reach the host" || fail "backup scripts not copied"
+grep -q 'exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh < /dev/null' "$ACTION" &&
+    pass "the role script cannot swallow the rest of the rollout" || fail "compose exec reads the rollout script from stdin"
 grep -q '^  deploy-staging:' "$CD" && pass "CD has a staging deploy" || fail "no deploy-staging job"
 [ "$(grep -c 'id-token: write' "$CD")" -ge 3 ] && pass "the deploy jobs may request an OIDC token" || fail "id-token permission missing on a deploy job"
 grep -q 'vault_role: api-staging' "$CD" && grep -q 'vault_role: api-production' "$CD" && pass "each environment uses its own Vault role" || fail "Vault roles"
