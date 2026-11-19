@@ -4,7 +4,7 @@
 #   - a GitHub OIDC token logs in only for its own repository and environment, from the CD workflow on its own
 #     branches or tags (push or manual run), reads only its own path, never writes;
 #   - wrong repository, environment, workflow, ref, audience, event or an expired token are refused;
-#   - the audit log records requests without the secret values; seed-env.sh fills a path once and never overwrites.
+#   - the audit log records requests without the secret values; seed-env.sh and seed-front.sh fill a path once and never overwrite.
 # GitHub tokens are signed here with a throwaway key (openssl), replacing the GitHub discovery URL in the copy only.
 # Needs docker and openssl. Usage: bash vault/test/vault.test.sh
 # shellcheck disable=SC2015  # "check && pass || fail": pass only echoes and always succeeds
@@ -164,7 +164,8 @@ if [ -n "$SNAP" ]; then
     [ "$caps" = deny ] && pass "snapshot token cannot read secrets" || fail "snapshot token on secrets: $caps"
 else fail "no token from the medlink-snapshot role"; fi
 
-# 7. seed-env.sh: fills the API secrets once, valid formats, never overwrites; refuses an unknown environment
+# 7. seed-env.sh: fills the API secrets once, valid formats, never overwrites; refuses an unknown environment.
+#    seed-front.sh: same contract for the dashboard's SSH bundle.
 seed() { in_vault -e VAULT_TOKEN="$SETUP_TOKEN" "$NAME" sh /medlink-vault/seed-env.sh "$@" < /dev/null; }
 as_root kv metadata delete medlink/staging/api > /dev/null
 if seed staging > "$WORK/seed1.log" 2>&1; then pass "seed-env.sh staging"; else fail "seed-env.sh staging"; cat "$WORK/seed1.log" >&2; fi
@@ -187,6 +188,44 @@ seed staging > "$WORK/seed2.log" 2>&1 || fail "seed-env.sh second run"
 after="$(as_root kv get -field=POSTGRES_PASSWORD medlink/staging/api)"
 [ "$before" = "$after" ] && pass "seed never overwrites a value" || fail "seed overwrote POSTGRES_PASSWORD"
 if seed qa > /dev/null 2>&1; then fail "seed accepted environment qa"; else pass "seed refuses an unknown environment"; fi
+
+# 7b. seed-front.sh: stores the dashboard SSH bundle once and never overwrites it
+ssh-keygen -q -t ed25519 -N "" -C seed-front-test -f "$WORK/front-key"
+printf 'front.example ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAITestOnly\n' > "$WORK/front-known"
+docker cp "$(host_path "$WORK/front-key")" "$NAME:/tmp/front-key" > /dev/null
+docker cp "$(host_path "$WORK/front-known")" "$NAME:/tmp/front-known" > /dev/null
+as_root kv metadata delete medlink/staging/front > /dev/null
+front_seed() { in_vault -e VAULT_TOKEN="$SETUP_TOKEN" "$NAME" sh /medlink-vault/seed-front.sh "$@" < /dev/null; }
+if front_seed staging /tmp/front-key /tmp/front-known > "$WORK/front-seed1.log" 2>&1; then
+    pass "seed-front.sh staging"
+else
+    fail "seed-front.sh staging"; cat "$WORK/front-seed1.log" >&2
+fi
+as_root kv get -field=ssh_private_key_b64 medlink/staging/front | openssl base64 -d -A | grep -q 'BEGIN .*PRIVATE KEY' &&
+    pass "seed-front stores the private key" || fail "seed-front private key missing or invalid"
+as_root kv get -field=known_hosts_b64 medlink/staging/front | openssl base64 -d -A | grep -q 'front.example' &&
+    pass "seed-front stores known_hosts" || fail "seed-front known_hosts missing or invalid"
+grep -qE 'BEGIN .*PRIVATE KEY|front\.example' "$WORK/front-seed1.log" && fail "seed-front printed a value" ||
+    pass "seed-front prints no value"
+front_before="$(as_root kv get -field=ssh_private_key_b64 medlink/staging/front)"
+if front_seed staging /tmp/front-key /tmp/front-known > "$WORK/front-seed2.log" 2>&1; then
+    pass "seed-front.sh second run"
+else
+    fail "seed-front.sh second run"
+fi
+front_after="$(as_root kv get -field=ssh_private_key_b64 medlink/staging/front)"
+[ "$front_before" = "$front_after" ] && pass "seed-front never overwrites a value" || fail "seed-front overwrote a value"
+grep -q 'nothing missing' "$WORK/front-seed2.log" && pass "seed-front reports an unchanged path" || fail "seed-front rerun message"
+if front_seed qa /tmp/front-key /tmp/front-known > /dev/null 2>&1; then
+    fail "seed-front accepted environment qa"
+else
+    pass "seed-front refuses an unknown environment"
+fi
+if front_seed staging /tmp/missing-key /tmp/front-known > /dev/null 2>&1; then
+    fail "seed-front accepted a missing key"
+else
+    pass "seed-front refuses a missing key"
+fi
 
 # 8. install-host.sh on a throwaway Ubuntu 26.04 (the vault host's release): files, owners, modes, a valid rotation,
 #    and a second run that changes nothing; snapshot.sh refuses to run without its token
