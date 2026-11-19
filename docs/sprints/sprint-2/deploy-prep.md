@@ -21,14 +21,14 @@ Vault configuration and diagnostics over SSH are fine). Never handle a password,
 |---|---|
 | Production (api-medlink `13.50.114.144` + frontend-medlink `56.228.94.12`) | Works end to end: dashboard, API through the front (`/readyz` 200), Gmail mail (account `medlinq2026@gmail.com`). Images `medlink-api:0be7983`, `medlink-front:72a61af`, deployed by hand on 2026-11-19 (before the workflow-only rule) |
 | Staging (`13.51.30.39`, disk 40 GB) | Dashboard live, Postgres up; API and Keycloak not deployed: CD will do it on the first push to `staging` |
-| Vault (`56.228.74.131`) | Unsealed, secrets seeded. **#133's roles applied live on 2026-11-20** (bound to the deploy workflow, refs and push/dispatch; read back OK); setup token revoked, no root token. Until #133 merges, do not run `master`'s `setup.sh` (it would write the looser `sub`-only roles back) |
+| Vault (`56.228.74.131`) | Unsealed, secrets seeded. **#133's roles applied live on 2026-11-20** (bound to the deploy workflow, refs and push/dispatch; read back OK); setup token revoked, no root token. Same roles as `master`'s `setup.sh` since #133 merged |
 | First admin (production) | Invited on Mohamed's school address (no password; API activation mail). The dashboard's `/activer-compte` is a placeholder, so activation uses `Docs/Deployment/activate-account.sh` with the newest mail (17:23 UTC, valid to 2026-11-20 17:23 UTC; a new one: `POST /api/auth/account/activate/resend`) |
 | Specialties | None in staging or production (only the dev seed has them): an admin cannot create a practitioner yet |
 
 | Git | State |
 |---|---|
 | api-MedLink `master` | Has #130 (Vault deploys), the owner's #132 (production deploys automatically from the verified staging run unless `AUTO_DEPLOY_PROD=false`) and #131 (MLink-37) |
-| PR #133 (`chore/vault-deploy` → `master`) | The 3 review fixes of #130 + production Vault roles that accept `staging` (needed by #132). CI all green incl. AI disclosure; both orders 847/0; **waiting for the owner's review**. One local docs commit not pushed yet |
+| PR #133 (`chore/vault-deploy` → `master`) | **Merged 2026-11-19 20:55 UTC** (approved by the owner). The hand-over docs commits that came after it: branch `docs/deploy-handover` |
 | medlink-dashboard `master` | Has #18 (appointments epic), #20, #21 (auto prod deploy). Activation page (MLink-20, Chourouk) only on `epic/MLink-11` (Ahlem's commit 17/11), no PR, 56 ahead / 20 behind |
 | `staging`, `prod` (both repos) | Far behind `master` (api `staging` 270+ commits). Every branch needs the owner's review (CODEOWNERS `*`); Mohamed has push, not admin |
 
@@ -43,14 +43,14 @@ YouTrack: MLink-168, 169, 170, 171 *À vérifier*; 172, 173 *En cours*; comments
 
 ### Next, in order
 
-1. **Check and sync** (above). If #133 is merged, merge `master` into the working branch first.
+1. **Check and sync** (above). Merge `master` into the working branch first.
 2. **Vault: DONE 2026-11-20** (setup token by Mohamed, `setup.sh` from this branch run from `~/medlink-vault-pr133` on the host, roles checked, token revoked and shredded; `seed-front.sh` skipped). Kept for the next time: (needs Mohamed's setup token; the permission check refuses Claude reading the unseal keys). Mohamed runs,
    from Git Bash, `Docs/Deployment/new-setup-token.sh` fed with three unseal keys (the exact one-liner is in the chat
    of 2026-11-19; by hand: `generate-root` steps in `vault.md`). It writes a 3-hour `/root/medlink-setup.token` and
    revokes the root token. Then: copy `vault/` to the host, `setup.sh` (new roles), check one role with
    `vault read auth/jwt-github/role/api-production`, revoke the setup token. `seed-front.sh` needs the private deploy
    key on the vault host: skip it, the dashboard falls back to its GitHub secrets.
-3. **Specialties (recommended: a migration)**: new ticket, `V19__specialties_reference_data.sql` like V15 (same ids as
+3. **Specialties: IN PROGRESS, MLink-174** (branch `feat/MLink-174-specialties`, V19 with 15 usual specialties; Mohamed has no official list). Original plan: new ticket, `V19__specialties_reference_data.sql` like V15 (same ids as
    the dev seed, `ON CONFLICT DO NOTHING`), red test first, PR to `master`. List: the 3 dev specialties unless Mohamed
    gives the real one.
 4. **Whole-app integration branch (Mohamed's request)**: `integration/whole-app` from `master` in each repo, merge the
