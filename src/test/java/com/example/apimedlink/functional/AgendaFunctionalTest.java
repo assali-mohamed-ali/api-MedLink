@@ -101,24 +101,77 @@ class AgendaFunctionalTest extends FunctionalTestBase {
     }
 
     @Test
-    void aBookedSlotShowsItsPatientsNamesAndNothingMoreAndACancelledAppointmentIsNotShown() throws Exception {
+    void aBookedSlotShowsItsPatientsNamesAndNothingMoreAndAFreedSlotShowsItsCancelledAppointment() throws Exception {
         Pro pro = practitioner(SOUSSE);
         UUID patient = insertPatient("Amel", "Ben Salah");
         UUID booked = insertSlot(pro.id(), SOUSSE, DAY, "BOOKED");
         UUID appointment = insertAppointment(booked, patient, "BOOKED");
         UUID freedAgain = insertSlot(pro.id(), SOUSSE, DAY.plus(1, ChronoUnit.HOURS), "FREE");
-        insertAppointment(freedAgain, patient, "CANCELLED");
+        UUID cancelled = insertAppointment(freedAgain, patient, "CANCELLED");
 
         HttpResponse<String> response = agenda(pro.browser(), DAY.minus(1, ChronoUnit.HOURS), DAY.plus(3, ChronoUnit.HOURS));
 
         List<Map<String, Object>> items = items(body(response));
         assertThat(items.get(0).get("appointment")).isEqualTo(Map.of("id", appointment.toString(), "status", "BOOKED",
                 "patient", Map.of("id", patient.toString(), "firstName", "Amel", "lastName", "Ben Salah")));
-        assertThat(items.get(1)).as("cancelled: the slot is open again").doesNotContainKey("appointment");
+        // MLink-37 (37.7): the slot is open again, and the agenda still says which appointment was cancelled on it
         assertThat(items.get(1).get("status")).isEqualTo("OPEN");
+        assertThat(items.get(1).get("appointment")).isEqualTo(Map.of("id", cancelled.toString(), "status", "CANCELLED",
+                "patient", Map.of("id", patient.toString(), "firstName", "Amel", "lastName", "Ben Salah")));
         // Names only: no phone, address or birth date of the patient, no email
         assertThat(response.body()).doesNotContain("1990-04-12").doesNotContain("+216").doesNotContain("rue du Test")
                 .doesNotContain("@").doesNotContain("phone").doesNotContain("address").doesNotContain("birthDate");
+    }
+
+    /**
+     * MLink-37 (37.7): a slot cancelled then booked again shows the new booking only; a slot cancelled twice shows the
+     * latest cancellation; a slot never booked shows no appointment.
+     */
+    @Test
+    void aRebookedSlotShowsItsBookingAndASlotCancelledTwiceShowsTheLatestCancellation() throws Exception {
+        Pro pro = practitioner(SOUSSE);
+        UUID first = insertPatient("Amel", "Ben Salah");
+        UUID second = insertPatient("Youssef", "Trabelsi");
+        UUID rebooked = insertSlot(pro.id(), SOUSSE, DAY, "BOOKED");
+        insertCancelledAppointment(rebooked, first, DAY.minus(3, ChronoUnit.DAYS));
+        UUID booking = insertAppointment(rebooked, second, "BOOKED");
+        UUID twice = insertSlot(pro.id(), SOUSSE, DAY.plus(1, ChronoUnit.HOURS), "FREE");
+        insertCancelledAppointment(twice, first, DAY.minus(3, ChronoUnit.DAYS));
+        UUID latest = insertCancelledAppointment(twice, second, DAY.minus(2, ChronoUnit.DAYS));
+        insertSlot(pro.id(), SOUSSE, DAY.plus(2, ChronoUnit.HOURS), "FREE");
+
+        List<Map<String, Object>> items = items(body(agenda(pro.browser(), DAY.minus(1, ChronoUnit.HOURS), DAY.plus(3, ChronoUnit.HOURS))));
+
+        assertThat(items).hasSize(3);
+        assertThat(appointmentOf(items.get(0))).containsEntry("id", booking.toString()).containsEntry("status", "BOOKED");
+        assertThat(appointmentOf(items.get(1))).containsEntry("id", latest.toString()).containsEntry("status", "CANCELLED");
+        assertThat(items.get(2)).doesNotContainKey("appointment");
+    }
+
+    /**
+     * MLink-37 (37.7), "the agenda matches the database": a patient books then cancels through the real routes; the
+     * practitioner's agenda shows the slot open again with the cancelled appointment on it.
+     */
+    @Test
+    void afterARealCancellationTheAgendaShowsTheSlotOpenWithTheCancelledAppointment() throws Exception {
+        Pro pro = practitioner(SOUSSE);
+        UUID slot = insertSlot(pro.id(), SOUSSE, DAY, "FREE");
+        String email = uniqueEmail("agenda-cancel");
+        UUID patientId = console.createUser(email, PASSWORD);
+        Browser patient = new Browser();
+        assertThat(patient.apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+        jdbc.update("insert into patients (id, first_name, last_name, birth_date) values (?, 'Amel', 'Ben Salah', ?)",
+                patientId, Date.valueOf("1990-04-12"));
+        HttpResponse<String> booked = patient.postJson("/api/appointments", "{\"slotId\":\"" + slot + "\"}");
+        assertThat(booked.statusCode()).as(booked.body()).isEqualTo(201);
+        String appointment = (String) body(booked).get("id");
+
+        assertThat(patient.postJson("/api/appointments/" + appointment + "/cancel", "").statusCode()).isEqualTo(204);
+
+        Map<String, Object> item = items(body(agenda(pro.browser(), DAY.minus(1, ChronoUnit.HOURS), DAY.plus(1, ChronoUnit.HOURS)))).get(0);
+        assertThat(item.get("status")).isEqualTo("OPEN");
+        assertThat(appointmentOf(item)).containsEntry("id", appointment).containsEntry("status", "CANCELLED");
+        assertThat(jdbc.queryForObject("select status from slots where id = ?", String.class, slot)).isEqualTo("FREE");
     }
 
     @Test
@@ -556,6 +609,19 @@ class AgendaFunctionalTest extends FunctionalTestBase {
         jdbc.update("insert into users (id, username, email) values (?, ?, ?)", id, "patient-" + id, "patient-" + id + "@example.com");
         jdbc.update("insert into patients (id, first_name, last_name, birth_date, phone, address) values (?, ?, ?, ?, '+21620000000', '1 rue du Test')",
                 id, firstName, lastName, Date.valueOf("1990-04-12"));
+        return id;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> appointmentOf(Map<String, Object> item) {
+        return (Map<String, Object>) item.get("appointment");
+    }
+
+    /** A cancelled appointment of the slot, cancelled at the given time. */
+    private UUID insertCancelledAppointment(UUID slot, UUID patient, Instant cancelledAt) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("insert into appointments (id, slot_id, patient_id, booked_by, status, cancelled_at) values (?, ?, ?, ?, 'CANCELLED', ?)",
+                id, slot, patient, patient, Timestamp.from(cancelledAt));
         return id;
     }
 
