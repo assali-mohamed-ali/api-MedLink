@@ -82,6 +82,14 @@ grep -q 'exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh < /dev
 grep -q '^  deploy-staging:' "$CD" && pass "CD has a staging deploy" || fail "no deploy-staging job"
 [ "$(grep -c 'id-token: write' "$CD")" -ge 3 ] && pass "the deploy jobs may request an OIDC token" || fail "id-token permission missing on a deploy job"
 grep -q 'vault_role: api-staging' "$CD" && grep -q 'vault_role: api-production' "$CD" && pass "each environment uses its own Vault role" || fail "Vault roles"
+grep -q '^  smoke-staging:' "$CD" && pass "CD smoke-tests staging" || fail "no staging smoke job"
+grep -q '^  wait-for-frontend-staging:' "$CD" && pass "CD waits for the dashboard staging jobs" || fail "no cross-repository gate"
+grep -q -- '--job deploy-staging' "$CD" && grep -q -- '--job smoke-staging' "$CD" &&
+    pass "the gate checks both staging jobs" || fail "the gate does not check both jobs"
+grep -q '^  deploy-prod-from-staging:' "$CD" && pass "CD deploys production from the staging digest" || fail "no automatic production job"
+grep -q "vars.AUTO_DEPLOY_PROD != 'false'" "$CD" && pass "automatic production is on unless disabled" || fail "missing AUTO_DEPLOY_PROD switch"
+grep -q "vars.AUTO_DEPLOY_PROD == 'false'" "$CD" && pass "the legacy promotion is switch-gated" || fail "legacy promotion not gated"
+grep -q 'cancel-in-progress: false' "$CD" && pass "a newer run cannot cancel a deployment" || fail "concurrency cancels deployments"
 
 echo
 if [ "$FAILED" -eq 0 ]; then echo "server deploy files: all checks passed"; else echo "server deploy files: $FAILED check(s) failed"; exit 1; fi
