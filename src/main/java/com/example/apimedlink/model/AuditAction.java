@@ -33,5 +33,13 @@ public enum AuditAction {
     /** An account was modified (MLink-114). */
     ACCOUNT_UPDATED,
     /** A user read sensitive data; the resource type says which (MLink-114). */
-    DATA_READ
+    DATA_READ,
+    /** A staff account was created (MLink-72). */
+    ACCOUNT_CREATED,
+    /** A staff account changed role (MLink-72). */
+    ROLE_CHANGED,
+    /** A staff account was enabled (MLink-72). */
+    ACCOUNT_ENABLED,
+    /** A staff account was disabled (MLink-72). */
+    ACCOUNT_DISABLED
 }
