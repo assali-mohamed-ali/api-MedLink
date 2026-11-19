@@ -29,6 +29,18 @@ jobs:
       - name: Test the lockout script's target guard
         run: bash scripts/check-lockout.test.sh
 
+      # MLink-168: Vault roles read only their own repository's and environment's secrets (throwaway Vault in Docker).
+      - name: Test the Vault configuration
+        run: bash vault/test/vault.test.sh
+
+      # MLink-171: the host preparation (deploy user, SSH, updates, backups) on throwaway Ubuntu 26.04 containers.
+      - name: Test the host preparation script
+        run: bash deploy/test/prepare-host.test.sh
+
+      # MLink-169: the server .env comes from Vault, and only the API publishes a port on a server.
+      - name: Test the server deploy files
+        run: bash deploy/test/render-env.test.sh
+
       # GitHub #67: backup and restore refuse unsafe use, encrypt, never leak the passphrase (offline, real gpg).
       - name: Test the database backup and restore scripts
         run: bash scripts/db-backup.test.sh

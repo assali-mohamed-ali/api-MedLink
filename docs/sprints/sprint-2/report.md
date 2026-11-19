@@ -48,6 +48,13 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-19:** Staging and production preparation applied on the hosts: Vault in a container, hosts prepared, production API and front running. Two AWS changes by the repo owner are still needed (security group, staging disk). No migration, no endpoint, no Java change. See [deploy-prep.md](deploy-prep.md).
+
+**2026-11-18:** Staging and production preparation (MLink-168 to MLink-173, Mohamed) on `chore/vault-deploy`:
+MLink-168 Vault as code and MLink-171 host preparation done, scripts and runbooks only (no migration, no endpoint, no
+Java change); `ci.yml` gains two steps. Nothing applied on the servers yet. See the section "Staging and production
+preparation".
+
 **2026-11-18:** MLink-166 (GitHub #67) on `chore/db-backup-restore`: encrypted backup and all-or-nothing restore of
 both databases, scripts and a runbook, restore drill done on the dev stack. No migration, no endpoint, no Java change.
 `ci.yml` gains one step. See the MLink-166 section.
@@ -286,6 +293,44 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## Staging and production preparation — MLink-168 to MLink-173 (2026-11-18, chore/vault-deploy)
+
+The repo owner created four EC2 hosts (staging, production API, production front, Vault; Ubuntu 26.04, t3.micro)
+and gave Mohamed their launch keys to prepare the deploys of both repositories. Only the repo owner has the AWS
+console and Vault's root token. Hosts, roles and edges: [docs/operations/servers.md](../../operations/servers.md).
+**Plan and hand-over for the next session: [deploy-prep.md](deploy-prep.md).**
+
+Found on the hosts (read-only check, 2026-11-18): Vault 1.21.0 already initialised and unsealed behind Caddy (TLS via
+sslip.io), Caddy edges on staging and front, ufw active, Docker 29 on the app hosts, empty `/opt/medlink`, nothing
+running. **Too small for the API stack:** 908 MB of RAM and about 2 GB of free disk per host, against about 2.5 GB of
+RAM for API + Keycloak + two Postgres: staging and api to resize (t3.medium, 20 GB), after Elastic IPs.
+
+| Ticket | What | State |
+|---|---|---|
+| MLink-168 | Vault as code: `vault/` (policies, `setup.sh`, `seed-env.sh`, `install-host.sh`, `snapshot.sh`), runbook [vault.md](../../operations/vault.md) | applied: Vault 1.21.0 in a container on the vault host, secrets seeded |
+| MLink-171 | Host preparation: `deploy/prepare-host.sh` (deploy user, restricted key, SSH keys only, security updates, Docker log rotation, daily backup job), runbook [servers.md](../../operations/servers.md) | applied on the staging, api and front hosts |
+| MLink-169 | API deploy reads Vault; staging deploy job (master's `cd.yml` has none); prod split across api and front | done on the branch; production API running; CD runs after the merge |
+| MLink-170 | Front deploy: extend the CD already in `medlink-dashboard` (`container-security.yml`), container on `127.0.0.1:8081` only | dashboard PR #20; production front running |
+| MLink-172 | Mail through the team Gmail account (SMTP, app password typed by its holder into `seed-env.sh`) | config ready; waits for the app password typed by its holder |
+| MLink-173 | First staging deploy checked end to end, then production | production up behind the security group; staging waits for a larger disk |
+
+- **Vault design.** KV v2 at `medlink/<staging|prod>/<api|front>`; GitHub Actions log in with their OIDC token
+  (JWT auth at `jwt-github/`), one role per repository and environment bound to the `sub` claim
+  (`repo:assali-mohamed-ali/<repo>:environment:<env>`), audience `medlink-vault`, read-only on its own path,
+  10-minute tokens. The set-up runs with a short-lived `medlink-setup` token, never root; secrets are generated on the
+  vault host and never shown. Audit log (rotated) and daily raft snapshot.
+- **Tests.** `vault/test/vault.test.sh` (58 checks, throwaway Vault 1.21.0 + Ubuntu 26.04: each role reads only its
+  path; wrong repository, environment, audience, key, event or an expired token refused; no value in clear in the
+  audit log; seed never overwrites) and `deploy/test/prepare-host.test.sh` (46 checks on Ubuntu 26.04: refusals before
+  any change, users, modes, `sshd -t` and the effective settings, idempotence, key rotation, the front gets no backup
+  job). Both in CI. Each committed red then green; rules broken on purpose in a copy (3 for Vault, 3 for the hosts)
+  each turned a test red.
+- **Found on the way:** `docker-compose.yml` has no `restart:` policy, so containers do not come back after a reboot
+  (fix with MLink-169).
+- **Waiting on the repo owner** (#125, #126, #129 merged 2026-11-18): the resize and the new IPs; a `medlink-setup` token;
+  `staging` brought up to `master`, branch rules, GitHub environments in both repositories; an S3 bucket for the
+  backups and Vault snapshots; the front's `Production` branch renamed `prod`. He proposes Terraform for the hosts (scope not agreed yet).
 
 ## MLink-166 — backup and tested restore of both databases, GitHub #67 (2026-11-18, chore/db-backup-restore)
 
