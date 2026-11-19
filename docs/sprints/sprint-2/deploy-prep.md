@@ -37,7 +37,12 @@ A. **Mohamed, a Vault setup token** (the last one expired at 08:00 UTC; Claude C
      `vault token revoke -self`.
    Then Claude: run `vault/setup.sh` again (new roles), deploy the API and Keycloak to staging, a real signup on staging
    with its verification mail (MLink-172), end-to-end checks of both environments (MLink-173), revoke the setup token.
-B. **Mohamed, GitHub environment values**: the commands in item 4 below.
+B. **GitHub environment values: set 2026-11-19 evening in both repositories** (write access is enough): variables
+   `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`, `DEPLOY_HEALTH_URL` and secret `DEPLOY_KNOWN_HOSTS` (from the pinned,
+   fingerprint-checked host keys) in `staging` and `production`. **Left for Mohamed:** secret `DEPLOY_SSH_KEY` (Claude
+   Code's permission check refuses uploading a private key): `medlink-deploy-staging` in both `staging` environments,
+   `medlink-deploy-production` in both `production` environments. The old `DEPLOY_ENV_FILE` secret in api-MedLink
+   `production` is no longer read (removed in #130).
 B2. **First admin of the app (production): invited 2026-11-19** with `Docs/Deployment/invite-admin.sh` (Mohamed's
    school address, group `/administrative-staff`, no password): the API mailed its own 24-hour activation link (the
    person sets the first password in the app, then the staff code). The script does what the admin screen does
