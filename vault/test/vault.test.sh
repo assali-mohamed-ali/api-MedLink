@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
 # Tests the Vault configuration as code (MLink-168) against a throwaway Vault 1.21.0 in a container:
 #   - setup.sh runs with the limited setup token (not root), twice, and changes nothing the second time;
-#   - a GitHub OIDC token logs in only for its own repository and environment, reads only its own path, never writes;
-#   - wrong repository, environment, audience, event or an expired token are refused;
+#   - a GitHub OIDC token logs in only for its own repository and environment, from the CD workflow on its own
+#     branches or tags (push or manual run), reads only its own path, never writes;
+#   - wrong repository, environment, workflow, ref, audience, event or an expired token are refused;
 #   - the audit log records requests without the secret values; seed-env.sh and seed-front.sh fill a path once and never overwrite.
 # GitHub tokens are signed here with a throwaway key (openssl), replacing the GitHub discovery URL in the copy only.
 # Needs docker and openssl. Usage: bash vault/test/vault.test.sh
@@ -61,13 +62,13 @@ as_root write auth/jwt-github/config jwt_validation_pubkeys=@/tmp/pub.pem \
     bound_issuer=https://token.actions.githubusercontent.com > /dev/null
 
 b64url() { openssl base64 -A | tr '+/' '-_' | tr -d '='; }
-# $1 sub, $2 audience, $3 lifetime in seconds (negative: already expired)
+# $1 sub, $2 audience, $3 lifetime in seconds (negative: already expired), $4 more claims (see claims)
 jwt() {
     local now; now="$(date +%s)"
     local header payload
     header="$(printf '{"alg":"RS256","typ":"JWT","kid":"test"}' | b64url)"
-    payload="$(printf '{"iss":"https://token.actions.githubusercontent.com","sub":"%s","aud":"%s","iat":%d,"nbf":%d,"exp":%d}' \
-        "$1" "$2" "$((now - 60))" "$((now - 60))" "$((now + $3))" | b64url)"
+    payload="$(printf '{"iss":"https://token.actions.githubusercontent.com","sub":"%s","aud":"%s","iat":%d,"nbf":%d,"exp":%d%s}' \
+        "$1" "$2" "$((now - 60))" "$((now - 60))" "$((now + $3))" "${4:-}" | b64url)"
     local sig; sig="$(printf '%s.%s' "$header" "$payload" | openssl dgst -sha256 -sign "$WORK/key.pem" | b64url)"
     printf '%s.%s.%s' "$header" "$payload" "$sig"
 }
@@ -76,12 +77,21 @@ login() { in_vault "$NAME" vault write -field=token "auth/jwt-github/login" "rol
 AUD=medlink-vault
 API=repo:assali-mohamed-ali/api-MedLink
 FRONT=repo:assali-mohamed-ali/medlink-dashboard
+# GitHub's other claims for a job: $1 repository, $2 workflow file, $3 ref, $4 event
+claims() {
+    printf ',"repository":"assali-mohamed-ali/%s","workflow_ref":"assali-mohamed-ali/%s/.github/workflows/%s@%s","ref":"%s","event_name":"%s"' \
+        "$1" "$1" "$2" "$3" "$3" "$4"
+}
+API_CD_STAGING="$(claims api-MedLink cd.yml refs/heads/staging push)"
+API_CD_TAG="$(claims api-MedLink cd.yml refs/tags/v1.2.0 push)"
+FRONT_CD_STAGING="$(claims medlink-dashboard container-security.yml refs/heads/staging push)"
+FRONT_CD_PROD="$(claims medlink-dashboard container-security.yml refs/heads/prod push)"
 
 # 3. What each environment may do
-check_role() { # $1 role $2 sub $3 own path, then the paths it must not read
-    local role="$1" sub="$2" own="$3"; shift 3
+check_role() { # $1 role $2 sub $3 claims $4 own path, then the paths it must not read
+    local role="$1" sub="$2" more="$3" own="$4"; shift 4
     local token
-    if ! token="$(login "$role" "$(jwt "$sub" "$AUD" 300)")"; then fail "$role: login refused for $sub"; return; fi
+    if ! token="$(login "$role" "$(jwt "$sub" "$AUD" 300 "$more")")"; then fail "$role: login refused for $sub"; return; fi
     pass "$role: login for $sub"
     if in_vault -e VAULT_TOKEN="$token" "$NAME" vault kv get -field=MARKER "medlink/$own" > /dev/null 2>&1; then
         pass "$role: reads medlink/$own"; else fail "$role: cannot read medlink/$own"; fi
@@ -97,26 +107,53 @@ check_role() { # $1 role $2 sub $3 own path, then the paths it must not read
     [ "${ttl:-0}" -gt 0 ] && [ "${ttl:-0}" -le 600 ] && pass "$role: token lives at most 10 minutes" ||
         fail "$role: token ttl $ttl s, expected 1..600"
 }
-check_role api-staging      "$API:environment:staging"      staging/api   prod/api staging/front prod/front
-check_role api-production   "$API:environment:production"   prod/api      staging/api staging/front prod/front
-check_role front-staging    "$FRONT:environment:staging"    staging/front prod/front staging/api prod/api
-check_role front-production "$FRONT:environment:production" prod/front    staging/front staging/api prod/api
+check_role api-staging      "$API:environment:staging"      "$API_CD_STAGING"   staging/api   prod/api staging/front prod/front
+check_role api-production   "$API:environment:production"   "$API_CD_TAG"       prod/api      staging/api staging/front prod/front
+check_role front-staging    "$FRONT:environment:staging"    "$FRONT_CD_STAGING" staging/front prod/front staging/api prod/api
+check_role front-production "$FRONT:environment:production" "$FRONT_CD_PROD"    prod/front    staging/front staging/api prod/api
 
-# 4. Logins that must be refused
+# 4. Logins that must be refused, and the other runs the CD workflows make
 refused() { # $1 what, $2 role, $3 jwt
     if login "$2" "$3" > /dev/null; then fail "login accepted: $1"; else pass "login refused: $1"; fi
 }
-refused "staging token on the production role"  api-production "$(jwt "$API:environment:staging" "$AUD" 300)"
-refused "production token on the staging role"  api-staging    "$(jwt "$API:environment:production" "$AUD" 300)"
-refused "front token on the API role"           api-staging    "$(jwt "$FRONT:environment:staging" "$AUD" 300)"
-refused "another repository"                    api-staging    "$(jwt "repo:someone-else/api-MedLink:environment:staging" "$AUD" 300)"
-refused "a pull request run"                    api-staging    "$(jwt "$API:pull_request" "$AUD" 300)"
-refused "a branch run without environment"      api-staging    "$(jwt "$API:ref:refs/heads/staging" "$AUD" 300)"
-refused "another audience"                      api-staging    "$(jwt "$API:environment:staging" "sigstore" 300)"
-refused "an expired token"                      api-staging    "$(jwt "$API:environment:staging" "$AUD" -120)"
+accepted() { # $1 what, $2 role, $3 jwt
+    if login "$2" "$3" > /dev/null; then pass "login accepted: $1"; else fail "login refused: $1"; fi
+}
+refused "staging token on the production role"  api-production "$(jwt "$API:environment:staging" "$AUD" 300 "$API_CD_TAG")"
+refused "production token on the staging role"  api-staging    "$(jwt "$API:environment:production" "$AUD" 300 "$API_CD_STAGING")"
+refused "front token on the API role"           api-staging    "$(jwt "$FRONT:environment:staging" "$AUD" 300 "$FRONT_CD_STAGING")"
+refused "another repository"                    api-staging    "$(jwt "repo:someone-else/api-MedLink:environment:staging" "$AUD" 300 "$API_CD_STAGING")"
+refused "a pull request run"                    api-staging    "$(jwt "$API:pull_request" "$AUD" 300 "$(claims api-MedLink cd.yml refs/pull/7/merge pull_request)")"
+refused "a branch run without environment"      api-staging    "$(jwt "$API:ref:refs/heads/staging" "$AUD" 300 "$API_CD_STAGING")"
+refused "another audience"                      api-staging    "$(jwt "$API:environment:staging" "sigstore" 300 "$API_CD_STAGING")"
+refused "an expired token"                      api-staging    "$(jwt "$API:environment:staging" "$AUD" -120 "$API_CD_STAGING")"
 refused "a token signed with another key" api-staging "$(
     openssl genrsa -out "$WORK/other.pem" 2048 2> /dev/null; cp "$WORK/key.pem" "$WORK/key.bak"
-    cp "$WORK/other.pem" "$WORK/key.pem"; jwt "$API:environment:staging" "$AUD" 300; cp "$WORK/key.bak" "$WORK/key.pem")"
+    cp "$WORK/other.pem" "$WORK/key.pem"; jwt "$API:environment:staging" "$AUD" 300 "$API_CD_STAGING"; cp "$WORK/key.bak" "$WORK/key.pem")"
+# The environment alone is not enough (PR #130 review): only the CD workflow, from its own branches or tags, by a
+# push or a manual run, gets the secrets, even when another workflow or a pull request enters the same environment
+refused "another workflow of the repository in the staging environment" api-staging \
+    "$(jwt "$API:environment:staging" "$AUD" 300 "$(claims api-MedLink ci.yml refs/heads/staging push)")"
+refused "a pull request job that enters the staging environment" api-staging \
+    "$(jwt "$API:environment:staging" "$AUD" 300 "$(claims api-MedLink cd.yml refs/pull/7/merge pull_request)")"
+refused "a pull_request_target job on the staging branch" api-staging \
+    "$(jwt "$API:environment:staging" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/staging pull_request_target)")"
+refused "the CD workflow from a feature branch" api-staging \
+    "$(jwt "$API:environment:staging" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/feat/x workflow_dispatch)")"
+refused "production from master (only the staging run or a v* tag)" api-production \
+    "$(jwt "$API:environment:production" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/master workflow_dispatch)")"
+refused "a token without the workflow claims" api-staging "$(jwt "$API:environment:staging" "$AUD" 300)"
+refused "another dashboard workflow in production" front-production \
+    "$(jwt "$FRONT:environment:production" "$AUD" 300 "$(claims medlink-dashboard ci.yml refs/heads/prod push)")"
+accepted "a manual staging deploy from master" api-staging \
+    "$(jwt "$API:environment:staging" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/master workflow_dispatch)")"
+# Automatic production deploys run from the verified staging run (deploy-prod-from-staging, PR #132)
+accepted "the API production deploy from the verified staging run" api-production \
+    "$(jwt "$API:environment:production" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/staging push)")"
+accepted "the dashboard production deploy from the verified staging run" front-production \
+    "$(jwt "$FRONT:environment:production" "$AUD" 300 "$(claims medlink-dashboard container-security.yml refs/heads/staging push)")"
+accepted "a dashboard release tag in production" front-production \
+    "$(jwt "$FRONT:environment:production" "$AUD" 300 "$(claims medlink-dashboard container-security.yml refs/tags/v1.0.0 push)")"
 
 # 5. The audit log records requests, never the values
 docker exec "$NAME" sh -c 'test -s /var/log/vault/audit.log' && pass "audit log written" || fail "no audit log"

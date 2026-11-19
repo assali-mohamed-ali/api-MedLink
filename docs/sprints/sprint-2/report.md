@@ -48,7 +48,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
-**2026-11-19:** Staging and production preparation applied on the hosts: Vault in a container, hosts prepared, production API and front running. Two AWS changes by the repo owner are still needed (security group, staging disk). No migration, no endpoint, no Java change. See [deploy-prep.md](deploy-prep.md).
+**2026-11-19:** Staging and production preparation applied on the hosts: Vault in a container, hosts prepared. **Production works end to end** (dashboard, API through the front, Gmail mail) since the repo owner opened port 8080 and enlarged the staging disk. Staging: dashboard live, API and Keycloak waiting for a fresh Vault setup token. PR #130: the three review findings fixed (CI YAML check, staging dispatch condition, Vault roles bound to the CD workflow, refs and event). No migration, no endpoint, no Java change. See [deploy-prep.md](deploy-prep.md).
 
 **2026-11-18:** Staging and production preparation (MLink-168 to MLink-173, Mohamed) on `chore/vault-deploy`:
 MLink-168 Vault as code and MLink-171 host preparation done, scripts and runbooks only (no migration, no endpoint, no

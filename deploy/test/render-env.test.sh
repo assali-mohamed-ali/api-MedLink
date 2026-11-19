@@ -82,6 +82,14 @@ grep -q 'exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh < /dev
 grep -q '^  deploy-staging:' "$CD" && pass "CD has a staging deploy" || fail "no deploy-staging job"
 [ "$(grep -c 'id-token: write' "$CD")" -ge 3 ] && pass "the deploy jobs may request an OIDC token" || fail "id-token permission missing on a deploy job"
 grep -q 'vault_role: api-staging' "$CD" && grep -q 'vault_role: api-production' "$CD" && pass "each environment uses its own Vault role" || fail "Vault roles"
+# A manual staging run from master, main or staging builds and publishes the image: the staging deploy must then run too
+job_if() { awk -v job="  $1:" '$0 == job { f = 1; next } f && /^  [a-z-]+:$/ { exit } f && /^    if:/ { print; exit }' "$CD"; }
+dispatch_refs() { grep -oE "inputs\.target == 'staging' && \([^)]*\)|inputs\.target == 'staging' && github\.ref == '[^']*'" | grep -oE "refs/heads/[a-z]+" | sort -u | tr '\n' ' '; }
+build_refs="$(job_if build-and-scan | dispatch_refs)"
+deploy_refs="$(job_if deploy-staging | dispatch_refs)"
+[ -n "$build_refs" ] && [ "$build_refs" = "$deploy_refs" ] &&
+    pass "a manual staging run deploys from the same branches it builds from ($build_refs)" ||
+    fail "manual staging run: builds from [$build_refs] but deploys from [$deploy_refs]"
 grep -q '^  smoke-staging:' "$CD" && pass "CD smoke-tests staging" || fail "no staging smoke job"
 grep -q '^  wait-for-frontend-staging:' "$CD" && pass "CD waits for the dashboard staging jobs" || fail "no cross-repository gate"
 grep -q -- '--job deploy-staging' "$CD" && grep -q -- '--job smoke-staging' "$CD" &&
