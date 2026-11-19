@@ -5,24 +5,56 @@ Tickets MLink-168 to MLink-173 (YouTrack, assigned to Mohamed, subtasks of MLink
 Background, design and test results: the section "Staging and production preparation" of `report.md`. Runbooks:
 `docs/operations/vault.md`, `docs/operations/servers.md`.
 
-## Hand-over for the next session (2026-11-19, night)
+## Hand-over for the next session (2026-11-19, 11:00 UTC)
 
-**Read first:** this file, then `report.md` (Status + that section), then the two runbooks.
+**Read first:** this file, then `report.md` (Status + that section), then the two runbooks. The full reference with
+diagrams, every address and where each secret lives is a PDF on Mohamed's machine:
+`Docs/Deployment/MedLink-Infrastructure-and-Deployment-Reference.pdf` (not in git: it maps the whole infrastructure).
 
 **What runs today**
 
 | Host | State |
 |---|---|
-| vault `56.228.74.131` | Vault 1.21.0 in a container, initialised, unsealed, configured, secrets seeded for staging and prod. `https://56.228.74.131.sslip.io` |
-| frontend-medlink `56.228.94.12` | Dashboard live on HTTPS (image from `master` `72a61af`). `/api` answers 502 until blocker 1 is fixed |
-| api-medlink `13.50.114.144` | API, Keycloak and both databases healthy (image from `master` `0be7983`), `/readyz` 200 on the private address |
-| staging-server `13.51.30.39` | Prepared, Postgres only: the 8 GB disk cannot hold Keycloak (blocker 2) |
+| vault `56.228.74.131` | Vault 1.21.0 in a container, unsealed, secrets seeded for staging and prod. Roles still the old ones (sub only) until step A |
+| frontend-medlink `56.228.94.12` | **Production works end to end**: dashboard and `https://56.228.94.12.sslip.io/readyz` 200 since the repo owner opened 8080 from 172.31.40.60 (2026-11-19 ~10:20 UTC) |
+| api-medlink `13.50.114.144` | API, Keycloak and both databases healthy (image `master` `0be7983`); mail through Gmail works (sign-in 235; a test mail to Mohamed accepted for delivery, 250) |
+| staging-server `13.51.30.39` | Disk 40 GB (repo owner, ~10:20 UTC; Ubuntu grew the partition at boot). Dashboard live (`/`, `/healthz` 200); Postgres up; **API and Keycloak not yet deployed**: step A |
 
-**Blockers, in order**
+**PR #130 review (repo owner, changes requested), all three fixed on the branch:**
 
-1. **Repo owner, AWS console:** on the security group of `api-medlink` (`launch-wizard-1`), allow inbound TCP 8080 from `172.31.40.60/32`. Packets from the front host never reach the API host today (port 22 passes). Then `https://56.228.94.12.sslip.io/readyz` must answer 200.
-2. **Repo owner, AWS console:** enlarge the staging volume to 20 GB. Then `docs/operations/servers.md`, "Grow the staging disk", and deploy the API and the front to staging.
-3. **Done on production, 2026-11-19 (MLink-172):** the Gmail app password (from Mohamed's local file `Docs/Server Keys/MedLink-Prod app key.txt`) is in `medlink/staging/api` and `medlink/prod/api`, sent over SSH stdin to `vault kv patch`, never displayed. The account is **`medlinq2026@gmail.com`**: the settings files first said `medliq2026`, and Gmail answered `535 Username and Password not accepted` to every key; `deploy/test/render-env.test.sh` now guards the address. Login test from the production host (curl, login and NOOP only, no mail sent): `235 2.7.0 Accepted`. Still to check: a real signup on staging delivers its mail, once staging runs. Login test, reading the value from the host's `.env`: strip its quotes with `sed -n "s/^MAIL_PASSWORD=.\(.*\).$/\1/p" .env` (`tr` does not understand `\x27`), write a `--netrc-file` with umask 077, `curl --ssl-reqd --url smtp://smtp.gmail.com:587 -X NOOP`. To change the password: `seed-env.sh` from a terminal (`ssh -t`) only adds missing keys, so use `vault kv patch medlink/<env>/api MAIL_PASSWORD=-` with a fresh token (`vault operator generate-root`; the setup token expires 2026-11-19 08:00 UTC).
+1. CI `check-yaml` rejected Compose's `!reset`: the hook skips `deploy/docker-compose.server.yml`, which `render-env.test.sh` validates with `docker compose config` (`026cf2f`). CI green.
+2. A manual staging dispatch from `master`/`main` built and published but did not deploy: `deploy-staging` now accepts the same refs (red `59c4bde`, green `5dbd332`).
+3. The Vault roles bound only `sub`: they now also require the CD workflow (`workflow_ref`), its refs and `event_name` push or manual run; 7 new refusals and 2 allowed cases in `vault/test/vault.test.sh` (red `a790d8e`, green `ca6f7c5`). **Applied in git only**: the live Vault gets it in step A.
+
+**Next, in order**
+
+A. **Mohamed, a Vault setup token** (the last one expired at 08:00 UTC; Claude Code's permission check refused making
+   one from the unseal keys). Either way the keys are typed or piped, never shown, never stored on the host:
+   - by hand, three key holders, on the vault host (`ssh -t`): `docker exec -it medlink-vault vault operator generate-root -init`,
+     then `docker exec -it medlink-vault vault operator generate-root -nonce=<nonce>` three times (key at the hidden
+     prompt), then `-decode=<encoded> -otp=<otp>`; with that root token:
+     `vault token create -policy=medlink-setup -ttl=3h -orphan -field=token > /root/medlink-setup.token` and
+     `vault token revoke -self`.
+   Then Claude: run `vault/setup.sh` again (new roles), deploy the API and Keycloak to staging, a real signup on staging
+   with its verification mail (MLink-172), end-to-end checks of both environments (MLink-173), revoke the setup token.
+B. **Mohamed, GitHub environment values**: the commands in item 4 below.
+B2. **First admin of the app (production): invited 2026-11-19** with `Docs/Deployment/invite-admin.sh` (Mohamed's
+   school address, group `/administrative-staff`, no password): the API mailed its own 24-hour activation link (the
+   person sets the first password in the app, then the staff code). The script does what the admin screen does
+   (Keycloak account + users row) and asks `POST /api/auth/account/activate/resend` to send the mail. Before it, there
+   was no admin in production except the dev user `staff.dev` (to be deleted). `Docs/Deployment/create-admin.sh` (Mohamed's machine, not in git) creates one in Keycloak through the API's
+   own service account `medlink-admin`: group `/administrative-staff`, email verified, a temporary password typed by
+   the person at a hidden prompt. At the first login the app makes them choose a password, then set up the staff code;
+   the API creates the database row then (GitHub #29). `--check <email>` tests the connection and creates nothing
+   (tested 2026-11-19: OK). Run it in Git Bash yourself: `bash create-admin.sh <email> <first name> <last name>`.
+C. **Repo owner:** review PR #130 again and merge it with medlink-dashboard PR #20. The dashboard branch is now `prod`.
+   Give the `production` environments a deployment rule (API: tags `v*`; dashboard: `prod` and `v*`).
+
+**Details of each item (1 to 3 done, 4 and 5 open)**
+
+1. Security group: 8080 from `172.31.40.60/32` on `api-medlink` (repo owner, 2026-11-19).
+2. Staging volume enlarged to 40 GB (repo owner, 2026-11-19).
+3. **Mail, done on production, 2026-11-19 (MLink-172):** the Gmail app password (from Mohamed's local file `Docs/Server Keys/MedLink-Prod app key.txt`) is in `medlink/staging/api` and `medlink/prod/api`, sent over SSH stdin to `vault kv patch`, never displayed. The account is **`medlinq2026@gmail.com`**: the settings files first said `medliq2026`, and Gmail answered `535 Username and Password not accepted` to every key; `deploy/test/render-env.test.sh` now guards the address. Login test from the production host (curl, login and NOOP only, no mail sent): `235 2.7.0 Accepted`. Still to check: a real signup on staging delivers its mail, once staging runs. Login test, reading the value from the host's `.env`: strip its quotes with `sed -n "s/^MAIL_PASSWORD=.\(.*\).$/\1/p" .env` (`tr` does not understand `\x27`), write a `--netrc-file` with umask 077, `curl --ssl-reqd --url smtp://smtp.gmail.com:587 -X NOOP`. To change the password: `seed-env.sh` from a terminal (`ssh -t`) only adds missing keys, so use `vault kv patch medlink/<env>/api MAIL_PASSWORD=-` with a fresh token (`vault operator generate-root`; the setup token expires 2026-11-19 08:00 UTC).
 4. **Mohamed:** the GitHub environment values, needed by CD (Claude Code's permission check refused uploading the private deploy key). From `code/api-MedLink`, in Git Bash:
    ```sh
    K="../../Docs/Server Keys/deploy-keys"
@@ -36,7 +68,7 @@ Background, design and test results: the section "Staging and production prepara
    ssh-keyscan -t ed25519 13.50.114.144 | gh secret set DEPLOY_KNOWN_HOSTS -R $R --env production
    ```
    Check each scanned key against the fingerprints in `servers.md`. The dashboard repository needs the same names with path `/opt/medlink/front`, health URL `.../healthz`, and host `56.228.94.12` for production.
-5. **Repo owner:** review and merge the PR of `chore/vault-deploy` and `medlink-dashboard` PR #20. The branch he created in the dashboard is `Prod`, but its workflow deploys from `prod` (names are case-sensitive).
+5. **Repo owner:** review and merge PR #130 (`chore/vault-deploy`) and `medlink-dashboard` PR #20. Dashboard branch renamed `Prod` → `prod` (done, 2026-11-19).
 
 **Before production opens:** delete the dev users `staff.dev`, `practitioner.dev`, `patient.dev` from the production Keycloak (MLink-173), and split the five unseal keys between at least three people.
 
