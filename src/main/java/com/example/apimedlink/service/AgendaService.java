@@ -91,8 +91,13 @@ public class AgendaService {
         Map<UUID, BookedAppointment> booked = found.isEmpty() ? Map.of()
                 : appointments.findWithPatient(found.stream().map(Slot::getId).toList(), AppointmentStatus.BOOKED)
                         .stream().collect(Collectors.toMap(BookedAppointment::slotId, Function.identity()));
+        // MLink-37 (37.7): on a slot nobody holds, its latest cancelled appointment, so the agenda shows the cancellation
+        List<UUID> notHeld = found.stream().map(Slot::getId).filter(id -> !booked.containsKey(id)).toList();
+        Map<UUID, BookedAppointment> cancelled = notHeld.isEmpty() ? Map.of()
+                : appointments.findCancelledWithPatient(notHeld).stream()
+                        .collect(Collectors.toMap(BookedAppointment::slotId, Function.identity(), (latest, older) -> latest));
         List<AgendaEntry> entries = found.stream()
-                .map(slot -> new AgendaEntry(slot, booked.get(slot.getId()))).toList();
+                .map(slot -> new AgendaEntry(slot, booked.get(slot.getId()), cancelled.get(slot.getId()))).toList();
         return new Agenda(clinics.findOfPractitioner(practitionerId), entries);
     }
 
