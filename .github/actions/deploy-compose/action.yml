@@ -158,7 +158,7 @@ runs:
         # The API connects as medlink_app (GitHub #57). The image creates that role only on an empty volume, so give it
         # its login (APP_DB_PASSWORD) on every deploy, before the API starts. The script is safe to run again.
         compose up -d --wait postgres
-        compose exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh
+        compose exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh < /dev/null
         compose up -d --no-build --remove-orphans app
         REMOTE
 
