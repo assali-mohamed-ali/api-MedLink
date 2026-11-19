@@ -9,4 +9,6 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 public interface AuditEntryRepository extends Repository<AuditEntry, UUID>, JpaSpecificationExecutor<AuditEntry> {
 
     AuditEntry save(AuditEntry entry);
+
+    AuditEntry saveAndFlush(AuditEntry entry);
 }

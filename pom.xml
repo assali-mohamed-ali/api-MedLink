@@ -71,6 +71,12 @@
             <artifactId>core</artifactId>
             <version>3.5.3</version>
         </dependency>
+        <!-- MLink-123/125: patient documents live in an S3-compatible object store (MinIO), never in Postgres -->
+        <dependency>
+            <groupId>io.minio</groupId>
+            <artifactId>minio</artifactId>
+            <version>8.5.17</version>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.boot</groupId>

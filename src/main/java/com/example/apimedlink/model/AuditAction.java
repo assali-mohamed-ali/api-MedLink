@@ -19,5 +19,9 @@ public enum AuditAction {
     /** A practitioner wrote a consultation report (MLink-32): the report id only, never its text. */
     REPORT_CREATED,
     /** A practitioner read a patient's consultation reports (MLink-32): the patient id only. */
-    REPORT_VIEWED
+    REPORT_VIEWED,
+    /** Staff uploaded a patient document (MLink-123/125): the document id only. */
+    DOCUMENT_UPLOAD,
+    /** A patient or staff member read a patient document (MLink-123/125): the document id only. */
+    DOCUMENT_READ
 }

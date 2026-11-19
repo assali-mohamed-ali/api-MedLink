@@ -12,11 +12,15 @@ paths = [
   '''.*test.*''',
   '''HELP.md''',
 ]
-# Documented placeholders and dev-only values, never real secrets.
+# Documented placeholders and dev-only values, never real secrets. Exact values only: a dev MinIO
+# password or document key must not allowlist anything else on a line.
 regexes = [
   '''change-me''',
   '''dev-only-''',
   '''at-least-32-chars''',
+  '''^minioadmin$''',
+  '''^devOnlyMfaKeyNotForProductionUseLocalOnlyMA=$''',
+  '''^ZGV2T25seURvY3VtZW50c0tleU5vdEZvclByb2QhISE=$''',
 ]
 # A single reviewed finding already in history: add its fingerprint to /.gitleaksignore.
 
