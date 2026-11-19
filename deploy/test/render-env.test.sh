@@ -50,6 +50,9 @@ for e in staging production; do
     grep -qE 'PASSWORD=|SECRET=|ENCRYPTION_KEY=|PASSPHRASE=' "$f" && fail "$e.env holds a secret key" || pass "$e.env holds no secret"
     grep -q '^KEYCLOAK_START_MODE=start$' "$f" && pass "$e: Keycloak in production mode" || fail "$e: Keycloak start mode"
     grep -qE "^APP_FRONTEND_URL=https://" "$f" && pass "$e: the front is on HTTPS" || fail "$e: front URL"
+    # The team mail account (MLink-172); a typo here makes Gmail refuse every app password with 535
+    grep -q '^MAIL_USERNAME=medlinq2026@gmail\.com$' "$f" && grep -q "^MAIL_FROM='MedLink <medlinq2026@gmail\.com>'$" "$f" &&
+        pass "$e: mail goes through the team account" || fail "$e: MAIL_USERNAME/MAIL_FROM is not medlinq2026@gmail.com"
 done
 grep -q '^SPRING_PROFILES_ACTIVE=prod$' "$DEPLOY/env/production.env" && pass "production uses the prod profile" || fail "production profile"
 grep -q '^API_BIND_ADDRESS=127\.0\.0\.1$' "$DEPLOY/env/staging.env" && pass "staging API on loopback" || fail "staging bind address"
