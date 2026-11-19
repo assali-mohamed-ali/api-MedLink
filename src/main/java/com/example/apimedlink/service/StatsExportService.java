@@ -10,6 +10,7 @@ import java.time.LocalDate;
 import java.time.ZoneOffset;
 import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.EnumSet;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,9 +24,10 @@ import org.springframework.stereotype.Service;
 /**
  * MLink-95: an export of anonymised statistics.
  *
- * <p>Anonymity rests on two things. First, only counts are produced, from data that holds no person (see
- * {@link AppointmentFact}). Second, a group smaller than the minimum group size is left out, because a count of one
- * or two can point at a person; and when an indicator has no group left, the whole export is refused rather than
+ * <p>Anonymity rests on two things. First, only counts are produced, and the patient id read to count people is
+ * never written to the file or to the audit trail. Second, a group is released only when it holds at least the
+ * minimum number of <em>distinct patients</em> (not appointments: five visits of one patient are one person). A
+ * smaller group is left out, and when an indicator has no group left, the whole export is refused rather than
  * delivered empty or partial.
  *
  * <p>Every export is traced (MLink-59) before it is returned: an export is never delivered without its entry, and a
@@ -52,10 +54,11 @@ public class StatsExportService {
     }
 
     /**
-     * The CSV of the chosen indicators for the days {@code from} to {@code to} included (UTC).
+     * The CSV of the chosen indicators for the days {@code from} to {@code to} included (UTC). Each row gives the
+     * number of appointments of a group that holds at least the minimum number of distinct patients.
      *
      * @throws ApiException 400 {@code VALIDATION_FAILED} for a bad period or indicators; 422
-     *         {@code ANONYMISATION_IMPOSSIBLE} when an indicator has no group big enough
+     *         {@code ANONYMISATION_IMPOSSIBLE} when an indicator has no group with enough distinct patients
      */
     public String export(LocalDate from, LocalDate to, Set<StatsIndicator> requested) {
         validate(from, to, requested);
@@ -70,10 +73,10 @@ public class StatsExportService {
         List<StatsIndicator> withoutGroup = new ArrayList<>();
         for (StatsIndicator indicator : indicators) {
             int kept = 0;
-            for (Map.Entry<String, Long> group : indicator.count(rows).entrySet()) {
-                if (group.getValue() >= minGroupSize) {
+            for (Map.Entry<String, StatsIndicator.Group> group : indicator.count(rows).entrySet()) {
+                if (group.getValue().patients() >= minGroupSize) {
                     csv.append(indicator.name()).append(',').append(csvCell(group.getKey())).append(',')
-                            .append(group.getValue()).append('\n');
+                            .append(group.getValue().appointments()).append('\n');
                     kept++;
                 }
             }
@@ -85,8 +88,8 @@ public class StatsExportService {
         if (!withoutGroup.isEmpty()) {
             audit.record(AuditAction.STATS_EXPORTED, RESOURCE_TYPE, resource, AuditOutcome.DENIED);
             throw new ApiException(HttpStatus.UNPROCESSABLE_CONTENT, "ANONYMISATION_IMPOSSIBLE",
-                    "Export refusé : sur cette période, aucun groupe n'atteint la taille minimale de "
-                            + minGroupSize + " rendez-vous pour " + names(withoutGroup)
+                    "Export refusé : sur cette période, aucun groupe ne compte au moins " + minGroupSize
+                            + " patients différents pour " + names(withoutGroup)
                             + ". L'anonymisation est impossible.");
         }
 
@@ -123,7 +126,7 @@ public class StatsExportService {
         return from + ".." + to + ":" + names(indicators);
     }
 
-    private static String names(java.util.Collection<StatsIndicator> indicators) {
+    private static String names(Collection<StatsIndicator> indicators) {
         return indicators.stream().map(StatsIndicator::name).collect(Collectors.joining(","));
     }
 

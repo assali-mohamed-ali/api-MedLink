@@ -23,9 +23,10 @@ import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 
-/** MLink-95: anonymisation, refusal, trace and validation of the statistics export. */
+/** MLink-95: anonymisation (distinct patients), refusal, trace and validation of the statistics export. */
 class StatsExportServiceTest {
 
     private static final LocalDate FROM = LocalDate.parse("2026-11-01");
@@ -35,14 +36,30 @@ class StatsExportServiceTest {
     private final AuditService audit = mock(AuditService.class);
     private final StatsExportService service = new StatsExportService(facts, audit, 5);
 
-    private static AppointmentFact fact(String day, AppointmentStatus status, String specialty) {
-        return new AppointmentFact(Instant.parse(day + "T10:00:00Z"), status, specialty);
+    private static AppointmentFact fact(String day, AppointmentStatus status, String specialty, UUID patient) {
+        return new AppointmentFact(Instant.parse(day + "T10:00:00Z"), status, specialty, patient);
     }
 
+    /** One appointment of a new patient. */
+    private static AppointmentFact fact(String day, AppointmentStatus status, String specialty) {
+        return fact(day, status, specialty, UUID.randomUUID());
+    }
+
+    /** {@code count} appointments, each of a different patient. */
     private static List<AppointmentFact> many(int count, String day, AppointmentStatus status, String specialty) {
         List<AppointmentFact> rows = new ArrayList<>();
         for (int i = 0; i < count; i++) {
             rows.add(fact(day, status, specialty));
+        }
+        return rows;
+    }
+
+    /** {@code count} appointments, all of the same patient. */
+    private static List<AppointmentFact> manyOfOnePatient(
+            int count, String day, AppointmentStatus status, String specialty, UUID patient) {
+        List<AppointmentFact> rows = new ArrayList<>();
+        for (int i = 0; i < count; i++) {
+            rows.add(fact(day, status, specialty, patient));
         }
         return rows;
     }
@@ -61,6 +78,76 @@ class StatsExportServiceTest {
 
         assertThat(csv).isEqualTo("indicator,group,count\nAPPOINTMENTS_PER_STATUS,BOOKED,6\n");
         assertThat(csv).doesNotContain("CANCELLED");
+    }
+
+    @Test
+    void fiveAppointmentsOfOnePatientAreNotFivePeople() {
+        UUID patient = UUID.randomUUID();
+        databaseHolds(manyOfOnePatient(5, "2026-11-10", AppointmentStatus.BOOKED, "Cardiologie", patient));
+
+        assertThatThrownBy(() -> service.export(FROM, TO, EnumSet.of(StatsIndicator.APPOINTMENTS_PER_SPECIALTY)))
+                .isInstanceOfSatisfying(ApiException.class,
+                        refusal -> assertThat(refusal.getCode()).isEqualTo("ANONYMISATION_IMPOSSIBLE"));
+
+        verify(audit).record(eq(AuditAction.STATS_EXPORTED), eq("STATS"), anyString(), eq(AuditOutcome.DENIED));
+    }
+
+    @Test
+    void fiveVisitsOfOnePatientOnOneDayAreNotReleasedPerDay() {
+        UUID patient = UUID.randomUUID();
+        databaseHolds(manyOfOnePatient(5, "2026-11-10", AppointmentStatus.BOOKED, "Cardiologie", patient));
+
+        assertThatThrownBy(() -> service.export(FROM, TO, EnumSet.of(StatsIndicator.APPOINTMENTS_PER_DAY)))
+                .isInstanceOfSatisfying(ApiException.class,
+                        refusal -> assertThat(refusal.getCode()).isEqualTo("ANONYMISATION_IMPOSSIBLE"));
+    }
+
+    @Test
+    void fourPatientsWithManyAppointmentsEachAreStillTooFew() {
+        List<AppointmentFact> rows = new ArrayList<>();
+        for (int patient = 0; patient < 4; patient++) {
+            rows.addAll(manyOfOnePatient(
+                    3, "2026-11-10", AppointmentStatus.BOOKED, "Cardiologie", UUID.randomUUID()));
+        }
+        databaseHolds(rows);
+
+        assertThatThrownBy(() -> service.export(FROM, TO, EnumSet.of(StatsIndicator.APPOINTMENTS_PER_STATUS)))
+                .isInstanceOfSatisfying(ApiException.class,
+                        refusal -> assertThat(refusal.getCode()).isEqualTo("ANONYMISATION_IMPOSSIBLE"));
+    }
+
+    @Test
+    void fivePatientsWithSeveralAppointmentsEachAreReleasedWithTheAppointmentCount() {
+        List<AppointmentFact> rows = new ArrayList<>();
+        for (int patient = 0; patient < 5; patient++) {
+            rows.addAll(manyOfOnePatient(
+                    2, "2026-11-10", AppointmentStatus.BOOKED, "Cardiologie", UUID.randomUUID()));
+        }
+        databaseHolds(rows);
+
+        String csv = service.export(FROM, TO, EnumSet.of(StatsIndicator.APPOINTMENTS_PER_STATUS));
+
+        assertThat(csv).isEqualTo("indicator,group,count\nAPPOINTMENTS_PER_STATUS,BOOKED,10\n");
+    }
+
+    @Test
+    void thePatientIdNeverReachesTheExportOrTheTrace() {
+        List<AppointmentFact> rows = new ArrayList<>();
+        List<String> ids = new ArrayList<>();
+        for (int patient = 0; patient < 5; patient++) {
+            UUID id = UUID.randomUUID();
+            ids.add(id.toString());
+            rows.add(fact("2026-11-10", AppointmentStatus.BOOKED, "Cardiologie", id));
+        }
+        databaseHolds(rows);
+
+        String csv = service.export(FROM, TO, EnumSet.of(StatsIndicator.APPOINTMENTS_PER_STATUS));
+
+        for (String id : ids) {
+            assertThat(csv).doesNotContain(id);
+        }
+        verify(audit).record(AuditAction.STATS_EXPORTED, "STATS",
+                "2026-11-01..2026-11-30:APPOINTMENTS_PER_STATUS", AuditOutcome.SUCCESS);
     }
 
     @Test
@@ -105,7 +192,7 @@ class StatsExportServiceTest {
         }
         databaseHolds(rows);
 
-        // Per status there are 6 BOOKED, enough; per day each day holds 1, too few: nothing is delivered.
+        // Per status there are 6 different patients, enough; per day each day holds 1: nothing is delivered.
         assertThatThrownBy(() -> service.export(FROM, TO,
                 EnumSet.of(StatsIndicator.APPOINTMENTS_PER_STATUS, StatsIndicator.APPOINTMENTS_PER_DAY)))
                 .isInstanceOfSatisfying(ApiException.class,
