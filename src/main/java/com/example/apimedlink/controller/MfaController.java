@@ -31,7 +31,9 @@ import org.springframework.web.bind.annotation.RestController;
  *
  * <p>LOGIN/SUCCESS is audited here, once the session really opens (review of #90). When it cannot be opened,
  * the failure is audited and the half-made session and the Keycloak session are cleaned up before the error
- * goes on.
+ * goes on. A wrong, replayed or locked code is a refused login attempt too: it is audited as LOGIN/FAILURE for
+ * the identified user (review of #90), best effort like the other login entries, and the code that was typed is
+ * never recorded.
  */
 @RestController
 @RequestMapping("/api/auth/mfa")
@@ -76,6 +78,9 @@ public class MfaController {
         try {
             mfa.verify(login.user().getId(), body.code());
         } catch (ApiException refused) {
+            // A wrong, replayed or locked code (401 INVALID_CODE, 423 MFA_LOCKED) is a refused login attempt by the
+            // identified user. Audited first, so nothing after it can skip it; only the user id is recorded.
+            logins.recordLoginFailure(login.user().getId());
             if (refused.getStatus() == HttpStatus.LOCKED) {
                 // Locked: this login is over, here and in Keycloak; the user logs in again later
                 pending.clear(request);
