@@ -6,7 +6,8 @@ import java.util.UUID;
 
 /**
  * One slot of a practitioner's agenda (MLink-26). {@code status} is {@code OPEN}, {@code BOOKED} or
- * {@code CLOSED}. Of the patient who holds the slot, only the id (to open their record) and the names.
+ * {@code CLOSED}. Of the patient who holds the slot, only the id (to open their record) and the names. A slot nobody
+ * holds may show its latest cancelled appointment, {@code appointment.status} {@code CANCELLED} (MLink-37, 37.7).
  */
 public record AgendaItemDto(
         UUID slotId,
