@@ -17,9 +17,10 @@ codes, password changes and account management will too.
   page reaches the browser: [decision record 0001](decisions/0001-login-password-grant.md) (GitHub #50).
 - **Authorization:** deny by default, roles from the signed token, "own data only" checks, and a role × route
   matrix that fails the build when a route has no rule.
-- **Delivery:** CI/security checks on PRs to `staging`, deploy + smoke-test on merge, automatic checked
-  `staging` → `prod` promotion, Release Please SemVer release PR, lowercase `vX.Y.Z` tag and tag-only production deploy.
-  The release flow is being introduced by a reviewed migration PR; do not enable it on diverged branches until reconciled.
+- **Delivery:** CI/security checks on PRs to `staging`, deploy + smoke-test on merge, a cross-repository gate that
+  waits for both the API and dashboard staging jobs, then deployment of the same verified digest to production.
+  The legacy release path (`staging` → `prod` PR, Release Please, `vX.Y.Z` tag deploy) remains available behind
+  `AUTO_DEPLOY_PROD=false`; do not enable either path on diverged branches until reconciled.
 - **Where we are:** sprint 2 builds the identity features; plan, contracts and progress are in
   [`docs/sprints/sprint-2/`](sprints/sprint-2/README.md).
 
@@ -257,32 +258,36 @@ SonarQube settings exist (`sonar-project.properties`), but no workflow runs Sona
 ## Environments & branching
 
 After the release-pipeline migration, product changes flow from a topic branch into `staging`. The merge deploys
-the candidate, and only a successful post-deployment smoke gate can trigger a checked PR from `staging` to `prod`.
-Release Please calculates the SemVer version from Conventional Commits and opens a version/changelog PR; the
-resulting lowercase `vX.Y.Z` tag triggers the production image build, scan, signature verification, and deploy.
+the candidate, and only a successful post-deployment smoke gate can deploy it to production. The API and dashboard
+also wait for each other's staging deploy/smoke jobs, so both applications are green before either goes to production.
+The same verified digest is deployed to production; no production rebuild is needed.
+
+The legacy path remains behind `AUTO_DEPLOY_PROD=false`: a checked `staging -> prod` PR, Release Please SemVer PR,
+lowercase `vX.Y.Z` tag and tag-based production build/deploy.
 
 ```mermaid
 flowchart LR
   F[feat/*, fix/*, core/*, docs/*] -->|PR + CI/security checks| S[staging]
   S -->|deploy immutable digest| SE[staging environment]
-  SE -->|smoke tests pass| PR[PR staging -> prod]
-  PR -->|checks pass, auto-merge| P[prod]
-  P -->|Release Please PR + version bump| R[release commit]
+  SE -->|smoke tests pass| G{API and dashboard staging gates}
+  G -->|both green| PE[production environment]
+  G -->|AUTO_DEPLOY_PROD=false| PR[legacy PR staging -> prod]
+  PR -->|Release Please PR + version bump| R[release commit]
   R -->|tag vX.Y.Z| T[GHCR image + attestations + signature]
-  T -->|verify signature, deploy by digest| PE[production environment]
+  T -->|verify signature, deploy by digest| PE
 ```
 
 | Environment/ref | Role | Spring profile | Env file | Keycloak mode | Where secrets live |
 |---|---|---|---|---|---|
 | Local dev | Any topic branch | `dev` | `.env` (made by setup script) | `start-dev` | `.env` (git-ignored) |
-| `staging` branch | Integration and candidate release | `staging` | `.env.staging` | `start` behind HTTPS proxy | GitHub Environment `staging` |
-| `prod` branch | Release history and versioned release PRs; **does not deploy directly** | `prod` | `.env.prod` | `start` behind HTTPS proxy | GitHub Environment `production` |
-| `vX.Y.Z` tag | Production build/deploy trigger | `prod` | `.env.prod` | `start` behind HTTPS proxy | GitHub Environment `production` |
+| `staging` branch | Integration and candidate release | `staging` | `deploy/env/staging.env` + Vault | `start` behind HTTPS proxy | Vault `medlink/staging/*` |
+| `prod` branch | Release history for the legacy path; **does not deploy directly** | `prod` | `deploy/env/production.env` + Vault | `start` behind HTTPS proxy | Vault `medlink/prod/*` |
+| `vX.Y.Z` tag | Legacy production build/deploy trigger | `prod` | `deploy/env/production.env` + Vault | `start` behind HTTPS proxy | Vault `medlink/prod/*` |
 | `master` | Repository default and one-time workflow bootstrap during migration | existing | — | — | — |
 
 - **Never push directly** to `master`, `staging`, or `prod`.
-- Keep PR/check-required protections on `staging` and `prod`. In this PAT-based full-automation design, don't require reviewers on those branches or on the production environment: that would block the bot's `staging -> prod` promotion and `prod -> staging` version-sync PRs. All configured CI/security checks must still pass before merge. If review requirements must stay enforced, use a dedicated GitHub App with narrowly scoped ruleset bypass for automation PRs.
-- **One-time migration warning:** the current `master`, `staging`, and `prod` branches have different/diverged history. This design is not active on staging/prod until workflows and release configuration are carried over by deliberately reviewed PRs and branch baselines are reconciled. Keep repository variable `ENABLE_AUTO_PROMOTION` false until then; do not merge the historical branch differences blindly.
+- Keep PR/check-required protections on `staging` and `prod`. Automatic production deployment needs no reviewer gate on the `production` environment; the cross-repository staging gate is the release gate. If the legacy PR path stays enabled, don't require reviewers on those branches or on `production`: that would block the bot's `staging -> prod` promotion and `prod -> staging` version-sync PRs. All configured CI/security checks must still pass before merge. If review requirements must stay enforced, use a dedicated GitHub App with narrowly scoped ruleset bypass for automation PRs.
+- **One-time migration warning:** the current `master`, `staging`, and `prod` branches have different/diverged history. This design is not active on staging/prod until workflows and release configuration are carried over by deliberately reviewed PRs and branch baselines are reconciled. Keep repository variable `AUTO_DEPLOY_PROD` false until then; do not merge the historical branch differences blindly.
 - **Secrets never enter git.** `.env*` files are ignored except `*.example` templates.
 - **Fail fast:** Keycloak client secrets and database credentials have no default outside dev, so a missing secret stops startup. In staging and prod, `config/DatabaseCredentialsCheck` also refuses the dev values and the examples' placeholders (`myuser`, `secret`, `change-me...`) before Flyway connects, and `docker-compose.yml` requires `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` (GitHub #64).
 - **Least privilege in the database (GitHub #57):** two roles. Flyway migrates as the schema owner

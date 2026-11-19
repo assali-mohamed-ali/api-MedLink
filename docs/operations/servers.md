@@ -30,7 +30,8 @@ staging disk" below.
 - **`ubuntu`**: the admin, with the instance's EC2 launch key (`.pem`). For emergencies and set-up only. The keys
   never go into git, a chat, or a GitHub secret.
 - **`deploy`**: the GitHub deploys only, with one ed25519 key per environment (staging, production), marked
-  `restrict` (no terminal, no forwarding). Its private key is the environment's `DEPLOY_SSH_KEY` secret.
+  `restrict` (no terminal, no forwarding). Its private key is the API's `DEPLOY_SSH_KEY` secret; the dashboard also
+  stores it in Vault as `medlink/<env>/front` and keeps the secret only as fallback.
 - No password logins, no root login, no other user (`/etc/ssh/sshd_config.d/10-medlink.conf`).
 
 `deploy` is in the `docker` group, which is root in practice. What it buys is a key that is used by GitHub only and
@@ -82,7 +83,8 @@ rotated weekly. Still to do: the off-host copy (an S3 bucket from the repo owner
 ## Change or revoke a deploy key
 
 Make a new key (step 1), run `prepare-host.sh` again with the new `.pub`: it replaces the old key, which stops working
-at once. Then the repo owner updates `DEPLOY_SSH_KEY`.
+at once. Then update `DEPLOY_SSH_KEY` on the API and replace the dashboard's Vault fields (a fresh `vault kv patch`,
+see [vault.md](vault.md)) or its GitHub fallback secret before the next deploy.
 
 ## Grow the staging disk
 
