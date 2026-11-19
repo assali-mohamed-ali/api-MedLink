@@ -5,8 +5,8 @@ Everything Vault holds for MedLink is configured from `vault/` in this repositor
 
 | Item | Value |
 |---|---|
-| Host | the `vault` EC2 instance, Ubuntu 26.04; Vault 1.21.0, raft storage, Shamir seal (5 keys, 3 to unseal) |
-| Address | `https://13.48.56.245.sslip.io` (Caddy, TLS); Vault itself listens on `127.0.0.1:8200` only |
+| Host | the `vault` EC2 instance, Ubuntu 26.04; Vault 1.21.0 **in a container** (`medlink-vault`, `vault/docker`, run from `/opt/vault-docker/compose`), raft storage in `/opt/vault-docker/data`, Shamir seal (5 keys, 3 to unseal) |
+| Address | `https://56.228.74.131.sslip.io` (Caddy, TLS); Vault itself listens on `127.0.0.1:8200` only |
 | Secrets | KV v2 at `medlink/`: `medlink/<staging\|prod>/<api\|front>` |
 | GitHub login | JWT auth at `jwt-github/`, GitHub's OIDC issuer, audience `medlink-vault` |
 | Audit log | `/var/log/vault/audit.log` (values as HMACs), rotated daily, 30 days |
@@ -55,8 +55,8 @@ neither write nor list. `vault/test/vault.test.sh` proves each of these on a thr
 
 ## After a reboot: unseal
 
-Vault starts sealed after every restart of the instance or the service: deploys fail until it is unsealed. Three of
-the five key holders each run, on the host:
+The container comes back by itself after a reboot, but Vault starts **sealed**: deploys fail until it is unsealed. Three
+of the five key holders each run, on the host:
 
 ```sh
 VAULT_ADDR=http://127.0.0.1:8200 vault operator unseal      # asks for the key, hidden
@@ -100,6 +100,12 @@ To do: copy each snapshot off the host (an S3 bucket with versioning, from the r
 
 Add its policy file in `vault/policies/`, its line in `setup.sh` (the policy list and a `role` call), its paths in
 `vault/test/vault.test.sh`, then run the test and `setup.sh` again.
+
+## The Vault installed before the container
+
+The first Vault ran as a system service. It was stopped and disabled on 2026-11-19, and nothing was deleted: its data stays
+in `/opt/vault/data`, with an archive in `/var/backups/vault-native-20261119.tgz`. It needs its own unseal keys, held by the
+repo owner. Delete both once nobody needs them.
 
 ## Notes
 

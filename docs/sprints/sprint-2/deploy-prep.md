@@ -5,56 +5,46 @@ Tickets MLink-168 to MLink-173 (YouTrack, assigned to Mohamed, subtasks of MLink
 Background, design and test results: the section "Staging and production preparation" of `report.md`. Runbooks:
 `docs/operations/vault.md`, `docs/operations/servers.md`.
 
-## Hand-over for the next session (2026-11-19)
+## Hand-over for the next session (2026-11-19, night)
 
 **Read first:** this file, then `report.md` (Status + that section), then the two runbooks.
 
-**State of the branches**
+**What runs today**
 
-| Branch | State |
+| Host | State |
 |---|---|
-| `chore/vault-deploy` | MLink-168 (`b971baf`) and MLink-171 (`6a16ffd` red, `7d636ba` green) pushed. `master` merged after #125, #126 and #129 (`7b480ce`): `clean verify` and the reversed order 845/0; Vault, host and backup script tests pass. No PR yet: one PR for the branch once MLink-169 is in. |
-| `fix/db-hardening` (PR #126) | Merged into `master` on 2026-11-18. |
-| `chore/db-backup-restore` (PR #129) | Merged into `master` on 2026-11-18. |
-| PR #125 (a teammate's, V17) | Merged into `master` on 2026-11-18. |
+| vault `56.228.74.131` | Vault 1.21.0 in a container, initialised, unsealed, configured, secrets seeded for staging and prod. `https://56.228.74.131.sslip.io` |
+| frontend-medlink `56.228.94.12` | Dashboard live on HTTPS (image from `master` `72a61af`). `/api` answers 502 until blocker 1 is fixed |
+| api-medlink `13.50.114.144` | API, Keycloak and both databases healthy (image from `master` `0be7983`), `/readyz` 200 on the private address |
+| staging-server `13.51.30.39` | Prepared, Postgres only: the 8 GB disk cannot hold Keycloak (blocker 2) |
 
-**YouTrack** (checked 2026-11-19, no change by anyone else): MLink-171, 168, 164, 165 and 166 *À vérifier*;
-MLink-169, 170, 172, 173 *Ouvert*.
-MLink-171 shows a short "Doublon" in its history: a wrong click, corrected at once.
+**Blockers, in order**
 
-**Next steps, in order**
+1. **Repo owner, AWS console:** on the security group of `api-medlink` (`launch-wizard-1`), allow inbound TCP 8080 from `172.31.40.60/32`. Packets from the front host never reach the API host today (port 22 passes). Then `https://56.228.94.12.sslip.io/readyz` must answer 200.
+2. **Repo owner, AWS console:** enlarge the staging volume to 20 GB. Then `docs/operations/servers.md`, "Grow the staging disk", and deploy the API and the front to staging.
+3. **Mohamed:** type the Gmail app password (MLink-172). No mail leaves until then. On the vault host, from a terminal (`ssh -t`): `sudo sh -c 'VAULT_ADDR=http://127.0.0.1:8200 VAULT_TOKEN=$(cat /root/medlink-setup.token) sh /home/ubuntu/medlink-vault/seed-env.sh staging'`, the same with `prod`, then redeploy. The setup token expires 8 hours after 2026-11-19 00:00 UTC; afterwards make a new one with `vault operator generate-root`.
+4. **Mohamed:** the GitHub environment values, needed by CD (Claude Code's permission check refused uploading the private deploy key). From `code/api-MedLink`, in Git Bash:
+   ```sh
+   K="../../Docs/Server Keys/deploy-keys"
+   R=assali-mohamed-ali/api-MedLink
+   for e in staging production; do gh secret set DEPLOY_SSH_KEY -R $R --env $e < "$K/medlink-deploy-$e"; gh variable set DEPLOY_USER -R $R --env $e --body deploy; gh variable set DEPLOY_PATH -R $R --env $e --body /opt/medlink/api; done
+   gh variable set DEPLOY_HOST -R $R --env staging --body 13.51.30.39
+   gh variable set DEPLOY_HEALTH_URL -R $R --env staging --body https://13.51.30.39.sslip.io/readyz
+   gh variable set DEPLOY_HOST -R $R --env production --body 13.50.114.144
+   gh variable set DEPLOY_HEALTH_URL -R $R --env production --body https://56.228.94.12.sslip.io/readyz
+   ssh-keyscan -t ed25519 13.51.30.39 | gh secret set DEPLOY_KNOWN_HOSTS -R $R --env staging
+   ssh-keyscan -t ed25519 13.50.114.144 | gh secret set DEPLOY_KNOWN_HOSTS -R $R --env production
+   ```
+   Check each scanned key against the fingerprints in `servers.md`. The dashboard repository needs the same names with path `/opt/medlink/front`, health URL `.../healthz`, and host `56.228.94.12` for production.
+5. **Repo owner:** review and merge the PR of `chore/vault-deploy` and `medlink-dashboard` PR #20. The branch he created in the dashboard is `Prod`, but its workflow deploys from `prod` (names are case-sensitive).
 
-1. Before any full suite: free memory (Chrome, Edge, `wsl --shutdown`; about 3 GB free needed), start Docker Desktop.
-2. Done 2026-11-19: `chore/vault-deploy` merged with `master`, both test orders 845/0, pushed, MLink-171 to
-   *À vérifier*.
-3. **MLink-170** (front CD) in `medlink-dashboard`: move it to *En cours*; branch `chore/cd-deploy` from that repo's
-   default branch after reading its README/CLAUDE.md and branch rules. **The front already has CD**:
-   `container-security.yml` on its `master` builds, scans, signs, pushes to GHCR and deploys (staging on a push to
-   `staging`, production from `prod` or a `v*` tag). Extend it, no second workflow. To change: publish the container
-   on `127.0.0.1:8081` only (`deploy/docker-compose.frontend.yml` publishes it on every interface today). No Vault step:
-   `seed-env.sh` stores nothing for the front. The app already calls `/api` on its own origin. Red test, green,
-   actionlint, local image build.
-4. **MLink-169** (#126 is merged, nothing blocks it):
-   on `chore/vault-deploy`, after `git merge origin/master` if `master` moved:
-   - `cd.yml`: a `deploy-staging` job (master has none, only `deploy-prod`), environment `staging`;
-   - the action logs in to Vault (`hashicorp/vault-action`, method jwt, path `jwt-github`, role `api-<env>`), reads
-     `medlink/<env>/api`, writes `.env` (600) and `.backup.env` (only `BACKUP_PASSPHRASE`, read by the backup job)
-     on the host, user `deploy`, under `/opt/medlink/api`; `DEPLOY_ENV_FILE` goes away;
-   - non-secret settings per environment in the repository (URLs, ports, profile, `TRUSTED_PROXIES`: `127\.0\.0\.1`
-     on staging, `172\.31\.40\.60` in prod, mail host and account), not in Vault;
-   - copy `scripts/db-backup.sh` and `db-restore.sh` to the host;
-   - add `restart: unless-stopped` to the long-running services of `docker-compose.yml` (found missing);
-   - prod: API stack on api-medlink bound for the front host only; TLS ends on frontend-medlink.
-   Then open the PR for `chore/vault-deploy` (AI usage box ticked, review box left for Mohamed).
-5. After the repo owner's part (below): apply Vault on the host (`docs/operations/vault.md`, "First set-up"); Mohamed
-   types the Gmail app password himself at `seed-env.sh`'s hidden prompt; prepare each host with
-   `deploy/prepare-host.sh` (`docs/operations/servers.md`); first staging deploy and its checks (MLink-173), then prod.
+**Before production opens:** delete the dev users `staff.dev`, `practitioner.dev`, `patient.dev` from the production Keycloak (MLink-173), and split the five unseal keys between at least three people.
 
-**Waiting on the repo owner (assali-mohamed-ali, the only one with the AWS console and Vault's root token)**, message
-sent by Mohamed on 2026-11-18. His answers: #125, #126, #129 merged; no Elastic IPs for now; staging and api being resized,
-new IPs to come; unseal keys not assigned yet; one production branch name, `prod`. He proposes Terraform and GitHub Actions for everything from the EC2 hosts to the deploy (scope not agreed yet). Still open: a `medlink-setup` token (8 h, as a file); `staging` brought up
-to `master`, branch rules, GitHub environments `staging` and `production` in both repositories; an S3 bucket
-(versioned) for backups and Vault snapshots; the front's `Production` branch renamed `prod`.
+**Where the keys are (on Mohamed's machine only, never in git):** `Docs/Server Keys/vault-init-KEEP-PRIVATE.json` (the five unseal keys; the root token in it is already revoked) and `Docs/Server Keys/deploy-keys/`.
+
+**Shelved by the repo owner:** the S3 bucket, so backups and Vault snapshots stay on their hosts for now. Terraform waits for that bucket.
+
+**The first deploys were done by hand** over SSH with the deploy keys, with the same steps as `.github/actions/deploy-compose`, because CD runs only after the merge.
 
 ## Rules for this work
 

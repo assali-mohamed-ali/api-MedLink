@@ -48,6 +48,8 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-19:** Staging and production preparation applied on the hosts: Vault in a container, hosts prepared, production API and front running. Two AWS changes by the repo owner are still needed (security group, staging disk). No migration, no endpoint, no Java change. See [deploy-prep.md](deploy-prep.md).
+
 **2026-11-18:** Staging and production preparation (MLink-168 to MLink-173, Mohamed) on `chore/vault-deploy`:
 MLink-168 Vault as code and MLink-171 host preparation done, scripts and runbooks only (no migration, no endpoint, no
 Java change); `ci.yml` gains two steps. Nothing applied on the servers yet. See the section "Staging and production
@@ -306,12 +308,12 @@ RAM for API + Keycloak + two Postgres: staging and api to resize (t3.medium, 20 
 
 | Ticket | What | State |
 |---|---|---|
-| MLink-168 | Vault as code: `vault/` (policies, `setup.sh`, `seed-env.sh`, `install-host.sh`, `snapshot.sh`), runbook [vault.md](../../operations/vault.md) | pushed green, *To Verify*; to apply on the host with a setup token |
-| MLink-171 | Host preparation: `deploy/prepare-host.sh` (deploy user, restricted key, SSH keys only, security updates, Docker log rotation, daily backup job), runbook [servers.md](../../operations/servers.md) | pushed green, *To Verify*; to apply on the hosts |
-| MLink-169 | API deploy reads Vault; staging deploy job (master's `cd.yml` has none); prod split across api and front | to do (#126 merged) |
-| MLink-170 | Front deploy: extend the CD already in `medlink-dashboard` (`container-security.yml`), container on `127.0.0.1:8081` only | to do |
-| MLink-172 | Mail through the team Gmail account (SMTP, app password typed by its holder into `seed-env.sh`) | config ready; real test on staging |
-| MLink-173 | First staging deploy checked end to end, then production | after the repo owner's part |
+| MLink-168 | Vault as code: `vault/` (policies, `setup.sh`, `seed-env.sh`, `install-host.sh`, `snapshot.sh`), runbook [vault.md](../../operations/vault.md) | applied: Vault 1.21.0 in a container on the vault host, secrets seeded |
+| MLink-171 | Host preparation: `deploy/prepare-host.sh` (deploy user, restricted key, SSH keys only, security updates, Docker log rotation, daily backup job), runbook [servers.md](../../operations/servers.md) | applied on the staging, api and front hosts |
+| MLink-169 | API deploy reads Vault; staging deploy job (master's `cd.yml` has none); prod split across api and front | done on the branch; production API running; CD runs after the merge |
+| MLink-170 | Front deploy: extend the CD already in `medlink-dashboard` (`container-security.yml`), container on `127.0.0.1:8081` only | dashboard PR #20; production front running |
+| MLink-172 | Mail through the team Gmail account (SMTP, app password typed by its holder into `seed-env.sh`) | config ready; waits for the app password typed by its holder |
+| MLink-173 | First staging deploy checked end to end, then production | production up behind the security group; staging waits for a larger disk |
 
 - **Vault design.** KV v2 at `medlink/<staging|prod>/<api|front>`; GitHub Actions log in with their OIDC token
   (JWT auth at `jwt-github/`), one role per repository and environment bound to the `sub` claim

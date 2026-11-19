@@ -2,12 +2,12 @@
 
 MLink-171. Four EC2 instances in eu-north-1, Ubuntu 26.04, created by the repo owner. Only he has the AWS console.
 
-| Host | Role | Public IP (2026-11-18) | Private IP | Edge |
+| Host | Role | Elastic IP (2026-11-19) | Private IP | Edge |
 |---|---|---|---|---|
-| staging-server | `staging`: API, Keycloak, both databases and the front | 13.51.70.18 | 172.31.36.231 | Caddy `https://13.51.70.18.sslip.io`: `/api/*`, `/livez`, `/readyz` → 127.0.0.1:8080, the rest → 127.0.0.1:8081 |
-| api-medlink | `api`: production API, Keycloak, both databases | 16.171.194.155 | 172.31.33.183 | none; port 8080 open only to the front host's private IP |
-| frontend-medlink | `front`: production front and TLS edge | 51.20.3.234 | 172.31.40.60 | Caddy `https://51.20.3.234.sslip.io`: `/api/*` → 172.31.33.183:8080, the rest → 127.0.0.1:8081 |
-| vault | secrets (see [vault.md](vault.md)) | 13.48.56.245 | 172.31.44.172 | Caddy → Vault |
+| staging-server | `staging`: API, Keycloak, both databases and the front | 13.51.30.39 | 172.31.36.231 | Caddy `https://13.51.30.39.sslip.io`: `/api/*`, `/livez`, `/readyz` → 127.0.0.1:8080, the rest → 127.0.0.1:8081 |
+| api-medlink | `api`: production API, Keycloak, both databases | 13.50.114.144 | 172.31.33.183 | none; port 8080 open only to the front host's private IP |
+| frontend-medlink | `front`: production front and TLS edge | 56.228.94.12 | 172.31.40.60 | Caddy `https://56.228.94.12.sslip.io`: `/api/*` → 172.31.33.183:8080, the rest → 127.0.0.1:8081 |
+| vault | secrets (see [vault.md](vault.md)) | 56.228.74.131 | 172.31.44.172 | Caddy → Vault |
 
 Host keys seen at the first admin login (2026-11-18, ED25519). They stay the same when the IP changes; check them
 before trusting a host or filling `DEPLOY_KNOWN_HOSTS`:
@@ -19,8 +19,11 @@ before trusting a host or filling `DEPLOY_KNOWN_HOSTS`:
 | frontend-medlink | `SHA256:r+uqLOeCDdK63zwNMhBU4aoRQAyPwO5jenFmrXLeyyY` |
 | vault | `SHA256:5cbT/Vv58Nng9FJUy6/WY+v9kEL8GjwO8zsyqiYGqkA` |
 
-The public IPs change when an instance is stopped, unless Elastic IPs are attached: attach them before any stop or
-resize, then update this table, the Caddy names (`<ip>.sslip.io`) and the pinned host keys.
+The four addresses are Elastic IPs: they stay the same when an instance is stopped or resized.
+
+Sizes on 2026-11-19: staging-server m7i-flex.large (8 GB RAM) with an **8 GB disk**, api-medlink c7i-flex.large (4 GB RAM,
+60 GB disk), frontend-medlink and vault t3.micro (8 GB disks). The staging disk is too small for the stack: see "Grow the
+staging disk" below.
 
 ## Who logs in, and how
 
@@ -81,10 +84,19 @@ rotated weekly. Still to do: the off-host copy (an S3 bucket from the repo owner
 Make a new key (step 1), run `prepare-host.sh` again with the new `.pub`: it replaces the old key, which stops working
 at once. Then the repo owner updates `DEPLOY_SSH_KEY`.
 
+## Grow the staging disk
+
+The stack needs about 3 GB of images and the staging disk has 8 GB in all. After the repo owner enlarges the volume to
+20 GB in the AWS console, on the host:
+
+```sh
+sudo growpart /dev/nvme0n1 1 && sudo resize2fs /dev/nvme0n1p1 && df -h /
+```
+
+Then deploy again.
+
 ## Notes
 
-- Updates do not reboot the host. When `/var/run/reboot-required` exists, reboot in a quiet moment. **Today the
-  containers do not come back on their own after a reboot**: `docker-compose.yml` has no `restart:` policy (to add
-  with the deploy changes, MLink-169); until then, run the deploy again or `docker compose up -d` in
-  `/opt/medlink/api`. Never reboot the vault host without someone able to unseal it.
+- Updates do not reboot the host. When `/var/run/reboot-required` exists, reboot in a quiet moment. The containers come
+  back on their own (`deploy/docker-compose.server.yml`). Never reboot the vault host without someone able to unseal it.
 - Test: `bash deploy/test/prepare-host.test.sh` (Docker; about three minutes). It runs in CI.
