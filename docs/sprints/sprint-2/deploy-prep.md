@@ -21,7 +21,7 @@ Vault configuration and diagnostics over SSH are fine). Never handle a password,
 |---|---|
 | Production (api-medlink `13.50.114.144` + frontend-medlink `56.228.94.12`) | Works end to end: dashboard, API through the front (`/readyz` 200), Gmail mail (account `medlinq2026@gmail.com`). Images `medlink-api:0be7983`, `medlink-front:72a61af`, deployed by hand on 2026-11-19 (before the workflow-only rule) |
 | Staging (`13.51.30.39`, disk 40 GB) | Dashboard live, Postgres up; API and Keycloak not deployed: CD will do it on the first push to `staging` |
-| Vault (`56.228.74.131`) | Unsealed, secrets seeded. Live roles are still #130's (`sub` only); #133's stricter roles apply when `setup.sh` runs again (step 2 below) |
+| Vault (`56.228.74.131`) | Unsealed, secrets seeded. **#133's roles applied live on 2026-11-20** (bound to the deploy workflow, refs and push/dispatch; read back OK); setup token revoked, no root token. Until #133 merges, do not run `master`'s `setup.sh` (it would write the looser `sub`-only roles back) |
 | First admin (production) | Invited on Mohamed's school address (no password; API activation mail). The dashboard's `/activer-compte` is a placeholder, so activation uses `Docs/Deployment/activate-account.sh` with the newest mail (17:23 UTC, valid to 2026-11-20 17:23 UTC; a new one: `POST /api/auth/account/activate/resend`) |
 | Specialties | None in staging or production (only the dev seed has them): an admin cannot create a practitioner yet |
 
@@ -44,7 +44,7 @@ YouTrack: MLink-168, 169, 170, 171 *À vérifier*; 172, 173 *En cours*; comments
 ### Next, in order
 
 1. **Check and sync** (above). If #133 is merged, merge `master` into the working branch first.
-2. **Vault** (needs Mohamed's setup token; the permission check refuses Claude reading the unseal keys). Mohamed runs,
+2. **Vault: DONE 2026-11-20** (setup token by Mohamed, `setup.sh` from this branch run from `~/medlink-vault-pr133` on the host, roles checked, token revoked and shredded; `seed-front.sh` skipped). Kept for the next time: (needs Mohamed's setup token; the permission check refuses Claude reading the unseal keys). Mohamed runs,
    from Git Bash, `Docs/Deployment/new-setup-token.sh` fed with three unseal keys (the exact one-liner is in the chat
    of 2026-11-19; by hand: `generate-root` steps in `vault.md`). It writes a 3-hour `/root/medlink-setup.token` and
    revokes the root token. Then: copy `vault/` to the host, `setup.sh` (new roles), check one role with
