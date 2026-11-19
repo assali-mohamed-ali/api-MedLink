@@ -179,11 +179,11 @@ reason before changing one; the dated decisions are in the
 | Per-IP rate limits counted in Postgres | Shared by every instance and race-free with the database we already run | Redis; an in-memory map (one instance, racy) |
 | Separate `keycloak-db` container + volume | Identity data isolated from business data: separate credentials, backups, upgrades | One shared Postgres |
 | `users.id` = Keycloak id; one role per person | One id per person, no mapping table; a person is a patient or a practitioner or staff | Our own id + `keycloak_id`; several profiles per login |
-| Audit trail append-only in the database | "Not changed or deleted from the application" must hold for raw SQL too | A save-and-read-only repository only (the owner role limit is GitHub #57) |
+| Audit trail append-only in the database | "Not changed or deleted from the application" must hold for raw SQL too | A save-and-read-only repository only. Since GitHub #57 the API connects as `medlink_app`, which may only insert and read the trail; Flyway alone runs as the owner |
 | Explicit OIDC endpoints, not `issuer-uri` | The API starts even when Keycloak is down (tests, CI, DAST) | Discovery makes Keycloak a hard startup dependency |
 | 401 and 403 as JSON, never a redirect | React needs a code, not an HTML login page | Spring's redirect or empty 401 |
 | Flyway owns the schema, `ddl-auto: validate` | Schema changes are reviewed as code | `ddl-auto: update` silently changes production tables |
-| Profiles `dev` / `staging` / `prod`, secrets from env only | The same image runs everywhere; a missing Keycloak secret stops startup outside dev | Defaults baked into config (the datasource still has some: GitHub #64) |
+| Profiles `dev` / `staging` / `prod`, secrets from env only | The same image runs everywhere; a missing Keycloak secret or database credential stops startup outside dev | Defaults baked into config |
 | Pinned versions (Java 17, image tags) | Reproducible builds; Dependabot proposes bumps as reviewable PRs | `latest` tags change under your feet |
 | Functional tests against real Keycloak, Postgres, Mailpit (Testcontainers) | Prove behaviour end to end over HTTP, like a browser | Mocked Keycloak; H2 in-memory |
 | Non-root container user + healthcheck | Least privilege at runtime; orchestrators restart an unhealthy app | |
@@ -284,7 +284,11 @@ flowchart LR
 - Keep PR/check-required protections on `staging` and `prod`. In this PAT-based full-automation design, don't require reviewers on those branches or on the production environment: that would block the bot's `staging -> prod` promotion and `prod -> staging` version-sync PRs. All configured CI/security checks must still pass before merge. If review requirements must stay enforced, use a dedicated GitHub App with narrowly scoped ruleset bypass for automation PRs.
 - **One-time migration warning:** the current `master`, `staging`, and `prod` branches have different/diverged history. This design is not active on staging/prod until workflows and release configuration are carried over by deliberately reviewed PRs and branch baselines are reconciled. Keep repository variable `ENABLE_AUTO_PROMOTION` false until then; do not merge the historical branch differences blindly.
 - **Secrets never enter git.** `.env*` files are ignored except `*.example` templates.
-- **Fail fast:** Keycloak client secrets have no default outside dev, so a missing secret stops startup. Datasource credentials still have defaults (GitHub #64).
+- **Fail fast:** Keycloak client secrets and database credentials have no default outside dev, so a missing secret stops startup. In staging and prod, `config/DatabaseCredentialsCheck` also refuses the dev values and the examples' placeholders (`myuser`, `secret`, `change-me...`) before Flyway connects, and `docker-compose.yml` requires `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` (GitHub #64).
+- **Least privilege in the database (GitHub #57):** two roles. Flyway migrates as the schema owner
+  (`SPRING_FLYWAY_USER`); the API connects as `medlink_app` (`docker/postgres/initdb/10-app-role.sh`, grants in
+  `V18__app_role_grants.sql`): data in and out, no schema change, only `INSERT` and `SELECT` on `audit_entries`.
+  Staging and prod refuse to start when both are the same user. The tests run as `medlink_app` too.
 
 ## ISO/IEC 27001:2022 mapping
 
@@ -305,7 +309,7 @@ treatment, Statement of Applicability, policies, awareness, internal audit, mana
 | 8.8 Management of technical vulnerabilities | Dependabot; Dependency-Check, Trivy and CodeQL blocking; private disclosure | `.github/dependabot.yml`, workflows, `SECURITY.md` | Covered | |
 | 8.9 Configuration management | Infrastructure and config as code; pinned versions; checkov and Trivy config scans; compose files kept alike by a test | `docker/`, compose files, `terraform/`, `ComposeFilesTest` | Covered | |
 | 8.12 Data leakage prevention | gitleaks before commit, in CI and daily; tokens never in the browser; no body or token in logs; audit paths redacted | `security/.gitleaks.toml`, `secrets-scan.yml`, `security/RouteWords.java` | Covered | |
-| 8.13 Information backup | Named volumes `pgdata` and `keycloak-db-data` | compose files | Gap | Backup and tested restore for both databases (GitHub #67) |
+| 8.13 Information backup | Daily encrypted backup of both databases (gpg AES-256), checked after writing; all-or-nothing restore; restore drill recorded; 7 daily + 4 weekly kept off the host | `scripts/db-backup.sh`, `scripts/db-restore.sh`, [backup and restore runbook](operations/backup-restore.md) | Covered | RPO 24 h (no WAL archiving); the cron job and the off-host copy are set up on the server |
 | 8.15 Logging | Append-only audit trail of refusals; Keycloak login and admin events (30 days); per-profile application logs | `V7__audit_entries.sql`, `AuditService`, realm events | Partial | Logins and account operations in the trail (MLink-114, MLink-72); central log store |
 | 8.16 Monitoring activities | Prometheus metrics; 4 alert rules | `monitoring/` | Gap | Route alerts: Alertmanager has no target |
 | 8.24 Use of cryptography | Tokens signed by Keycloak, checked via JWKS with issuer and `azp`; email tokens stored as SHA-256 hashes | `KeycloakLoginClient`, `V5__email_tokens.sql` | Partial | Document TLS and encryption at rest for both databases |
@@ -327,11 +331,11 @@ The prioritised list, with the threat behind each item, is in
 
 - [x] Second factor for practitioners and staff (MLink-62/63)
 - [ ] MFA for admin identities (GitHub #68)
-- [ ] No default database credentials outside dev (GitHub #64)
+- [x] No default database credentials outside dev (GitHub #64)
 - [x] API docs (Scalar `/scalar`, `/v3/api-docs`) not public in production (GitHub #65)
-- [ ] Separate database roles for the audit trail (GitHub #57)
+- [x] Separate database roles for the audit trail (GitHub #57)
 - [ ] Logins and account operations in the audit trail (MLink-114, MLink-72)
-- [ ] Backup and tested restore of both databases (GitHub #67)
+- [x] Backup and tested restore of both databases (GitHub #67, [runbook](operations/backup-restore.md))
 - [ ] CD rollout and Keycloak/`keycloak-db` in the deployment (GitHub #47); Terraform variables and container environment aligned with the production profile (GitHub #53)
 - [ ] Reverse proxy: TLS, HSTS, CSP, `TRUSTED_PROXIES`, Keycloak not public
 - [ ] Alert routing and a central log store; shared sessions before a second API instance

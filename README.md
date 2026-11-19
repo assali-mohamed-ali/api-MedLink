@@ -309,6 +309,11 @@ Volumes: `pgdata` (app database) and `keycloak-db-data` (Keycloak).
 
 After checking out a branch with other migrations, re-run with `-Reset` if Flyway refuses to start.
 
+Database roles (GitHub #57): Flyway migrates as the owner (`myuser` / `POSTGRES_USER`), the API connects as
+`medlink_app` (`APP_DB_PASSWORD`, added to `.env` by the script). A volume made before #57 gets the role from the
+script on the next run, so no `-Reset` is needed. In setup A the API on the host still connects as the owner (Spring
+Boot's compose integration); setup B, the tests and the servers use `medlink_app`.
+
 </details>
 
 <details>
