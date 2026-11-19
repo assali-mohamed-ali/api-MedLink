@@ -87,9 +87,9 @@ EOF
     say "role $name: repo:$OWNER/$repo:environment:$env, $workflow on $* -> $policy (read-only, 10 min)"
 }
 role api-staging      api-MedLink       staging    medlink-staging-api   cd.yml refs/heads/staging refs/heads/master refs/heads/main
-role api-production   api-MedLink       production medlink-prod-api      cd.yml 'refs/tags/v*'
+role api-production   api-MedLink       production medlink-prod-api      cd.yml refs/heads/staging 'refs/tags/v*'
 role front-staging    medlink-dashboard staging    medlink-staging-front container-security.yml refs/heads/staging refs/heads/master refs/heads/main
-role front-production medlink-dashboard production medlink-prod-front    container-security.yml refs/heads/prod 'refs/tags/v*'
+role front-production medlink-dashboard production medlink-prod-front    container-security.yml refs/heads/staging refs/heads/prod 'refs/tags/v*'
 
 # 4. Audit log: every request recorded, secret values only as HMACs
 if vault audit list 2> /dev/null | grep -q '^file/ '; then

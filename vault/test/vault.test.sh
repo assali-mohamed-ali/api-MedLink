@@ -140,7 +140,7 @@ refused "a pull_request_target job on the staging branch" api-staging \
     "$(jwt "$API:environment:staging" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/staging pull_request_target)")"
 refused "the CD workflow from a feature branch" api-staging \
     "$(jwt "$API:environment:staging" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/feat/x workflow_dispatch)")"
-refused "production from a branch instead of a v* tag" api-production \
+refused "production from master (only the staging run or a v* tag)" api-production \
     "$(jwt "$API:environment:production" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/master workflow_dispatch)")"
 refused "a token without the workflow claims" api-staging "$(jwt "$API:environment:staging" "$AUD" 300)"
 refused "another dashboard workflow in production" front-production \
