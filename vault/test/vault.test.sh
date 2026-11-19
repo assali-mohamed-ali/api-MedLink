@@ -147,6 +147,11 @@ refused "another dashboard workflow in production" front-production \
     "$(jwt "$FRONT:environment:production" "$AUD" 300 "$(claims medlink-dashboard ci.yml refs/heads/prod push)")"
 accepted "a manual staging deploy from master" api-staging \
     "$(jwt "$API:environment:staging" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/master workflow_dispatch)")"
+# Automatic production deploys run from the verified staging run (deploy-prod-from-staging, PR #132)
+accepted "the API production deploy from the verified staging run" api-production \
+    "$(jwt "$API:environment:production" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/staging push)")"
+accepted "the dashboard production deploy from the verified staging run" front-production \
+    "$(jwt "$FRONT:environment:production" "$AUD" 300 "$(claims medlink-dashboard container-security.yml refs/heads/staging push)")"
 accepted "a dashboard release tag in production" front-production \
     "$(jwt "$FRONT:environment:production" "$AUD" 300 "$(claims medlink-dashboard container-security.yml refs/tags/v1.0.0 push)")"
 
