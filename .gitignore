@@ -51,3 +51,7 @@ terraform/*.tfplan
 dependency-check-report.*
 trivy-*.sarif
 app.log
+# Database backups (GitHub #67): never committed, kept off the host
+*.dump
+*.dump.gpg
+*.dump.gpg.part
