@@ -220,8 +220,8 @@ class AppointmentSchemaTest {
 
     /**
      * V19 (MLink-174) holds the reference specialties, in every environment: a practitioner needs one and no endpoint
-     * creates a specialty, so without them an admin could not create a practitioner in staging or production. Same ids
-     * as the dev seed, which skips them.
+     * creates a specialty, so without them an admin could not create a practitioner in staging or production. The first
+     * three keep the dev seed's ids, so the dev seed skips them.
      */
     @Test
     void outsideTheDevProfileTheReferenceSpecialtiesExistWithTheDevSeedIds() {
