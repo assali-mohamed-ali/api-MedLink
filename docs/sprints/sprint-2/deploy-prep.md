@@ -38,8 +38,11 @@ A. **Mohamed, a Vault setup token** (the last one expired at 08:00 UTC; Claude C
    Then Claude: run `vault/setup.sh` again (new roles), deploy the API and Keycloak to staging, a real signup on staging
    with its verification mail (MLink-172), end-to-end checks of both environments (MLink-173), revoke the setup token.
 B. **Mohamed, GitHub environment values**: the commands in item 4 below.
-B2. **First admin of the app (production):** there is no admin in production except the dev user `staff.dev` (to be
-   deleted). `Docs/Deployment/create-admin.sh` (Mohamed's machine, not in git) creates one in Keycloak through the API's
+B2. **First admin of the app (production): invited 2026-11-19** with `Docs/Deployment/invite-admin.sh` (Mohamed's
+   school address, group `/administrative-staff`, no password): the API mailed its own 24-hour activation link (the
+   person sets the first password in the app, then the staff code). The script does what the admin screen does
+   (Keycloak account + users row) and asks `POST /api/auth/account/activate/resend` to send the mail. Before it, there
+   was no admin in production except the dev user `staff.dev` (to be deleted). `Docs/Deployment/create-admin.sh` (Mohamed's machine, not in git) creates one in Keycloak through the API's
    own service account `medlink-admin`: group `/administrative-staff`, email verified, a temporary password typed by
    the person at a hidden prompt. At the first login the app makes them choose a password, then set up the staff code;
    the API creates the database row then (GitHub #29). `--check <email>` tests the connection and creates nothing
