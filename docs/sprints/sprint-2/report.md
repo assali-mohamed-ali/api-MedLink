@@ -296,6 +296,20 @@ number: a database that already applied V9 makes Flyway refuse a V8 that arrives
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
 
+## MLink-174 — reference specialties in every environment (2026-11-19, feat/MLink-174-specialties)
+
+- Found while preparing production: staging and production had no specialty (only the dev seed inserts them), and a
+  practitioner needs one (`specialty_id NOT NULL`), so an admin could not create a practitioner there.
+- `V19__specialties_reference_data.sql`, like V15 for the clinics: 15 usual consultation specialties (Médecine
+  générale, Cardiologie, Pédiatrie, Dermatologie, Gynécologie-obstétrique, Ophtalmologie, ORL, Neurologie, Pneumologie,
+  Gastro-entérologie, Endocrinologie, Rhumatologie, Psychiatrie, Urologie, Néphrologie) with `ON CONFLICT DO NOTHING`.
+  The first three keep the dev seed's ids, so the dev seed skips them. Mohamed had no official list (2026-11-20): this
+  one is a proposal; a change goes in a new migration (no endpoint creates a specialty).
+- Test: `AppointmentSchemaTest.outsideTheDevProfileTheReferenceSpecialtiesExistWithTheDevSeedIds` (red commit first).
+  Existing tests insert specialties with their own suffixed names and check `/api/slots/filters` with `contains`, so
+  the new rows do not disturb them. One exception: `DevSeedTest.theThreeSpecialtiesAreSeeded` expected exactly the
+  seed's three; it now checks they are among the specialties (`containsAll`), since V19 adds the others everywhere.
+
 ## Staging and production preparation — MLink-168 to MLink-173 (2026-11-18, chore/vault-deploy)
 
 The repo owner created four EC2 hosts (staging, production API, production front, Vault; Ubuntu 26.04, t3.micro)
