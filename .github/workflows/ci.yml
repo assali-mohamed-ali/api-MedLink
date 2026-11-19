@@ -37,6 +37,10 @@ jobs:
       - name: Test the host preparation script
         run: bash deploy/test/prepare-host.test.sh
 
+      # MLink-169: the server .env comes from Vault, and only the API publishes a port on a server.
+      - name: Test the server deploy files
+        run: bash deploy/test/render-env.test.sh
+
       # GitHub #67: backup and restore refuse unsafe use, encrypt, never leak the passphrase (offline, real gpg).
       - name: Test the database backup and restore scripts
         run: bash scripts/db-backup.test.sh

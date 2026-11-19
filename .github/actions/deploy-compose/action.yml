@@ -1,5 +1,5 @@
 name: Deploy the compose stack over SSH
-description: Pull an immutable image on a Docker host and roll out the API service.
+description: Read the secrets from Vault, pull an immutable image on a Docker host and roll out the API service.
 
 inputs:
   host:
@@ -20,8 +20,17 @@ inputs:
   known_hosts:
     description: Pinned SSH host key(s) for the target
     required: true
-  env_file:
-    description: Full staging or production .env content (secrets included)
+  settings_file:
+    description: Non-secret settings of the environment, in this repository (deploy/env/<environment>.env)
+    required: true
+  vault_addr:
+    description: Address of Vault
+    required: true
+  vault_role:
+    description: Vault role of this repository and GitHub environment (api-staging or api-production)
+    required: true
+  vault_path:
+    description: Secrets path under the medlink/ engine (staging/api or prod/api)
     required: true
   image:
     description: Immutable image reference (repository@sha256:digest)
@@ -42,17 +51,48 @@ runs:
         DEPLOY_HEALTH_URL: ${{ inputs.health_url }}
         DEPLOY_SSH_KEY: ${{ inputs.ssh_key }}
         DEPLOY_KNOWN_HOSTS: ${{ inputs.known_hosts }}
-        DEPLOY_ENV_FILE: ${{ inputs.env_file }}
+        DEPLOY_SETTINGS_FILE: ${{ inputs.settings_file }}
+        VAULT_ADDR: ${{ inputs.vault_addr }}
+        VAULT_ROLE: ${{ inputs.vault_role }}
+        VAULT_SECRET_PATH: ${{ inputs.vault_path }}
         DEPLOY_IMAGE: ${{ inputs.image }}
         GHCR_TOKEN: ${{ inputs.ghcr_token }}
       run: |
-        for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_HEALTH_URL \
-          DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS DEPLOY_ENV_FILE DEPLOY_IMAGE GHCR_TOKEN; do
+        for name in DEPLOY_HOST DEPLOY_USER DEPLOY_PATH DEPLOY_HEALTH_URL DEPLOY_SSH_KEY DEPLOY_KNOWN_HOSTS \
+          DEPLOY_SETTINGS_FILE VAULT_ADDR VAULT_ROLE VAULT_SECRET_PATH DEPLOY_IMAGE GHCR_TOKEN; do
           if [ -z "${!name}" ]; then
             echo "::error::$name is not set. Define it in the GitHub Environment."
             exit 1
           fi
         done
+        test -f "$DEPLOY_SETTINGS_FILE"
+
+    - name: Read the secrets from Vault
+      shell: bash
+      env:
+        VAULT_ADDR: ${{ inputs.vault_addr }}
+        VAULT_ROLE: ${{ inputs.vault_role }}
+        VAULT_SECRET_PATH: ${{ inputs.vault_path }}
+        DEPLOY_SETTINGS_FILE: ${{ inputs.settings_file }}
+        DEPLOY_IMAGE: ${{ inputs.image }}
+      run: |
+        set -euo pipefail
+        umask 077
+        # GitHub's OIDC token for this job, valid only for this repository and GitHub environment
+        jwt="$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=medlink-vault" | jq -r .value)"
+        echo "::add-mask::$jwt"
+        token="$(jq -n --arg jwt "$jwt" --arg role "$VAULT_ROLE" '{jwt: $jwt, role: $role}' |
+          curl -fsS -X POST --data @- "$VAULT_ADDR/v1/auth/jwt-github/login" | jq -r .auth.client_token)"
+        echo "::add-mask::$token"
+        curl -fsS -H "X-Vault-Token: $token" "$VAULT_ADDR/v1/medlink/data/$VAULT_SECRET_PATH" |
+          jq .data.data > "$RUNNER_TEMP/secrets.json"
+        curl -fsS -X POST -H "X-Vault-Token: $token" "$VAULT_ADDR/v1/auth/token/revoke-self" > /dev/null
+        jq -r '.[]' "$RUNNER_TEMP/secrets.json" | while IFS= read -r value; do echo "::add-mask::$value"; done
+        python3 deploy/render-env.py env "$DEPLOY_SETTINGS_FILE" < "$RUNNER_TEMP/secrets.json" > "$RUNNER_TEMP/deploy.env"
+        python3 deploy/render-env.py backup < "$RUNNER_TEMP/secrets.json" > "$RUNNER_TEMP/backup.env"
+        rm -f "$RUNNER_TEMP/secrets.json"
+        printf "APP_IMAGE='%s'\n" "$DEPLOY_IMAGE" >> "$RUNNER_TEMP/deploy.env"
 
     - name: Configure SSH
       shell: bash
@@ -66,43 +106,29 @@ runs:
         printf '%s\n' "$DEPLOY_KNOWN_HOSTS" > "$HOME/.ssh/known_hosts"
         chmod 644 "$HOME/.ssh/known_hosts"
 
-    - name: Copy the compose file, realm, database role script and monitoring config
+    - name: Copy the compose files, realm, database scripts and environment files
       shell: bash
       env:
         DEPLOY_HOST: ${{ inputs.host }}
         DEPLOY_USER: ${{ inputs.user }}
         DEPLOY_PATH: ${{ inputs.path }}
       run: |
+        set -euo pipefail
         SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i "$HOME/.ssh/deploy_key")
         ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
-          "mkdir -p '$DEPLOY_PATH/keycloak' '$DEPLOY_PATH/docker/postgres/initdb' '$DEPLOY_PATH/monitoring/prometheus' '$DEPLOY_PATH/monitoring/alerts'"
+          "mkdir -p '$DEPLOY_PATH/keycloak' '$DEPLOY_PATH/docker/postgres/initdb' '$DEPLOY_PATH/monitoring/prometheus' '$DEPLOY_PATH/monitoring/alerts' '$DEPLOY_PATH/scripts'"
         scp -q "${SSH_OPTS[@]}" docker-compose.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.yml"
+        scp -q "${SSH_OPTS[@]}" deploy/docker-compose.server.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker-compose.server.yml"
         # -p keeps the executable mode: Postgres's entrypoint sources a non-executable *.sh into its own shell (GitHub #57)
         scp -q -p "${SSH_OPTS[@]}" docker/postgres/initdb/10-app-role.sh "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/docker/postgres/initdb/10-app-role.sh"
+        scp -q -p "${SSH_OPTS[@]}" scripts/db-backup.sh scripts/db-restore.sh "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/scripts/"
         scp -q "${SSH_OPTS[@]}" keycloak/realm-medlink.json "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/keycloak/realm-medlink.json"
         scp -q "${SSH_OPTS[@]}" monitoring/prometheus/prometheus.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/prometheus/prometheus.yml"
         scp -q "${SSH_OPTS[@]}" monitoring/alerts/alert-rules.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/alerts/alert-rules.yml"
-
-    - name: Write the environment file
-      shell: bash
-      env:
-        DEPLOY_HOST: ${{ inputs.host }}
-        DEPLOY_USER: ${{ inputs.user }}
-        DEPLOY_PATH: ${{ inputs.path }}
-        DEPLOY_ENV_FILE: ${{ inputs.env_file }}
-        DEPLOY_IMAGE: ${{ inputs.image }}
-      run: |
-        umask 077
-        printf '%s\n' "$DEPLOY_ENV_FILE" > "$RUNNER_TEMP/deploy.env"
-        grep -q '^SPRING_PROFILES_ACTIVE=' "$RUNNER_TEMP/deploy.env" || {
-          echo "::error::DEPLOY_ENV_FILE must define SPRING_PROFILES_ACTIVE."
-          exit 1
-        }
-        printf 'APP_IMAGE=%s\n' "$DEPLOY_IMAGE" >> "$RUNNER_TEMP/deploy.env"
-        SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i "$HOME/.ssh/deploy_key")
-        scp -q "${SSH_OPTS[@]}" "$RUNNER_TEMP/deploy.env" "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/.env"
-        rm -f "$RUNNER_TEMP/deploy.env"
-        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "chmod 600 '$DEPLOY_PATH/.env'"
+        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "umask 077; cat > '$DEPLOY_PATH/.env'" < "$RUNNER_TEMP/deploy.env"
+        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "umask 077; cat > '$DEPLOY_PATH/.backup.env'" < "$RUNNER_TEMP/backup.env"
+        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "chmod 600 '$DEPLOY_PATH/.env' '$DEPLOY_PATH/.backup.env'"
+        rm -f "$RUNNER_TEMP/deploy.env" "$RUNNER_TEMP/backup.env"
 
     - name: Log in to GHCR on the target
       shell: bash
@@ -127,12 +153,13 @@ runs:
         ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" <<'REMOTE'
         set -euo pipefail
         cd "$1"
-        docker compose --env-file .env -f docker-compose.yml pull app
+        compose() { docker compose --env-file .env -f docker-compose.yml -f docker-compose.server.yml "$@"; }
+        compose pull app
         # The API connects as medlink_app (GitHub #57). The image creates that role only on an empty volume, so give it
         # its login (APP_DB_PASSWORD) on every deploy, before the API starts. The script is safe to run again.
-        docker compose --env-file .env -f docker-compose.yml up -d --wait postgres
-        docker compose --env-file .env -f docker-compose.yml exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh
-        docker compose --env-file .env -f docker-compose.yml up -d --no-build --remove-orphans app
+        compose up -d --wait postgres
+        compose exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh
+        compose up -d --no-build --remove-orphans app
         REMOTE
 
     - name: Verify the running image digest
@@ -147,7 +174,7 @@ runs:
         running="$(ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" <<'REMOTE'
         set -euo pipefail
         cd "$1"
-        cid="$(docker compose --env-file .env -f docker-compose.yml ps -q app)"
+        cid="$(docker compose --env-file .env -f docker-compose.yml -f docker-compose.server.yml ps -q app)"
         test -n "$cid"
         docker inspect --format '{{.Config.Image}}' "$cid"
         REMOTE
@@ -187,5 +214,5 @@ runs:
         ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" bash -s -- "$DEPLOY_PATH" <<'REMOTE' || true
         set -u
         cd "$1"
-        docker compose --env-file .env -f docker-compose.yml logs --tail=200 app
+        docker compose --env-file .env -f docker-compose.yml -f docker-compose.server.yml logs --tail=200 app
         REMOTE
