@@ -3094,6 +3094,53 @@
           ]
         },
         {
+          "name": "GET /appointments/me → note the demo patient's booked times (MLink-167)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/appointments/me?size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "// A patient holds one appointment at a time (MLink-167): the bookings below pick slots that fit this agenda,",
+                  "// so the folder also runs again on a stack that keeps the demo patient's earlier appointments",
+                  "const booked = pm.response.json().items.filter((a) => a.status === \"BOOKED\").map((a) => [a.startsAt, a.endsAt]);",
+                  "pm.collectionVariables.set(\"myBusy\", JSON.stringify(booked));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots → keep the earliest free slot that fits the demo patient's agenda (MLink-167)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const busy = JSON.parse(pm.collectionVariables.get(\"myBusy\") || \"[]\");",
+                  "const fits = (s) => !busy.some(([from, to]) => new Date(s.startsAt) < new Date(to) && new Date(s.endsAt) > new Date(from));",
+                  "const slot = pm.response.json().items.find(fits);",
+                  "pm.test(\"a free slot that fits\", () => pm.expect(slot).to.be.an(\"object\"));",
+                  "pm.collectionVariables.set(\"bookSlotId\", slot.slotId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "GET /csrf → refresh XSRF-TOKEN before booking",
           "request": {
             "method": "GET",
@@ -3148,6 +3195,9 @@
                   "const body = pm.response.json();",
                   "pm.test(\"booked\", () => pm.expect(body.status).to.eql(\"BOOKED\"));",
                   "pm.collectionVariables.set(\"bookedAppointmentId\", body.id);",
+                  "pm.collectionVariables.set(\"overlapFrom\", body.startsAt);",
+                  "pm.collectionVariables.set(\"overlapTo\", body.endsAt);",
+                  "pm.collectionVariables.set(\"myBusy\", JSON.stringify(JSON.parse(pm.collectionVariables.get(\"myBusy\") || \"[]\").concat([[body.startsAt, body.endsAt]])));",
                   "pm.test(\"where, with whom and when\", () => pm.expect(body).to.have.all.keys(\"id\", \"status\", \"clinic\", \"practitioner\", \"startsAt\", \"endsAt\"));",
                   "pm.test(\"no email of the practitioner\", () => pm.expect(pm.response.text()).to.not.include(\"@\"));"
                 ]
@@ -3215,6 +3265,78 @@
           ]
         },
         {
+          "name": "GET /slots at the booked time → keep another free slot at that time (MLink-167)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{overlapFrom}}&to={{overlapTo}}&size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "// Another practitioner's slot at the same time, if the seed has one (the next request is skipped otherwise)",
+                  "const other = pm.response.json().items.find((s) => s.slotId !== pm.collectionVariables.get(\"bookSlotId\"));",
+                  "pm.collectionVariables.set(\"overlapSlotId\", other ? other.slotId : \"\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments at the same time elsewhere → 409 PATIENT_BUSY (MLink-167)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slotId\": \"{{overlapSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get(\"overlapSlotId\")) {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"PATIENT_BUSY\", () => pm.expect(pm.response.json().code).to.eql(\"PATIENT_BUSY\"));",
+                  "pm.test(\"a French message\", () => pm.expect(pm.response.json().message).to.eql(\"Vous avez déjà un rendez-vous à ce moment-là.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "GET /appointments/me → 200, the demo patient's appointments, latest first (MLink-108)",
           "request": {
             "method": "GET",
@@ -3243,7 +3365,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/slots?from={{cancelFrom}}&to={{cancelTo}}&size=1"
+            "url": "{{baseUrl}}/api/slots?from={{cancelFrom}}&to={{cancelTo}}&size=50"
           },
           "event": [
             {
@@ -3264,8 +3386,10 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
-                  "const first = pm.response.json().items[0];",
-                  "pm.test(\"a free slot two days ahead\", () => pm.expect(first).to.be.an(\"object\"));",
+                  "const busy = JSON.parse(pm.collectionVariables.get(\"myBusy\") || \"[]\");",
+                  "const fits = (s) => !busy.some(([from, to]) => new Date(s.startsAt) < new Date(to) && new Date(s.endsAt) > new Date(from));",
+                  "const first = pm.response.json().items.find(fits);",
+                  "pm.test(\"a free slot two days ahead that fits the agenda (MLink-167)\", () => pm.expect(first).to.be.an(\"object\"));",
                   "pm.collectionVariables.set(\"cancelSlotId\", first.slotId);"
                 ]
               }
@@ -3461,7 +3585,7 @@
           "request": {
             "method": "GET",
             "header": [],
-            "url": "{{baseUrl}}/api/slots?from={{cancelFrom}}&to={{cancelTo}}&size=2"
+            "url": "{{baseUrl}}/api/slots?from={{cancelFrom}}&to={{cancelTo}}&size=50"
           },
           "event": [
             {
@@ -3470,8 +3594,10 @@
                 "type": "text/javascript",
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
-                  "const items = pm.response.json().items;",
-                  "pm.test(\"two free slots\", () => pm.expect(items).to.have.lengthOf(2));",
+                  "const busy = JSON.parse(pm.collectionVariables.get(\"myBusy\") || \"[]\");",
+                  "const fits = (s) => !busy.some(([from, to]) => new Date(s.startsAt) < new Date(to) && new Date(s.endsAt) > new Date(from));",
+                  "const items = pm.response.json().items.filter(fits);",
+                  "pm.test(\"two free slots that fit the agenda (MLink-167)\", () => pm.expect(items.length).to.be.at.least(2));",
                   "pm.collectionVariables.set(\"moveFromSlotId\", items[0].slotId);",
                   "pm.collectionVariables.set(\"moveToSlotId\", items[1].slotId);"
                 ]
@@ -7261,6 +7387,10 @@
     { "key": "agendaSlotEnd", "value": "" },
     { "key": "randomSlotId", "value": "" },
     { "key": "randomPatientId", "value": "" },
-    { "key": "recordDeniedCode", "value": "" }
+    { "key": "recordDeniedCode", "value": "" },
+    { "key": "myBusy", "value": "" },
+    { "key": "overlapFrom", "value": "" },
+    { "key": "overlapTo", "value": "" },
+    { "key": "overlapSlotId", "value": "" }
   ]
 }
