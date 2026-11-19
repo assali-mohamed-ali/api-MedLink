@@ -1,6 +1,7 @@
 # Vault: the deploy secrets
 
-MLink-168. The staging and production deploys read their secrets from HashiCorp Vault, never from a GitHub secret.
+MLink-168. The API reads its application secrets from HashiCorp Vault. The dashboard reads its SSH deploy bundle
+from Vault too, falling back to the GitHub Environment secrets while Vault is unreachable or not seeded.
 Everything Vault holds for MedLink is configured from `vault/` in this repository.
 
 | Item | Value |
@@ -49,8 +50,14 @@ neither write nor list. `vault/test/vault.test.sh` proves each of these on a thr
    VAULT_TOKEN="$(cat medlink-setup.token)" sh medlink-vault/seed-env.sh staging
    VAULT_TOKEN="$(cat medlink-setup.token)" sh medlink-vault/seed-env.sh prod
    ```
-   The non-secret settings (URLs, ports, profiles, the mail account name) are in the repository with the deploy
-   (MLink-169), not in Vault.
+   The dashboard's SSH bundle comes from the deploy key files, once per environment:
+   ```sh
+   VAULT_TOKEN="$(cat medlink-setup.token)" sh medlink-vault/seed-front.sh staging ~/.ssh/medlink-front-deploy ~/.ssh/medlink-front-known_hosts
+   VAULT_TOKEN="$(cat medlink-setup.token)" sh medlink-vault/seed-front.sh prod ~/.ssh/medlink-front-deploy ~/.ssh/medlink-front-known_hosts
+   ```
+   Use the same files as `DEPLOY_SSH_KEY`/`DEPLOY_KNOWN_HOSTS`; until the path is seeded the workflow falls back
+   to those GitHub Environment secrets. The non-secret settings (URLs, ports, profiles, the mail account name) are in
+   the repository with the deploy (MLink-169), not in Vault.
 4. **Revoke the setup token** and delete its file: `VAULT_TOKEN="$(cat medlink-setup.token)" vault token revoke -self && shred -u medlink-setup.token`.
 
 ## After a reboot: unseal
@@ -64,6 +71,16 @@ VAULT_ADDR=http://127.0.0.1:8200 vault operator unseal      # asks for the key, 
 
 `vault status` shows `Sealed false` when done. Keep the five keys with five different people or password-manager
 vaults; never on the host, in git or in a chat.
+
+## The dashboard SSH bundle
+
+`seed-front.sh` base64-encodes two files into `medlink/<env>/front`: `ssh_private_key_b64` (the deploy private key)
+and `known_hosts_b64` (the pinned host keys). The `load-deploy-secrets` action decodes them for the deploy, then
+deletes the bundle with the runner. Like `seed-env.sh`, it only adds missing keys; it never overwrites one.
+
+When rotating the dashboard's deploy key, update the target's `authorized_keys` and both Vault environments in the
+same change, then remove `DEPLOY_SSH_KEY`/`DEPLOY_KNOWN_HOSTS` from the GitHub environments once the Vault path is known
+to work.
 
 ## Change a secret
 
@@ -82,6 +99,9 @@ Then redeploy. Some values are also stored elsewhere and must be changed there i
 | `APP_MFA_ENCRYPTION_KEY` | do not change casually: every enrolled staff code becomes unreadable (`docs/DEPLOYMENT.md`) |
 | `APP_REPORT_ENCRYPTION_KEY` | do not change: sealed reports would no longer open |
 | `BACKUP_PASSPHRASE` | keep the old one until the last backup made with it has expired (28 days) |
+
+The dashboard's `ssh_private_key_b64` and `known_hosts_b64` are changed the same way, with `vault kv patch
+medlink/<env>/front KEY=-`; update the target's `authorized_keys` in the same step.
 
 Every change is in the audit log; KV v2 keeps the previous versions (`vault kv rollback -version=<n>`).
 
