@@ -44,6 +44,8 @@ resource "docker_container" "app" {
     "SPRING_DATASOURCE_URL=${var.db_url}",
     "SPRING_DATASOURCE_USERNAME=${var.db_username}",
     "SPRING_DATASOURCE_PASSWORD=${var.db_password}",
+    "SPRING_FLYWAY_USER=${var.db_flyway_username}",
+    "SPRING_FLYWAY_PASSWORD=${var.db_flyway_password}",
     "KEYCLOAK_PUBLIC_URL=${var.keycloak_public_url}",
     "KEYCLOAK_INTERNAL_URL=${var.keycloak_internal_url}",
     "KEYCLOAK_REALM=${var.keycloak_realm}",

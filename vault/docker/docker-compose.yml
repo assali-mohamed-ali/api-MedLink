@@ -1,0 +1,19 @@
+# Vault in a container on the vault host (MLink-168). Runbook: docs/operations/vault.md.
+# Run from this directory, with the vault user's ids and the public address in .env:
+#   VAULT_UID, VAULT_GID (id -u vault, id -g vault) and VAULT_API_ADDR (https://<ip>.sslip.io)
+services:
+  vault:
+    image: hashicorp/vault:1.21.0
+    container_name: medlink-vault
+    restart: unless-stopped
+    user: '${VAULT_UID:?VAULT_UID must be set}:${VAULT_GID:?VAULT_GID must be set}'
+    entrypoint: ['vault', 'server', '-config=/vault/config/vault.hcl']
+    environment:
+      VAULT_API_ADDR: ${VAULT_API_ADDR:?VAULT_API_ADDR must be set}
+    ports:
+      # Caddy on the host is the only way in from outside
+      - '127.0.0.1:8200:8200'
+    volumes:
+      - ./vault.hcl:/vault/config/vault.hcl:ro
+      - /opt/vault-docker/data:/vault/file
+      - /var/log/vault:/var/log/vault

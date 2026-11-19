@@ -285,6 +285,7 @@ if (Test-Path '.env') {
     $content = $content -replace "`r`n", "`n"
     $generated = @{
         POSTGRES_PASSWORD       = New-Secret
+        APP_DB_PASSWORD         = New-Secret
         KEYCLOAK_DB_PASSWORD    = New-Secret
         KEYCLOAK_ADMIN_PASSWORD = New-Secret
         KC_BFF_CLIENT_SECRET    = New-Secret
@@ -313,7 +314,7 @@ foreach ($key in (Read-DotEnv '.env.example').Keys) {
 }
 if ($added) { Write-Ok "added to .env: $($added -join ', ')" }
 $envValues = Read-DotEnv '.env'
-foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KC_ADMIN_CLIENT_SECRET', 'APP_MFA_ENCRYPTION_KEY', 'APP_REPORT_ENCRYPTION_KEY', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD') {
+foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KC_ADMIN_CLIENT_SECRET', 'APP_MFA_ENCRYPTION_KEY', 'APP_REPORT_ENCRYPTION_KEY', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD', 'APP_DB_PASSWORD') {
     if (-not $envValues[$key] -or $envValues[$key] -like 'change-me*') {
         if ($FullStack) { Stop-Setup "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." }
     }
@@ -356,6 +357,14 @@ foreach ($port in $ports) {
 }
 if ($busy) { Stop-Setup ("Free these ports first:`n  " + ($busy -join "`n  ")) }
 Write-Ok "ports $($ports -join ', ') are free"
+
+# GitHub #57: the API's runtime role medlink_app. A new volume gets it from the init script; a volume made before
+# #57 (-KeepData) gets it here, from the same script, before the API starts. Safe to run again.
+Invoke-Native docker @('compose', '-f', $composeFile, 'up', '-d', '--wait', 'postgres')
+if (-not (Test-Quiet "docker compose -f $composeFile exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh")) {
+    Stop-Setup 'could not set up the database role medlink_app (docker/postgres/initdb/10-app-role.sh).'
+}
+Write-Ok 'database role medlink_app ready (the API runtime role)'
 
 if ($FullStack) {
     $kcAdminUser = $envValues['KEYCLOAK_ADMIN']; if (-not $kcAdminUser) { $kcAdminUser = 'admin' }

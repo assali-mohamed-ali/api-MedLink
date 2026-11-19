@@ -48,6 +48,40 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
+**2026-11-19:** Staging and production preparation applied on the hosts: Vault in a container, hosts prepared, production API and front running. Two AWS changes by the repo owner are still needed (security group, staging disk). No migration, no endpoint, no Java change. See [deploy-prep.md](deploy-prep.md).
+
+**2026-11-18:** Staging and production preparation (MLink-168 to MLink-173, Mohamed) on `chore/vault-deploy`:
+MLink-168 Vault as code and MLink-171 host preparation done, scripts and runbooks only (no migration, no endpoint, no
+Java change); `ci.yml` gains two steps. Nothing applied on the servers yet. See the section "Staging and production
+preparation".
+
+**2026-11-18:** MLink-166 (GitHub #67) on `chore/db-backup-restore`: encrypted backup and all-or-nothing restore of
+both databases, scripts and a runbook, restore drill done on the dev stack. No migration, no endpoint, no Java change.
+`ci.yml` gains one step. See the MLink-166 section.
+
+**2026-11-18:** MLink-37, code owner's review on #125 (2/2), after #120 (US-15) merged: `master` merged in (conflicts in `report.md` and `MailService`, both sides kept: the cancellation mail and the reminder mail). A real cancellation now creates the practitioner's alert: `AppointmentService.cancel()` calls `alerts.onAppointmentCancelled(appointment)` right after its `APPOINTMENT_CANCELLED` audit row, and `reschedule()` calls it for the old appointment after its `APPOINTMENT_RESCHEDULED` row (a move cancels the old one), both inside the change's transaction; the mail still leaves after the commit and never blocks it. Coordinated with Ela on #120. Tests, red first, through the real routes: the 37.8 story now books and cancels with `POST /api/appointments` and `POST /api/appointments/{id}/cancel` (no direct service call), `movingAnAppointmentWarnsThePractitionerOfTheOldSlotWithAMail`, `aCancelRefusedByTheDeadlineGivesNoAlert`, `cancellingTwiceGivesOneAlert`.
+
+**2026-11-17:** MLink-37, code owner's review on #125 (1/2): the alert list is bounded, since the bell polls it every minute and unread alerts are kept until read. `GET /api/practitioner/alerts` takes `page` (from 0) and `size` (20 by default, 50 at most), sorted newest first then by id, so alerts of the same instant are never repeated or skipped across pages; a page or size out of range (or not a number) is 400 `VALIDATION_FAILED` naming the parameter, as on `/api/admin/users`. The answer is still a JSON array: the front's bell is unchanged. Tests, red first: `theListIsPagedTwentyAtATimeByDefaultNewestFirst`, `alertsOfTheSameInstantArePagedInOneStableOrder`, `aPageSizeAboveFiftyOrAPageOutOfRangeIsRefusedNamingTheParameter`; Postman folder 12 gains size=50 (200) and size=51 (400). (2/2), the wiring into the real cancellation, waits for #120 (US-15) to merge first.
+
+**2026-11-17:** MLink-37, before the PR: `master` merged in (V16 then V17; conflicts only in this file and `AccessMatrixFunctionalTest`, both sides kept). Postman folder 12 "Cancellation alerts": a patient gets 403 on both routes, a disposable practitioner (code step included) gets 200 and an empty list (unread and `unread=false`), 403 for an alert that is not theirs or an id that is not a UUID, anonymous 401. An alert itself needs a cancelled appointment, which no endpoint creates yet (US-15): proven by `AlertFunctionalTest`, `AlertCreationTest`, `AlertMailFunctionalTest`.
+
+**2026-11-13:** MLink-37 37.8, the acceptance criteria and their tests. One end-to-end story, `AlertFunctionalTest.anAlertReceivedWhileLoggedOutIsThereAtTheNextLoginWithItsMailThenMarkedRead`: the practitioner logs out, the appointment is cancelled, (1) the alert row and the mail exist (read in Mailpit), (2) logged in again the alert is still listed unread, (3) once marked read it leaves the list, also after another login, (4) another practitioner neither sees it nor marks it (403). Details per criterion: `AlertCreationTest` (one alert, Tunis time, not twice, a failing mail never blocks), `AlertMailFunctionalTest` (the mail's content), the other `AlertFunctionalTest` cases (list shape, ownership, roles), `AlertSchemaTest` (table rules). The cancel route itself is US-15's (epic MLink-8): the story calls `AlertService.onAppointmentCancelled` as its cancel code will. `./mvnw -B verify` and the reversed class order green before the push.
+
+**2026-11-13:** MLink-37 37.4 (H-06): with its alert, the practitioner gets a mail "Un rendez-vous a été annulé" (`MailService.sendAppointmentCancelled`, French, plain text and HTML): the patient's name, the date and time in Tunis, the clinic and a link to the agenda; no medical content, no birth date or phone. It leaves after the commit (`TransactionSynchronization.afterCommit`), so never for a rolled-back cancellation, and never blocks it: a failure is logged by the alert id only (no address, no name) and the alert stays. No alert, no mail (not cancelled, already alerted). Tests: `AlertMailFunctionalTest` (the mail read in Mailpit), `AlertCreationTest` (a failing mail keeps the alert, throws nothing).
+
+**2026-11-13:** MLink-37 37.2: `AlertService.onAppointmentCancelled(appointment)` gives one `APPOINTMENT_CANCELLED` alert to the practitioner of the slot: "Rendez-vous annulé : <patient>, <jour date à HH:mm Tunis>, <clinic>." Nothing for an appointment that is not cancelled; one alert per cancellation (checked, and held by the V17 unique constraint), so a cancel processed twice changes nothing. It joins the caller's transaction: the cancellation and its alert are kept together. The cancel route is US-15's (`AppointmentService.cancel`, epic MLink-8, not merged): until then the method is tested directly (`AlertCreationTest`); its owner calls it after `slot.setStatus(FREE)` in `cancel()` (asked on their ticket, their file is not changed here).
+
+**2026-11-13:** MLink-37 37.3: `GET /api/practitioner/alerts?unread=true` (the default; `false` gives all) → the caller's alerts newest first, `{ id, type, message, appointmentId, createdAt }`, the contract the front's bell was built on (37.5); `POST /api/practitioner/alerts/{id}/read` → 204, harmless when repeated (the first reading time stays). Ownership: every query is scoped to the caller (`findByIdAndPractitionerId`), so another practitioner's alert, an unknown one and a malformed id get the same 403. `OwnershipGuard` is not used here on purpose: it lets staff through, and an alert's owner is only known by reading it; the URL rule `/api/practitioner/**` (#116) already keeps staff and patients out before anything is read. `Alert.createdAt` kept to the microsecond (as #123). Access matrix: two rows. `master` merged first (V15 now there, V16 still on #123).
+
+**2026-11-12:** MLink-37 37.1 (`feat/MLink-37-cancellation-alerts`): `V17__alerts.sql`, the practitioner's alerts, kept until read (H-06: an offline practitioner finds them at the next login). Columns of the ticket; `practitioner_id` references `practitioners` (= `users.id`, stricter than `users`: only a practitioner gets an alert); `type` checked (`APPOINTMENT_CANCELLED`); one alert per (type, appointment), so a cancellation processed twice gives one alert (37.2); partial index for the unread list. Entity `Alert`, `AlertType`, `AlertRepository` (unread newest first, own alert by id, already alerted). **V17 because V15 (#116, agenda) and V16 (MLink-32, reports) come first: this branch merges after both.**
+
+**2026-11-17:** MLink-165 (GitHub #57) on `fix/db-hardening`: two database roles. Flyway migrates as the owner
+(`POSTGRES_USER`), the API connects as `medlink_app`, which may only append to and read the audit trail and cannot
+change the schema. **Migration V18** (`V18__app_role_grants.sql`; V17 is MLink-37's, now present from `master`). **Every test now runs as
+`medlink_app`** (`TestcontainersConfiguration`, shared file): a new test that needs a privilege the API does not have
+will fail, as the API would. New env key `APP_DB_PASSWORD` (the setup scripts add it to `.env`); staging/prod also need
+`SPRING_FLYWAY_USER` / `SPRING_FLYWAY_PASSWORD`. No `-Reset` needed. No endpoint. See the MLink-165 section.
+
 **2026-11-17:** Code owner's review on #120, round 3: a cancel writes `APPOINTMENT_CANCELLED` and a move writes
 `APPOINTMENT_RESCHEDULED` (on the new appointment), each in its own transaction like a booking. `AuditAction` gains
 the two values (shared file, two lines). No migration, no new route. See the section "Review on #120".
@@ -102,6 +136,11 @@ makes `POST /api/appointments` PATIENT-only in the filter chain, so a malformed 
 **2026-11-10:** MLink-26, code owner's review on #116: `SecurityConfig` gains a role rule for `/api/practitioner/**` (the role is checked before Spring converts dates and JSON: 403, never 400, for a patient). Shared file: no other route changes. Also fixed: two overlapping slot openings at once could end in a 500 (Postgres deadlock), now 409. No migration, no new route.
 
 **2026-11-10:** MLink-26 (`feat/MLink-26-agenda`): `master` merged after #87 and #113, so the agenda migration is renumbered **V15** (`V15__agenda_reference_data.sql`; V14 is MLink-99's slot search index). Dev databases that ran the branch's old V14 need the setup script with `--reset` (`-Reset`) once. Conflicts kept both sides (`SlotRepository`, access matrix). New test: a closed slot cannot be booked. See the MLink-26 section.
+
+**2026-11-11:** MLink-164 (GitHub #64) on `fix/db-hardening`: staging and prod refuse to start without real database
+credentials, and `docker-compose.yml` requires `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`. No migration, no
+endpoint. **Before the next deploy:** the deploy secret (`DEPLOY_ENV_FILE`) must hold those three keys with real
+values. One PR with #57 (MLink-165, next). See the MLink-164 section.
 
 **2026-11-10:** MLink-31 (`feat/MLink-31-patient-record`): `GET /api/patients/{id}/record` for the practitioners the patient is attached to (a `BOOKED` appointment). No migration. **One new line in `AccessMatrixFunctionalTest`**, one new rule in `SecurityConfig`. See the MLink-31 section.
 
@@ -254,6 +293,160 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## Staging and production preparation — MLink-168 to MLink-173 (2026-11-18, chore/vault-deploy)
+
+The repo owner created four EC2 hosts (staging, production API, production front, Vault; Ubuntu 26.04, t3.micro)
+and gave Mohamed their launch keys to prepare the deploys of both repositories. Only the repo owner has the AWS
+console and Vault's root token. Hosts, roles and edges: [docs/operations/servers.md](../../operations/servers.md).
+**Plan and hand-over for the next session: [deploy-prep.md](deploy-prep.md).**
+
+Found on the hosts (read-only check, 2026-11-18): Vault 1.21.0 already initialised and unsealed behind Caddy (TLS via
+sslip.io), Caddy edges on staging and front, ufw active, Docker 29 on the app hosts, empty `/opt/medlink`, nothing
+running. **Too small for the API stack:** 908 MB of RAM and about 2 GB of free disk per host, against about 2.5 GB of
+RAM for API + Keycloak + two Postgres: staging and api to resize (t3.medium, 20 GB), after Elastic IPs.
+
+| Ticket | What | State |
+|---|---|---|
+| MLink-168 | Vault as code: `vault/` (policies, `setup.sh`, `seed-env.sh`, `install-host.sh`, `snapshot.sh`), runbook [vault.md](../../operations/vault.md) | applied: Vault 1.21.0 in a container on the vault host, secrets seeded |
+| MLink-171 | Host preparation: `deploy/prepare-host.sh` (deploy user, restricted key, SSH keys only, security updates, Docker log rotation, daily backup job), runbook [servers.md](../../operations/servers.md) | applied on the staging, api and front hosts |
+| MLink-169 | API deploy reads Vault; staging deploy job (master's `cd.yml` has none); prod split across api and front | done on the branch; production API running; CD runs after the merge |
+| MLink-170 | Front deploy: extend the CD already in `medlink-dashboard` (`container-security.yml`), container on `127.0.0.1:8081` only | dashboard PR #20; production front running |
+| MLink-172 | Mail through the team Gmail account (SMTP, app password typed by its holder into `seed-env.sh`) | config ready; waits for the app password typed by its holder |
+| MLink-173 | First staging deploy checked end to end, then production | production up behind the security group; staging waits for a larger disk |
+
+- **Vault design.** KV v2 at `medlink/<staging|prod>/<api|front>`; GitHub Actions log in with their OIDC token
+  (JWT auth at `jwt-github/`), one role per repository and environment bound to the `sub` claim
+  (`repo:assali-mohamed-ali/<repo>:environment:<env>`), audience `medlink-vault`, read-only on its own path,
+  10-minute tokens. The set-up runs with a short-lived `medlink-setup` token, never root; secrets are generated on the
+  vault host and never shown. Audit log (rotated) and daily raft snapshot.
+- **Tests.** `vault/test/vault.test.sh` (58 checks, throwaway Vault 1.21.0 + Ubuntu 26.04: each role reads only its
+  path; wrong repository, environment, audience, key, event or an expired token refused; no value in clear in the
+  audit log; seed never overwrites) and `deploy/test/prepare-host.test.sh` (46 checks on Ubuntu 26.04: refusals before
+  any change, users, modes, `sshd -t` and the effective settings, idempotence, key rotation, the front gets no backup
+  job). Both in CI. Each committed red then green; rules broken on purpose in a copy (3 for Vault, 3 for the hosts)
+  each turned a test red.
+- **Found on the way:** `docker-compose.yml` has no `restart:` policy, so containers do not come back after a reboot
+  (fix with MLink-169).
+- **Waiting on the repo owner** (#125, #126, #129 merged 2026-11-18): the resize and the new IPs; a `medlink-setup` token;
+  `staging` brought up to `master`, branch rules, GitHub environments in both repositories; an S3 bucket for the
+  backups and Vault snapshots; the front's `Production` branch renamed `prod`. He proposes Terraform for the hosts (scope not agreed yet).
+
+## MLink-166 — backup and tested restore of both databases, GitHub #67 (2026-11-18, chore/db-backup-restore)
+
+Part C of the database hardening (Parts A and B, #64 and #57, are in PR #126). No migration, no endpoint, no Java
+change.
+
+- `scripts/db-backup.sh <dir>`: `pg_dump --format=custom` of the app database, then Keycloak's, inside each
+  container with its own credentials; encrypted on the way out with gpg (AES-256, integrity-protected), so nothing in
+  clear touches the disk; each file decrypted in full once and checked to be a pg_dump archive before it gets its
+  final name. Refuses a passphrase under 20 characters, a missing directory, or a directory inside the repository.
+- `scripts/db-restore.sh <app|keycloak> <file> --yes-overwrite`: decrypts and checks the whole file first (a wrong
+  passphrase or a damaged file never reaches the database), then `pg_restore --clean --if-exists --no-owner
+  --single-transaction --exit-on-error`: fully restored or unchanged.
+- **Change from the plan:** gpg instead of `openssl enc -aes-256-cbc`. CBC has no integrity check, so a damaged or
+  altered backup would only show up halfway through a restore; gpg refuses it before.
+- The passphrase comes from the environment only and reaches gpg through a file descriptor: never an argument, never
+  printed. The test checks this on every output, on docker's arguments and on gpg's.
+- **Tests:** `scripts/db-backup.test.sh`, 17 cases, offline with a fake `docker` and the real gpg; new CI step in
+  `ci.yml` (code owner's file: one step). Committed red, then green. Each rule broken once in a copy of the scripts
+  (passphrase as an argument, no check before restore, no repository guard, no partial file, no single
+  transaction): the test turned red every time. shellcheck 0.10.0: clean.
+- **Drill (2026-11-18, dev stack):** marker rows in both databases, backup (3 s), both volumes deleted with
+  `docker compose down -v`, restore into empty databases (2 s), the API up and its checks passed in 53 s:
+  `patient.dev` logs in, `practitioner.dev` is asked for its code, a signup works; the Keycloak id of `patient.dev`
+  is unchanged. First attempt refused: the dump grants rights to `medlink_app` (#57) and the empty database had no
+  such role. Nothing was restored (one transaction). After #126, a new volume gets the role from
+  `docker/postgres/initdb/10-app-role.sh`; the runbook has the fix.
+- **Runbook:** [docs/operations/backup-restore.md](../../operations/backup-restore.md): policy (daily, 7 daily + 4
+  weekly, RPO 24 h, RTO measured), cron line, off-host copy, restore and verification steps, drill log.
+- **For whoever runs the server:** install `gnupg`, put `BACKUP_PASSPHRASE` in the team's secret store and in a
+  root-only env file, add the cron line and the off-host copy (runbook, "Set up on a server"). None of this is in the
+  deploy action yet.
+
+## MLink-165 — two database roles, the audit trail out of the API's reach, GitHub #57 (2026-11-17, fix/db-hardening)
+
+Plan and step-by-step history: [db-hardening.md](db-hardening.md) (Part B).
+
+**Built:**
+- `docker/postgres/initdb/10-app-role.sh`: the one place that creates the runtime role `medlink_app` (login, password
+  from `APP_DB_PASSWORD`, no superuser or create rights). Run by the postgres image on a new volume (both compose
+  files and the tests' container), and by the setup scripts on an existing one. Safe to run again.
+- `V18__app_role_grants.sql`: `SELECT, INSERT, UPDATE, DELETE` on the app's tables, **only `SELECT, INSERT` on
+  `audit_entries`**, nothing on `flyway_schema_history`, sequences, and default privileges for the tables of later
+  migrations. No ownership, so no `ALTER`, `DROP`, `TRUNCATE` or `TRIGGER`; no `CREATE` in the schema. It creates
+  the role without login when missing (an old volume), so it never fails there.
+- Staging and prod: `spring.flyway.user/password` (`SPRING_FLYWAY_USER` / `_PASSWORD`, no default) is the owner,
+  `spring.datasource.*` the runtime role. `DatabaseCredentialsCheck` applies the #64 rules to the Flyway values too,
+  and **refuses to start when the datasource user is the Flyway owner** (the protection would be gone silently).
+- `docker-compose.yml`: the app connects as `medlink_app` with `APP_DB_PASSWORD` (required), Flyway as
+  `POSTGRES_USER`; postgres mounts the init script. `compose.yaml` the same with dev values. Terraform:
+  `db_flyway_username` / `db_flyway_password`. Setup scripts: generate `APP_DB_PASSWORD`, run the init script before
+  the API starts.
+- Tests: `TestcontainersConfiguration` limits the service connection to Flyway (owner) and gives the datasource its own
+  `JdbcConnectionDetails` as `medlink_app`.
+
+**Found on the way:**
+- A plain `@ServiceConnection` (and Spring Boot's compose integration) gives the container's owner to **both** the
+  datasource and Flyway; connection details win over `spring.flyway.user`. Hence `type = FlywayConnectionDetails.class`.
+- A `DynamicPropertyRegistrar` comes too late for a `RANDOM_PORT` test: the embedded server opens the pool in
+  `onRefresh`, before registrars run. Hence a connection-details bean.
+- Git Bash on Windows rewrites `/docker-entrypoint-initdb.d/...` into a Windows path: `MSYS_NO_PATHCONV=1`.
+
+**Proof:** `RuntimeRoleGrantsTest` (the app's own datasource): INSERT and SELECT on the trail work; UPDATE, DELETE,
+TRUNCATE, DROP TRIGGER, DISABLE TRIGGER, DROP TABLE, CREATE TABLE are refused for a missing privilege (SQLState
+42501, not the trigger's P0001). Red first (7 of 8). `DatabaseCredentialsStartupTest` 44 cases (16 new, red first);
+`compose-credentials.test.sh` 9 cases (2 new, red first). Mutations: no `REVOKE` on `audit_entries` turns UPDATE and
+DELETE red; no same-user check turns its 2 cases red. The whole suite runs as `medlink_app`. Setup scripts, 0
+failures: `setup-dev.ps1 -KeepData` on a pre-#57 volume, `setup-dev.sh --full-stack`, `setup-dev.ps1 -FullStack`.
+
+**For whoever deploys:** the deploy secret must also hold `APP_DB_PASSWORD` (docker-compose.yml requires it); it is
+the only new key (`docker-compose.yml` gives Flyway `POSTGRES_USER` / `POSTGRES_PASSWORD`). The deploy action copies the
+role script to the server and runs it before the API starts, on every deploy. At first it did not copy it: a fresh
+server could not have initialised its database, and an older one would have kept `medlink_app` without a login (found
+after the PR opened). Proof: `DeployComposeActionTest` (red first), and the action's remote steps replayed on a
+disposable compose project: fresh volume, a role left without login, a second run; `medlink_app` logs in each time. The
+Terraform path creates the role by hand (`terraform/README.md`, "Database roles").
+
+**Limits:**
+- The API on the host (`mvnw spring-boot:run`, dev) still connects as the owner: Spring Boot's compose integration
+  gives the container's user to both. The tests, the full stack, staging and prod use `medlink_app`.
+- Flyway runs inside the API, so the API process holds the owner's password in its environment: an SQL injection
+  runs as `medlink_app`, but code execution inside the API would reach the owner. Next step: migrate in a one-shot
+  container and give the API only the runtime role.
+- A later append-only table needs its own `REVOKE` (the default privileges grant DML).
+
+## MLink-164 — no default database credentials outside dev, GitHub #64 (2026-11-11, fix/db-hardening)
+
+Plan and step-by-step history: [db-hardening.md](db-hardening.md) (Part A).
+
+**Built:**
+- `application-prod.yml`, `application-staging.yml`: `SPRING_DATASOURCE_USERNAME` / `_PASSWORD` with no default.
+- `config/DatabaseCredentialsCheck` (staging and prod): a `BeanFactoryPostProcessor`, so it runs before Flyway and
+  nothing connects with guessable credentials. It refuses a missing, empty or unresolved value, the dev values
+  `myuser` / `secret`, and anything starting with `change-me` (any case: every placeholder of `.env*.example` and
+  `terraform.tfvars*.example`). The message names the variable, never the value.
+- `docker-compose.yml`: `${POSTGRES_DB|USER|PASSWORD:?...}`, so `docker compose` stops when one is missing. Dev keeps
+  its fixed values (`compose.yaml`, `application-dev.yml`). It also passes `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`
+  and `KEYCLOAK_ADMIN_CLIENT_ID` to the API container, which it did not before (`ComposeFilesTest`).
+- Examples (`.env*.example`, `terraform.tfvars*.example`) say the placeholders are refused.
+
+**Why the check is needed:** removing the yml default alone does not fail closed. `spring.datasource.*` is bound as
+configuration properties, and the binder keeps an unresolved `${SPRING_DATASOURCE_USERNAME}` as plain text: the API
+would try to log in as that literal user and fail later with a misleading error.
+
+**Proof:** `DatabaseCredentialsStartupTest` starts the real API under prod and staging with a fake process
+environment and a closed database port (no Docker): 28 cases, committed red first each time (18 then 8 failures).
+Mutation checks: a default back in prod's yml, and a case-sensitive prefix, each turn cases red.
+`scripts/compose-credentials.test.sh` (CI step): 7 cases with an empty `--env-file`, so the developer's `.env` cannot
+make it pass. Both setup scripts pass in full-stack mode (2026-11-11).
+
+**For whoever deploys:** the deploy secret must hold `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` with real
+values, or the deploy stops at `docker compose` (on purpose). Staging and prod tests that start a staging/prod
+profile must pass `TestcontainersConfiguration.UNUSED_DB_CREDENTIAL`.
+
+**Limits:** ~~Flyway and the API still share one database user, the owner of every table~~: closed by GitHub #57
+(MLink-165, section above, 2026-11-17).
 
 ## MLink-31 — Accéder au dossier du patient (back-end)
 
@@ -1456,7 +1649,8 @@ failures**, and no audit error in the logs.
 disable the triggers, and today Flyway and the application run as the same database role. Protecting the
 trail from a compromised application role needs separate roles (an owner for migrations, a runtime role
 with only `INSERT` and `SELECT` on `audit_entries`); it touches compose, the environment, the setup
-scripts and Terraform, so it is a separate GitHub issue. Behind a reverse proxy the recorded IP is the proxy's until forwarded headers are configured
+scripts and Terraform, so it is a separate GitHub issue. **Closed 2026-11-17 by GitHub #57 (MLink-165):** the API
+runs as `medlink_app`, which can only append to and read the trail (see the MLink-165 section). Behind a reverse proxy the recorded IP is the proxy's until forwarded headers are configured
 (`server.forward-headers-strategy`, with the proxy trusted). Anonymous refusals are recorded with no
 rate limit, so a flood of forged writes grows the table (per-IP limits: GitHub #51). Reading the trail
 (MLink-33) and account operations (MLink-72) are other tasks; they add their own `AuditAction` values.
