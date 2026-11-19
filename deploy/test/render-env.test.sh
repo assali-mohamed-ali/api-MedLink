@@ -64,5 +64,19 @@ grep -q 'host_ip: 127.0.0.1' "$WORK/config.yml" && pass "the API port is bound t
 [ "$(grep -c 'restart: unless-stopped' "$WORK/config.yml")" = 4 ] && pass "the four services come back after a reboot" || fail "restart policies: $(grep -c 'restart: unless-stopped' "$WORK/config.yml")"
 grep -qE '^  (mailpit|prometheus):' "$WORK/config.yml" && fail "a local-only service would start on a server" || pass "mailpit and prometheus stay off the servers"
 
+# The deploy action and the CD jobs read Vault with GitHub's OIDC token, never a stored .env
+ACTION="$ROOT/.github/actions/deploy-compose/action.yml"
+CD="$ROOT/.github/workflows/cd.yml"
+grep -q 'DEPLOY_ENV_FILE' "$ACTION" "$CD" && fail "a stored .env is still used" || pass "no stored .env any more"
+grep -q 'audience=medlink-vault' "$ACTION" && pass "the action asks GitHub for a token for Vault" || fail "no OIDC token request"
+grep -q 'auth/jwt-github/login' "$ACTION" && pass "the action logs in to Vault" || fail "no Vault login"
+grep -q 'add-mask' "$ACTION" && pass "the secret values are masked in the logs" || fail "values not masked"
+grep -q 'render-env.py env' "$ACTION" && grep -q 'render-env.py backup' "$ACTION" && pass "the action renders .env and .backup.env" || fail "render not called"
+grep -q 'docker-compose.server.yml' "$ACTION" && pass "the action uses the server overlay" || fail "overlay not used"
+grep -q 'scripts/db-backup.sh' "$ACTION" && grep -q 'scripts/db-restore.sh' "$ACTION" && pass "the backup scripts reach the host" || fail "backup scripts not copied"
+grep -q '^  deploy-staging:' "$CD" && pass "CD has a staging deploy" || fail "no deploy-staging job"
+[ "$(grep -c 'id-token: write' "$CD")" -ge 3 ] && pass "the deploy jobs may request an OIDC token" || fail "id-token permission missing on a deploy job"
+grep -q 'vault_role: api-staging' "$CD" && grep -q 'vault_role: api-production' "$CD" && pass "each environment uses its own Vault role" || fail "Vault roles"
+
 echo
 if [ "$FAILED" -eq 0 ]; then echo "server deploy files: all checks passed"; else echo "server deploy files: $FAILED check(s) failed"; exit 1; fi
