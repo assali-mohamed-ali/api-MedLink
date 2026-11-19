@@ -21,9 +21,8 @@ before trusting a host or filling `DEPLOY_KNOWN_HOSTS`:
 
 The four addresses are Elastic IPs: they stay the same when an instance is stopped or resized.
 
-Sizes on 2026-11-19: staging-server m7i-flex.large (8 GB RAM) with an **8 GB disk**, api-medlink c7i-flex.large (4 GB RAM,
-60 GB disk), frontend-medlink and vault t3.micro (8 GB disks). The staging disk is too small for the stack: see "Grow the
-staging disk" below.
+Sizes on 2026-11-19: staging-server m7i-flex.large (8 GB RAM, 40 GB disk since 10:20 UTC), api-medlink c7i-flex.large
+(4 GB RAM, 60 GB disk), frontend-medlink and vault t3.micro (8 GB disks).
 
 ## Who logs in, and how
 
@@ -84,16 +83,14 @@ rotated weekly. Still to do: the off-host copy (an S3 bucket from the repo owner
 Make a new key (step 1), run `prepare-host.sh` again with the new `.pub`: it replaces the old key, which stops working
 at once. Then the repo owner updates `DEPLOY_SSH_KEY`.
 
-## Grow the staging disk
+## Grow a disk
 
-The stack needs about 3 GB of images and the staging disk has 8 GB in all. After the repo owner enlarges the volume to
-20 GB in the AWS console, on the host:
+The stack needs about 3 GB of images. After the repo owner enlarges a volume in the AWS console, a reboot lets Ubuntu
+grow the root partition by itself (staging, 8 → 40 GB on 2026-11-19). Without a reboot, on the host:
 
 ```sh
 sudo growpart /dev/nvme0n1 1 && sudo resize2fs /dev/nvme0n1p1 && df -h /
 ```
-
-Then deploy again.
 
 ## Notes
 
