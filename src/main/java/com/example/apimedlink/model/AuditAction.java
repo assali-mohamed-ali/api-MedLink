@@ -2,7 +2,7 @@ package com.example.apimedlink.model;
 
 /**
  * What an audit entry records (MLink-59). Other tasks add their values (MLink-72: account operations;
- * MLink-26: the practitioner's slots).
+ * MLink-26: the practitioner's slots; MLink-114: sign-ins and account changes).
  */
 public enum AuditAction {
     ACCESS_DENIED,
@@ -25,5 +25,13 @@ public enum AuditAction {
     /** Staff uploaded a patient document (MLink-123/125): the document id only. */
     DOCUMENT_UPLOAD,
     /** A patient or staff member read a patient document (MLink-123/125): the document id only. */
-    DOCUMENT_READ
+    DOCUMENT_READ,
+    /** A sign-in attempt; the outcome says whether it worked (MLink-114). */
+    LOGIN,
+    /** The password is right but must be changed first: no session exists yet (MLink-114). */
+    PASSWORD_CHANGE_REQUIRED,
+    /** An account was modified (MLink-114). */
+    ACCOUNT_UPDATED,
+    /** A user read sensitive data; the resource type says which (MLink-114). */
+    DATA_READ
 }

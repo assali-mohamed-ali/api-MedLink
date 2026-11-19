@@ -1,6 +1,8 @@
 package com.example.apimedlink.service;
 
 import com.example.apimedlink.exception.ApiException;
+import com.example.apimedlink.model.AuditAction;
+import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.UserRepository;
 import jakarta.persistence.EntityExistsException;
@@ -10,6 +12,7 @@ import java.util.UUID;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
@@ -17,20 +20,33 @@ import org.springframework.transaction.annotation.Transactional;
 public class UserService {
 
     private final UserRepository users;
+    private final AuditService audit;
 
-    public UserService(UserRepository users) {
+    public UserService(UserRepository users, AuditService audit) {
         this.users = users;
+        this.audit = audit;
     }
 
-    @Transactional(readOnly = true)
+    /**
+     * The audit row is written in its own transaction (it must survive a refusal), so it needs its own database
+     * connection. This method therefore holds no transaction of its own: the repository reads in its short
+     * transaction and gives the connection back before the audit asks for one. Under load, reads that kept their
+     * connection while waiting for the audit's would use up the pool (review of #90).
+     */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public List<User> findAll() {
-        return users.findAll();
+        List<User> all = users.findAll();
+        audit.record(AuditAction.DATA_READ, "USER", "ALL", AuditOutcome.SUCCESS);
+        return all;
     }
 
-    @Transactional(readOnly = true)
+    /** Same rule as {@link #findAll()}: the read has ended, and released its connection, before the audit. */
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
     public User findById(UUID id) {
-        return users.findById(id)
+        User user = users.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("User " + id + " not found"));
+        audit.record(AuditAction.DATA_READ, "USER", id.toString(), AuditOutcome.SUCCESS);
+        return user;
     }
 
     /** {@code id} is the Keycloak user id: the Keycloak account is created first. */
