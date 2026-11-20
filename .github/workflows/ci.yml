@@ -41,6 +41,10 @@ jobs:
       - name: Test the server deploy files
         run: bash deploy/test/render-env.test.sh
 
+      # MLink-168: the cross-repository gate waits for the matching staging jobs without deadlocking.
+      - name: Test the cross-repository staging gate
+        run: bash .github/scripts/test/wait-for-staging.test.sh
+
       # GitHub #67: backup and restore refuse unsafe use, encrypt, never leak the passphrase (offline, real gpg).
       - name: Test the database backup and restore scripts
         run: bash scripts/db-backup.test.sh

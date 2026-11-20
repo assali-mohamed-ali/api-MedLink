@@ -1,4 +1,4 @@
-# medlink-setup: what vault/setup.sh and vault/seed-env.sh need, nothing more (MLink-168).
+# medlink-setup: what vault/setup.sh, vault/seed-env.sh and vault/seed-front.sh need, nothing more (MLink-168).
 # The repo owner creates a short-lived token with this policy only:
 #   vault policy write medlink-setup vault/policies/medlink-setup.hcl
 #   vault token create -policy=medlink-setup -ttl=8h -orphan
@@ -61,7 +61,7 @@ path "auth/token/create/medlink-snapshot" {
   capabilities = ["update"]
 }
 
-# Seeding the environments' secrets (seed-env.sh adds missing keys, never overwrites)
+# Seeding the environments' secrets (seed-env.sh/seed-front.sh add missing keys, never overwrite)
 path "medlink/data/*" {
   capabilities = ["create", "update", "patch", "read"]
 }

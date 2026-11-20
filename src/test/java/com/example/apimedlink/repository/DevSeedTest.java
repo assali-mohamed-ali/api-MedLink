@@ -54,8 +54,9 @@ class DevSeedTest {
 
     @Test
     void theThreeSpecialtiesAreSeeded() {
+        // V19 (MLink-174) adds the other reference specialties in every environment: the seed's three are among them
         assertThat(jdbc.queryForList("select name from specialties", String.class))
-                .containsExactlyInAnyOrderElementsOf(PRACTITIONERS.values());
+                .containsAll(PRACTITIONERS.values());
     }
 
     @Test

@@ -48,7 +48,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
 
-**2026-11-19:** Staging and production preparation applied on the hosts: Vault in a container, hosts prepared, production API and front running. Two AWS changes by the repo owner are still needed (security group, staging disk). No migration, no endpoint, no Java change. See [deploy-prep.md](deploy-prep.md).
+**2026-11-19:** Staging and production preparation applied on the hosts: Vault in a container, hosts prepared. **Production works end to end** (dashboard, API through the front, Gmail mail) since the repo owner opened port 8080 and enlarged the staging disk. Staging: dashboard live, API and Keycloak waiting for a fresh Vault setup token. PR #130: the three review findings fixed (CI YAML check, staging dispatch condition, Vault roles bound to the CD workflow, refs and event). No migration, no endpoint, no Java change. See [deploy-prep.md](deploy-prep.md).
 
 **2026-11-18:** Staging and production preparation (MLink-168 to MLink-173, Mohamed) on `chore/vault-deploy`:
 MLink-168 Vault as code and MLink-171 host preparation done, scripts and runbooks only (no migration, no endpoint, no
@@ -58,6 +58,8 @@ preparation".
 **2026-11-18:** MLink-166 (GitHub #67) on `chore/db-backup-restore`: encrypted backup and all-or-nothing restore of
 both databases, scripts and a runbook, restore drill done on the dev stack. No migration, no endpoint, no Java change.
 `ci.yml` gains one step. See the MLink-166 section.
+
+**2026-11-19:** MLink-37 37.7, API part: the agenda shows a cancellation. `GET /api/practitioner/agenda` gives, on a slot nobody holds, its latest cancelled appointment (`appointment.status` `CANCELLED`, the patient's id and names, as for a booking); a booking always wins over an older cancellation; a slot never booked has no `appointment`. One more query, `AppointmentRepository.findCancelledWithPatient` (latest `cancelled_at` first), only for the slots of the week nobody holds. No migration, no new route. Tests, red first: `aBookedSlotShowsItsPatientsNamesAndNothingMoreAndAFreedSlotShowsItsCancelledAppointment` (was `…ACancelledAppointmentIsNotShown`: the contract changes on purpose), `aRebookedSlotShowsItsBookingAndASlotCancelledTwiceShowsTheLatestCancellation`, `afterARealCancellationTheAgendaShowsTheSlotOpenWithTheCancelledAppointment` (book and cancel through the real routes).
 
 **2026-11-18:** MLink-37, code owner's review on #125 (2/2), after #120 (US-15) merged: `master` merged in (conflicts in `report.md` and `MailService`, both sides kept: the cancellation mail and the reminder mail). A real cancellation now creates the practitioner's alert: `AppointmentService.cancel()` calls `alerts.onAppointmentCancelled(appointment)` right after its `APPOINTMENT_CANCELLED` audit row, and `reschedule()` calls it for the old appointment after its `APPOINTMENT_RESCHEDULED` row (a move cancels the old one), both inside the change's transaction; the mail still leaves after the commit and never blocks it. Coordinated with Ela on #120. Tests, red first, through the real routes: the 37.8 story now books and cancels with `POST /api/appointments` and `POST /api/appointments/{id}/cancel` (no direct service call), `movingAnAppointmentWarnsThePractitionerOfTheOldSlotWithAMail`, `aCancelRefusedByTheDeadlineGivesNoAlert`, `cancellingTwiceGivesOneAlert`.
 
@@ -293,6 +295,20 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-174 — reference specialties in every environment (2026-11-19, feat/MLink-174-specialties)
+
+- Found while preparing production: staging and production had no specialty (only the dev seed inserts them), and a
+  practitioner needs one (`specialty_id NOT NULL`), so an admin could not create a practitioner there.
+- `V19__specialties_reference_data.sql`, like V15 for the clinics: 15 usual consultation specialties (Médecine
+  générale, Cardiologie, Pédiatrie, Dermatologie, Gynécologie-obstétrique, Ophtalmologie, ORL, Neurologie, Pneumologie,
+  Gastro-entérologie, Endocrinologie, Rhumatologie, Psychiatrie, Urologie, Néphrologie) with `ON CONFLICT DO NOTHING`.
+  The first three keep the dev seed's ids, so the dev seed skips them. Mohamed had no official list (2026-11-20): this
+  one is a proposal; a change goes in a new migration (no endpoint creates a specialty).
+- Test: `AppointmentSchemaTest.outsideTheDevProfileTheReferenceSpecialtiesExistWithTheDevSeedIds` (red commit first).
+  Existing tests insert specialties with their own suffixed names and check `/api/slots/filters` with `contains`, so
+  the new rows do not disturb them. One exception: `DevSeedTest.theThreeSpecialtiesAreSeeded` expected exactly the
+  seed's three; it now checks they are among the specialties (`containsAll`), since V19 adds the others everywhere.
 
 ## Staging and production preparation — MLink-168 to MLink-173 (2026-11-18, chore/vault-deploy)
 
