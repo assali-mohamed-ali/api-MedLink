@@ -54,28 +54,42 @@ fi
 vault write auth/jwt-github/config oidc_discovery_url="$GITHUB_ISSUER" bound_issuer="$GITHUB_ISSUER" > /dev/null
 say "jwt-github/ trusts $GITHUB_ISSUER"
 
-# $1 role, $2 repository, $3 GitHub environment, $4 policy
+# $1 role, $2 repository, $3 GitHub environment, $4 policy, $5 deploy workflow file, $6... refs it may deploy from.
+# The environment alone is not enough: any workflow of the repository that enters it would get the same subject. So the
+# token must also come from the deploy workflow (workflow_ref), on one of the refs (ref, globs), by a push or a manual
+# run (event_name): a pull_request job, another workflow or a feature branch is refused even inside the environment.
 role() {
-    vault write "auth/jwt-github/role/$1" - > /dev/null <<EOF
+    local name="$1" repo="$2" env="$3" policy="$4" workflow="$5"; shift 5
+    local refs="" wrefs="" r
+    for r in "$@"; do
+        refs="$refs${refs:+, }\"$r\""
+        wrefs="$wrefs${wrefs:+, }\"$OWNER/$repo/.github/workflows/$workflow@$r\""
+    done
+    vault write "auth/jwt-github/role/$name" - > /dev/null <<EOF
 {
   "role_type": "jwt",
   "user_claim": "sub",
   "bound_audiences": ["$AUDIENCE"],
-  "bound_claims_type": "string",
-  "bound_claims": { "sub": "repo:$OWNER/$2:environment:$3" },
+  "bound_claims_type": "glob",
+  "bound_claims": {
+    "sub": "repo:$OWNER/$repo:environment:$env",
+    "workflow_ref": [$wrefs],
+    "ref": [$refs],
+    "event_name": ["push", "workflow_dispatch"]
+  },
   "claim_mappings": { "repository": "repository", "environment": "environment", "workflow_ref": "workflow_ref", "actor": "actor", "run_id": "run_id" },
-  "token_policies": ["$4"],
+  "token_policies": ["$policy"],
   "token_ttl": "10m",
   "token_max_ttl": "15m",
   "token_type": "service"
 }
 EOF
-    say "role $1: repo:$OWNER/$2:environment:$3 -> $4 (read-only, 10 min)"
+    say "role $name: repo:$OWNER/$repo:environment:$env, $workflow on $* -> $policy (read-only, 10 min)"
 }
-role api-staging      api-MedLink       staging    medlink-staging-api
-role api-production   api-MedLink       production medlink-prod-api
-role front-staging    medlink-dashboard staging    medlink-staging-front
-role front-production medlink-dashboard production medlink-prod-front
+role api-staging      api-MedLink       staging    medlink-staging-api   cd.yml refs/heads/staging refs/heads/master refs/heads/main
+role api-production   api-MedLink       production medlink-prod-api      cd.yml refs/heads/staging 'refs/tags/v*'
+role front-staging    medlink-dashboard staging    medlink-staging-front container-security.yml refs/heads/staging refs/heads/master refs/heads/main
+role front-production medlink-dashboard production medlink-prod-front    container-security.yml refs/heads/staging refs/heads/prod 'refs/tags/v*'
 
 # 4. Audit log: every request recorded, secret values only as HMACs
 if vault audit list 2> /dev/null | grep -q '^file/ '; then

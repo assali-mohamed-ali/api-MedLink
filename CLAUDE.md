@@ -146,4 +146,5 @@ classes (see README §7). Use only APIs of these versions.
   Configure PR/check-required rules on `staging` and `prod` during migration. With this PAT-based automation, don't require
   reviewers on those branches or on the production environment: that would block promotion and release-version sync PRs. Keep
   all CI/security checks required. If reviewer gates must stay enforced, use a GitHub App with narrow ruleset bypass for only
-  automation PRs. Production deploys only from lowercase `v*` tags.
+  automation PRs. Automatic production deployment uses the verified staging digest after both repositories' staging
+  gates; the legacy tag path remains available behind `AUTO_DEPLOY_PROD=false`.

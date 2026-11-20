@@ -1,70 +1,101 @@
 # Staging and production preparation — plan and hand-over
 
 Tickets MLink-168 to MLink-173 (YouTrack, assigned to Mohamed, subtasks of MLink-5). Branch `chore/vault-deploy`
-(api-MedLink, from `master`) for MLink-168, 169, 171, 172; `chore/cd-deploy` in `medlink-dashboard` for MLink-170.
-Background, design and test results: the section "Staging and production preparation" of `report.md`. Runbooks:
-`docs/operations/vault.md`, `docs/operations/servers.md`.
+(api-MedLink) for MLink-168, 169, 171, 172, 173; `chore/cd-deploy` in `medlink-dashboard` (merged, #20) for MLink-170.
+Background and test results: `report.md`, section "Staging and production preparation". Runbooks:
+`docs/operations/vault.md`, `docs/operations/servers.md`, `docs/DEPLOYMENT.md`.
 
-## Hand-over for the next session (2026-11-19, night)
+## Hand-over for the next session (2026-11-19, 20:00 UTC)
 
-**Read first:** this file, then `report.md` (Status + that section), then the two runbooks.
+**Start every session with:** GitHub (new commits on `master`/`staging`/`prod`, PRs, reviews, CI) and YouTrack (new
+comments on MLink-168..173 and the tickets touching accounts), then `git fetch` + merge `origin/master`, and free RAM
+(about 3 GB before the test suite). The full reference with diagrams, every address and where each secret lives is a
+PDF on Mohamed's machine, not in git: `Docs/Deployment/MedLink-Infrastructure-and-Deployment-Reference.pdf`.
 
-**What runs today**
+**Two rules from Mohamed:** deploys go **only through the CD workflows**, never by hand over SSH (host preparation,
+Vault configuration and diagnostics over SSH are fine). Never handle a password, private key or unseal key in chat.
 
-| Host | State |
+### Where things stand
+
+| Part | State |
 |---|---|
-| vault `56.228.74.131` | Vault 1.21.0 in a container, initialised, unsealed, configured, secrets seeded for staging and prod. `https://56.228.74.131.sslip.io` |
-| frontend-medlink `56.228.94.12` | Dashboard live on HTTPS (image from `master` `72a61af`). `/api` answers 502 until blocker 1 is fixed |
-| api-medlink `13.50.114.144` | API, Keycloak and both databases healthy (image from `master` `0be7983`), `/readyz` 200 on the private address |
-| staging-server `13.51.30.39` | Prepared, Postgres only: the 8 GB disk cannot hold Keycloak (blocker 2) |
+| Production (api-medlink `13.50.114.144` + frontend-medlink `56.228.94.12`) | Works end to end: dashboard, API through the front (`/readyz` 200), Gmail mail (account `medlinq2026@gmail.com`). Images `medlink-api:0be7983`, `medlink-front:72a61af`, deployed by hand on 2026-11-19 (before the workflow-only rule) |
+| Staging (`13.51.30.39`, disk 40 GB) | Dashboard live, Postgres up; API and Keycloak not deployed: CD will do it on the first push to `staging` |
+| Vault (`56.228.74.131`) | Unsealed, secrets seeded. **#133's roles applied live on 2026-11-20** (bound to the deploy workflow, refs and push/dispatch; read back OK); setup token revoked, no root token. Same roles as `master`'s `setup.sh` since #133 merged |
+| First admin (production) | Invited on Mohamed's school address (no password; API activation mail). The dashboard's `/activer-compte` is a placeholder, so activation uses `Docs/Deployment/activate-account.sh` with the newest mail (17:23 UTC, valid to 2026-11-20 17:23 UTC; a new one: `POST /api/auth/account/activate/resend`) |
+| Specialties | None in staging or production (only the dev seed has them): an admin cannot create a practitioner yet |
 
-**Blockers, in order**
+| Git | State |
+|---|---|
+| api-MedLink `master` | Has #130 (Vault deploys), the owner's #132 (production deploys automatically from the verified staging run unless `AUTO_DEPLOY_PROD=false`) and #131 (MLink-37) |
+| PR #133 (`chore/vault-deploy` → `master`) | **Merged 2026-11-19 20:55 UTC** (approved by the owner). The hand-over docs commits that came after it: branch `docs/deploy-handover` |
+| medlink-dashboard `master` | Has #18 (appointments epic), #20, #21 (auto prod deploy). Activation page (MLink-20, Chourouk) only on `epic/MLink-11` (Ahlem's commit 17/11), no PR, 56 ahead / 20 behind |
+| `staging`, `prod` (both repos) | Far behind `master` (api `staging` 270+ commits). Every branch needs the owner's review (CODEOWNERS `*`); Mohamed has push, not admin |
 
-1. **Repo owner, AWS console:** on the security group of `api-medlink` (`launch-wizard-1`), allow inbound TCP 8080 from `172.31.40.60/32`. Packets from the front host never reach the API host today (port 22 passes). Then `https://56.228.94.12.sslip.io/readyz` must answer 200.
-2. **Repo owner, AWS console:** enlarge the staging volume to 20 GB. Then `docs/operations/servers.md`, "Grow the staging disk", and deploy the API and the front to staging.
-3. **Done on production, 2026-11-19 (MLink-172):** the Gmail app password (from Mohamed's local file `Docs/Server Keys/MedLink-Prod app key.txt`) is in `medlink/staging/api` and `medlink/prod/api`, sent over SSH stdin to `vault kv patch`, never displayed. The account is **`medlinq2026@gmail.com`**: the settings files first said `medliq2026`, and Gmail answered `535 Username and Password not accepted` to every key; `deploy/test/render-env.test.sh` now guards the address. Login test from the production host (curl, login and NOOP only, no mail sent): `235 2.7.0 Accepted`. Still to check: a real signup on staging delivers its mail, once staging runs. Login test, reading the value from the host's `.env`: strip its quotes with `sed -n "s/^MAIL_PASSWORD=.\(.*\).$/\1/p" .env` (`tr` does not understand `\x27`), write a `--netrc-file` with umask 077, `curl --ssl-reqd --url smtp://smtp.gmail.com:587 -X NOOP`. To change the password: `seed-env.sh` from a terminal (`ssh -t`) only adds missing keys, so use `vault kv patch medlink/<env>/api MAIL_PASSWORD=-` with a fresh token (`vault operator generate-root`; the setup token expires 2026-11-19 08:00 UTC).
-4. **Mohamed:** the GitHub environment values, needed by CD (Claude Code's permission check refused uploading the private deploy key). From `code/api-MedLink`, in Git Bash:
-   ```sh
-   K="../../Docs/Server Keys/deploy-keys"
-   R=assali-mohamed-ali/api-MedLink
-   for e in staging production; do gh secret set DEPLOY_SSH_KEY -R $R --env $e < "$K/medlink-deploy-$e"; gh variable set DEPLOY_USER -R $R --env $e --body deploy; gh variable set DEPLOY_PATH -R $R --env $e --body /opt/medlink/api; done
-   gh variable set DEPLOY_HOST -R $R --env staging --body 13.51.30.39
-   gh variable set DEPLOY_HEALTH_URL -R $R --env staging --body https://13.51.30.39.sslip.io/readyz
-   gh variable set DEPLOY_HOST -R $R --env production --body 13.50.114.144
-   gh variable set DEPLOY_HEALTH_URL -R $R --env production --body https://56.228.94.12.sslip.io/readyz
-   ssh-keyscan -t ed25519 13.51.30.39 | gh secret set DEPLOY_KNOWN_HOSTS -R $R --env staging
-   ssh-keyscan -t ed25519 13.50.114.144 | gh secret set DEPLOY_KNOWN_HOSTS -R $R --env production
-   ```
-   Check each scanned key against the fingerprints in `servers.md`. The dashboard repository needs the same names with path `/opt/medlink/front`, health URL `.../healthz`, and host `56.228.94.12` for production.
-5. **Repo owner:** review and merge the PR of `chore/vault-deploy` and `medlink-dashboard` PR #20. The branch he created in the dashboard is `Prod`, but its workflow deploys from `prod` (names are case-sensitive).
+GitHub environments (both repos, `staging` and `production`): `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`,
+`DEPLOY_HEALTH_URL`, `DEPLOY_KNOWN_HOSTS` set on 2026-11-19. `DEPLOY_SSH_KEY`: Mohamed sets it (command in the chat;
+check with `gh api repos/assali-mohamed-ali/<repo>/environments/<env>/secrets`). The owner received a message listing
+what needs him: review #133, `master` → `staging` sync, `AUTO_DEPLOY_PROD`, production deployment rules, the unused
+`DEPLOY_ENV_FILE` secret, `CROSS_REPO_TOKEN`, the activation page PR, the nightly gitleaks finding on his branch
+`fix/workflow-security-and-reliability`, dev users and unseal keys.
 
-**Before production opens:** delete the dev users `staff.dev`, `practitioner.dev`, `patient.dev` from the production Keycloak (MLink-173), and split the five unseal keys between at least three people.
+YouTrack: MLink-168, 169, 170, 171 *À vérifier*; 172, 173 *En cours*; comments posted on 168, 169 (#133) and on MLink-20.
 
-**Where the keys are (on Mohamed's machine only, never in git):** `Docs/Server Keys/vault-init-KEEP-PRIVATE.json` (the five unseal keys; the root token in it is already revoked) and `Docs/Server Keys/deploy-keys/`.
+### Next, in order
 
-**Shelved by the repo owner:** the S3 bucket, so backups and Vault snapshots stay on their hosts for now. Terraform waits for that bucket.
+1. **Check and sync** (above). Merge `master` into the working branch first.
+2. **Vault: DONE 2026-11-20** (setup token by Mohamed, `setup.sh` from this branch run from `~/medlink-vault-pr133` on the host, roles checked, token revoked and shredded; `seed-front.sh` skipped). Kept for the next time: (needs Mohamed's setup token; the permission check refuses Claude reading the unseal keys). Mohamed runs,
+   from Git Bash, `Docs/Deployment/new-setup-token.sh` fed with three unseal keys (the exact one-liner is in the chat
+   of 2026-11-19; by hand: `generate-root` steps in `vault.md`). It writes a 3-hour `/root/medlink-setup.token` and
+   revokes the root token. Then: copy `vault/` to the host, `setup.sh` (new roles), check one role with
+   `vault read auth/jwt-github/role/api-production`, revoke the setup token. `seed-front.sh` needs the private deploy
+   key on the vault host: skip it, the dashboard falls back to its GitHub secrets.
+3. **Specialties: IN PROGRESS, MLink-174** (branch `feat/MLink-174-specialties`, V19 with 15 usual specialties; Mohamed has no official list). Original plan: new ticket, `V19__specialties_reference_data.sql` like V15 (same ids as
+   the dev seed, `ON CONFLICT DO NOTHING`), red test first, PR to `master`. List: the 3 dev specialties unless Mohamed
+   gives the real one.
+4. **Whole-app integration branch (Mohamed's request)**: `integration/whole-app` from `master` in each repo, merge the
+   other branches, resolve, both test orders green, then decide with Mohamed and the owner whether it can go to
+   `master`. Care: most open PRs have *changes requested* (#128 epic/MLink-8, #127, #122, #121, #90, dependabot #115
+   #114 #110 #75); teammates' code stays theirs (comment on their tickets, do not rewrite it); `DEPLOYMENT.md` warns
+   against blindly merging the legacy `staging`/`prod` differences. First list every remote branch with ahead/behind
+   and its PR/review state, skip merged or stale ones, merge in dependency order, one merge commit per branch.
+5. **Deploy through CD only**: when `master` has what must ship, the owner merges a `master` → `staging` sync in both
+   repos; CD deploys staging, smoke-tests, waits for the other repository, then deploys the same digest to production.
+   Then check: a real signup on staging receives its mail (MLink-172), the admin logs in, both environments pass the
+   checks of the PDF (MLink-173).
+6. **Before production opens**: delete `staff.dev`, `practitioner.dev`, `patient.dev` from the production realm
+   (destructive: ask), split the 5 unseal keys between 3+ people, delete `Docs/Server Keys/MedLink-Prod app key.txt`.
+7. **Proposed, not done**: a database backup just before each rollout in `.github/actions/deploy-compose`.
 
-**The first deploys were done by hand** over SSH with the deploy keys, with the same steps as `.github/actions/deploy-compose`, because CD runs only after the merge.
+### Files on Mohamed's machine (never in git)
+
+- `Docs/Server Keys/`: EC2 keys (`api-cle.pem`, `front-cle.pem`, `vault-cle.pem`, `staging clee.pem`), `deploy-keys/`,
+  `vault-init-KEEP-PRIVATE.json` (5 unseal keys; its root token is revoked), `MedLink-Prod app key.txt`.
+- `Docs/Deployment/`: the PDF reference (+ `source/` HTML, print with headless Edge `--print-to-pdf`), the owner
+  message PDF, `known_hosts` (4 pinned host keys), `new-setup-token.sh`, and the admin scripts `invite-admin.sh`,
+  `activate-account.sh`, `promote-admin.sh`, `create-admin.sh` (all read secrets on the host, print none).
+
+**Shelved by the repo owner:** the S3 bucket (off-host backups and Vault snapshots), and Terraform after it.
 
 ## Rules for this work
 
-- Never handle a password or token in a chat or a file: the Gmail app password is typed by Mohamed at the hidden
-  prompt; the Vault setup token comes as a file from the repo owner and is revoked after use; generated secrets stay
-  on the vault host.
-- The EC2 launch keys live on Mohamed's machine only (not in git); SSH as `ubuntu`. Check each host key against the
-  fingerprints in `docs/operations/servers.md` before trusting a host.
-- Nothing destructive on a host without asking Mohamed first. Every host script is tested on a throwaway Ubuntu
-  26.04 container first and is safe to run again.
+- Never handle a password, token, private key or unseal key in a chat or a file; generated secrets stay on the vault
+  host; a person types or pipes their own.
+- SSH as `ubuntu` with the EC2 keys, or as `deploy` with the deploy keys; check host keys against `servers.md`.
+- Nothing destructive on a host without asking Mohamed first. Host scripts are tested on a throwaway container first.
+- Red test commit, then green; both test orders before every push, and make the push conditional on their exit codes.
 
 ## Pitfalls met (Windows, Git Bash)
 
-- Docker from Git Bash: wrap it as `MSYS_NO_PATHCONV=1 docker ...` and mount with `$(pwd -W)`; never export
-  `MSYS_NO_PATHCONV` for a whole script (native tools such as openssl then get untranslated `/tmp` paths).
-- Never call `python`/`python3` in Git Bash (the Windows Store alias hangs). `node` and `perl` are there; prefer
-  `sed -n 'Np'` + line-numbered edits over clever quoting when breaking a rule on purpose, and check the edit applied.
-- Piping a script to ssh from PowerShell adds a BOM and mangles it: run ssh from Git Bash, `ssh ... 'bash -s' < file`.
-- The postgres image trusts connections from 127.0.0.1: test a role's password from another container.
-- YouTrack: create tickets with `/newIssue?project=MLink&summary=...&description=...` (Markdown); bulk-assign with the
-  command `Responsable Mohamed.BenNaima subtask of MLink-5`; pick dropdown values from a screenshot, not from hidden
-  list items (that is how the "Doublon" click happened).
-- Run the full suite only with about 3 GB free; Claude Code stops background jobs when memory runs out.
+- Docker from Git Bash: `MSYS_NO_PATHCONV=1 docker ...`, mount with `$(pwd -W)`. Same for `gh variable set` with a
+  value starting with `/` (Git Bash turned `/opt/medlink/api` into `C:/Program Files/Git/opt/...`).
+- Never call `python` in Git Bash (Store alias hangs); use `node` or `perl`. No `jq` locally: run such tests in a container.
+- Piping a script to ssh from PowerShell adds a BOM: use Git Bash, `ssh ... 'bash -s' < file`.
+- `curl -K -` takes stdin for its config: put the JSON body in the same config (`data = "..."`), not in a second pipe.
+- `tr` does not understand `\x27`: strip `.env` quotes with `sed -n "s/^KEY=.\(.*\).$/\1/p"`.
+- Never print access logs with query strings: an activation token leaked once (cancelled by a resend).
+- A privacy hook refuses commands that hold Mohamed's personal email; let him run those (`!` or an env variable).
+- Flaky tests seen under memory pressure: `QrCodesTest` (reversed order), `EmailTokenServiceTest` (24 h + 300 ns): rerun.
+- Claude Code kills background jobs when RAM runs out: run the suite with about 3 GB free.
+- YouTrack: create tickets with `/newIssue?project=MLink&summary=...&description=...`; the command dialog
+  (Ctrl+Alt+J) changes states; post plain comments in the box under the activity list; check the result by reloading.

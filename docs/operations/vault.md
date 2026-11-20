@@ -1,6 +1,7 @@
 # Vault: the deploy secrets
 
-MLink-168. The staging and production deploys read their secrets from HashiCorp Vault, never from a GitHub secret.
+MLink-168. The API reads its application secrets from HashiCorp Vault. The dashboard reads its SSH deploy bundle
+from Vault too, falling back to the GitHub Environment secrets while Vault is unreachable or not seeded.
 Everything Vault holds for MedLink is configured from `vault/` in this repository.
 
 | Item | Value |
@@ -14,17 +15,25 @@ Everything Vault holds for MedLink is configured from `vault/` in this repositor
 
 ## Who can read what
 
-| GitHub role | Accepted token (claim `sub`) | Policy | Can do |
-|---|---|---|---|
-| `api-staging` | `repo:assali-mohamed-ali/api-MedLink:environment:staging` | `medlink-staging-api` | read `medlink/staging/api` |
-| `api-production` | `repo:assali-mohamed-ali/api-MedLink:environment:production` | `medlink-prod-api` | read `medlink/prod/api` |
-| `front-staging` | `repo:assali-mohamed-ali/medlink-dashboard:environment:staging` | `medlink-staging-front` | read `medlink/staging/front` |
-| `front-production` | `repo:assali-mohamed-ali/medlink-dashboard:environment:production` | `medlink-prod-front` | read `medlink/prod/front` |
+| GitHub role | Claim `sub` | Claim `workflow_ref` (workflow file) and `ref` | Policy | Can do |
+|---|---|---|---|---|
+| `api-staging` | `repo:assali-mohamed-ali/api-MedLink:environment:staging` | `cd.yml` on `refs/heads/staging`, `master` or `main` | `medlink-staging-api` | read `medlink/staging/api` |
+| `api-production` | `repo:assali-mohamed-ali/api-MedLink:environment:production` | `cd.yml` on `refs/heads/staging` (automatic deploy from the verified staging run) or `refs/tags/v*` | `medlink-prod-api` | read `medlink/prod/api` |
+| `front-staging` | `repo:assali-mohamed-ali/medlink-dashboard:environment:staging` | `container-security.yml` on `staging`, `master` or `main` | `medlink-staging-front` | read `medlink/staging/front` |
+| `front-production` | `repo:assali-mohamed-ali/medlink-dashboard:environment:production` | `container-security.yml` on `refs/heads/staging` (from the verified staging run), `refs/heads/prod` or `refs/tags/v*` | `medlink-prod-front` | read `medlink/prod/front` |
 
-A job gets such a token only when it runs in that GitHub environment, so the environment's protection rules
-(which branches or tags may deploy, required reviewers) decide who can reach the secrets. Pull requests, branch runs
-without an environment, other repositories and other audiences are refused. Vault tokens last 10 minutes and can
-neither write nor list. `vault/test/vault.test.sh` proves each of these on a throwaway Vault.
+Every role also requires `event_name` `push` or `workflow_dispatch`. The environment alone is not enough: any workflow of
+the repository that enters an environment gets the same `sub`, so Vault also checks which workflow file asks, from which
+ref, and how it was started (PR #130 review). Another workflow, a `pull_request` or `pull_request_target` job, a feature
+branch, or production from `master` is refused, even inside the environment. Other repositories and
+audiences are refused too. Vault tokens last 10 minutes and can neither write nor list. `vault/test/vault.test.sh` proves
+each of these on a throwaway Vault.
+
+GitHub's side still matters: give the `production` environment a deployment rule (`staging` and tags `v*` for the API;
+`staging`, `prod` and `v*` for the dashboard) and, if wanted, a required reviewer. Then a run that Vault would accept also needs GitHub's
+approval.
+
+After a change to these roles, run `setup.sh` again on the vault host (step 2 of "First set-up", with a fresh setup token).
 
 ## First set-up (once)
 
@@ -49,8 +58,14 @@ neither write nor list. `vault/test/vault.test.sh` proves each of these on a thr
    VAULT_TOKEN="$(cat medlink-setup.token)" sh medlink-vault/seed-env.sh staging
    VAULT_TOKEN="$(cat medlink-setup.token)" sh medlink-vault/seed-env.sh prod
    ```
-   The non-secret settings (URLs, ports, profiles, the mail account name) are in the repository with the deploy
-   (MLink-169), not in Vault.
+   The dashboard's SSH bundle comes from the deploy key files, once per environment:
+   ```sh
+   VAULT_TOKEN="$(cat medlink-setup.token)" sh medlink-vault/seed-front.sh staging ~/.ssh/medlink-front-deploy ~/.ssh/medlink-front-known_hosts
+   VAULT_TOKEN="$(cat medlink-setup.token)" sh medlink-vault/seed-front.sh prod ~/.ssh/medlink-front-deploy ~/.ssh/medlink-front-known_hosts
+   ```
+   Use the same files as `DEPLOY_SSH_KEY`/`DEPLOY_KNOWN_HOSTS`; until the path is seeded the workflow falls back
+   to those GitHub Environment secrets. The non-secret settings (URLs, ports, profiles, the mail account name) are in
+   the repository with the deploy (MLink-169), not in Vault.
 4. **Revoke the setup token** and delete its file: `VAULT_TOKEN="$(cat medlink-setup.token)" vault token revoke -self && shred -u medlink-setup.token`.
 
 ## After a reboot: unseal
@@ -64,6 +79,16 @@ VAULT_ADDR=http://127.0.0.1:8200 vault operator unseal      # asks for the key, 
 
 `vault status` shows `Sealed false` when done. Keep the five keys with five different people or password-manager
 vaults; never on the host, in git or in a chat.
+
+## The dashboard SSH bundle
+
+`seed-front.sh` base64-encodes two files into `medlink/<env>/front`: `ssh_private_key_b64` (the deploy private key)
+and `known_hosts_b64` (the pinned host keys). The `load-deploy-secrets` action decodes them for the deploy, then
+deletes the bundle with the runner. Like `seed-env.sh`, it only adds missing keys; it never overwrites one.
+
+When rotating the dashboard's deploy key, update the target's `authorized_keys` and both Vault environments in the
+same change, then remove `DEPLOY_SSH_KEY`/`DEPLOY_KNOWN_HOSTS` from the GitHub environments once the Vault path is known
+to work.
 
 ## Change a secret
 
@@ -82,6 +107,9 @@ Then redeploy. Some values are also stored elsewhere and must be changed there i
 | `APP_MFA_ENCRYPTION_KEY` | do not change casually: every enrolled staff code becomes unreadable (`docs/DEPLOYMENT.md`) |
 | `APP_REPORT_ENCRYPTION_KEY` | do not change: sealed reports would no longer open |
 | `BACKUP_PASSPHRASE` | keep the old one until the last backup made with it has expired (28 days) |
+
+The dashboard's `ssh_private_key_b64` and `known_hosts_b64` are changed the same way, with `vault kv patch
+medlink/<env>/front KEY=-`; update the target's `authorized_keys` in the same step.
 
 Every change is in the audit log; KV v2 keeps the previous versions (`vault kv rollback -version=<n>`).
 
