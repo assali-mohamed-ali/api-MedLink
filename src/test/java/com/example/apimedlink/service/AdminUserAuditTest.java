@@ -9,6 +9,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doCallRealMethod;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -18,6 +19,7 @@ import com.example.apimedlink.model.AuditAction;
 import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Patient;
 import com.example.apimedlink.model.User;
+import com.example.apimedlink.repository.AccountOperationStore;
 import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.repository.UserRepository;
 import com.example.apimedlink.security.Roles;
@@ -40,10 +42,11 @@ import org.springframework.transaction.PlatformTransactionManager;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * MLink-72 (review of #121): no account change without its audit entry, and no silent gap. A new account is saved
- * with its entry in one transaction. A role or status change is traced first (ATTEMPTED, committed before anything
- * is touched), then sealed (SUCCESS or FAILURE); when an entry cannot be written the answer is a 503, never a
- * silent success. Real database; Keycloak is a mock.
+ * MLink-72 (reviews of #121 and #122): no account change without its audit entry, and no silent gap. A new account
+ * is saved with its entry in one transaction. A role or status change is a durable operation: its record and its
+ * ATTEMPTED entry are written together before anything is touched, and it is closed with its SUCCESS or FAILURE
+ * entry; when an entry cannot be written the answer is a 503, never a silent success. The outages, the retries by
+ * the worker and the correlation are in {@link AccountOperationTest}. Real database; Keycloak is a mock.
  */
 @SpringBootTest
 @Import(TestcontainersConfiguration.class)
@@ -73,6 +76,9 @@ class AdminUserAuditTest {
     @MockitoSpyBean
     AuditService auditService;
 
+    @MockitoSpyBean
+    AccountOperationStore operationStore;
+
     UUID keycloakId;
     String email;
 
@@ -93,6 +99,11 @@ class AdminUserAuditTest {
     private List<String> outcomes(AuditAction action) {
         return jdbc.queryForList("select outcome from audit_entries where resource_id = ? and action = ? "
                 + "order by timestamp", String.class, keycloakId.toString(), action.name());
+    }
+
+    private String operationStatus() {
+        return jdbc.queryForObject("select status from account_operations where user_id = ? "
+                + "order by created_at desc limit 1", String.class, keycloakId);
     }
 
     private long failedCreations() {
@@ -149,6 +160,7 @@ class AdminUserAuditTest {
         admin.changeRole(keycloakId, Roles.ADMINISTRATIVE_STAFF, null, null);
 
         assertThat(outcomes(AuditAction.ROLE_CHANGED)).containsExactly("ATTEMPTED", "SUCCESS");
+        assertThat(operationStatus()).isEqualTo("DONE");
     }
 
     @Test
@@ -195,7 +207,7 @@ class AdminUserAuditTest {
     }
 
     @Test
-    void aFailureInKeycloakIsSealedAsAFailure() {
+    void aFailureInKeycloakLeavesTheOperationPendingForARetry() {
         saveUser();
         doThrow(new IllegalStateException("keycloak down")).when(keycloak).setEnabled(keycloakId, false);
 
@@ -203,7 +215,9 @@ class AdminUserAuditTest {
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("keycloak down");
 
-        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("ATTEMPTED", "FAILURE");
+        // Not closed: an outage is not a refusal. The operation stays pending and the worker carries it out again
+        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("ATTEMPTED");
+        assertThat(operationStatus()).isEqualTo("PENDING");
     }
 
     // ---- no trace, no change; no silent success ----
@@ -211,8 +225,9 @@ class AdminUserAuditTest {
     @Test
     void whenTheAttemptCannotBeWrittenNothingIsDone() {
         saveUser();
-        doThrow(new IllegalStateException("audit down")).when(auditService)
-                .record(eq(AuditAction.ACCOUNT_DISABLED), anyString(), anyString(), eq(AuditOutcome.ATTEMPTED));
+        doThrow(new IllegalStateException("audit down")).when(operationStore)
+                .appendAudit(any(), eq(AuditAction.ACCOUNT_DISABLED), any(), any(), any(),
+                        eq(AuditOutcome.ATTEMPTED));
 
         assertThatThrownBy(() -> admin.setEnabled(keycloakId, false, UUID.randomUUID()))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
@@ -223,13 +238,16 @@ class AdminUserAuditTest {
         verify(keycloak, never()).setEnabled(any(), anyBoolean());
         verify(keycloak, never()).endSessions(any());
         assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).isEmpty();
+        assertThat(jdbc.queryForObject("select count(*) from account_operations where user_id = ?", Long.class,
+                keycloakId)).as("the record and its entry were one transaction").isZero();
     }
 
     @Test
-    void whenTheClosingEntryCannotBeWrittenTheAnswerIsAnErrorAndARetryCompletesIt() {
+    void whenTheClosingEntryCannotBeWrittenTheAnswerIsAnErrorAndTheSameRequestCompletesIt() {
         saveUser();
-        doThrow(new IllegalStateException("audit down")).when(auditService)
-                .record(eq(AuditAction.ACCOUNT_DISABLED), anyString(), anyString(), eq(AuditOutcome.SUCCESS));
+        doThrow(new IllegalStateException("audit down")).when(operationStore)
+                .appendAudit(any(), eq(AuditAction.ACCOUNT_DISABLED), any(), any(), any(),
+                        eq(AuditOutcome.SUCCESS));
 
         assertThatThrownBy(() -> admin.setEnabled(keycloakId, false, UUID.randomUUID()))
                 .isInstanceOfSatisfying(ApiException.class, e -> {
@@ -237,16 +255,21 @@ class AdminUserAuditTest {
                     assertThat(e.getCode()).isEqualTo("AUDIT_UNAVAILABLE");
                 });
 
-        // Never a silent success: the change was made, the trail shows the attempt, and the caller was told
+        // Never a silent success: the change was made, the trail shows the attempt, and the caller was told.
+        // The operation is still pending: nothing was closed.
         verify(keycloak).setEnabled(keycloakId, false);
         assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("ATTEMPTED");
+        assertThat(operationStatus()).isEqualTo("PENDING");
 
-        // The audit store is back: staff send the same request again and the trail is closed
-        doCallRealMethod().when(auditService)
-                .record(eq(AuditAction.ACCOUNT_DISABLED), anyString(), anyString(), eq(AuditOutcome.SUCCESS));
+        // The audit store is back: the same request carries on the same operation, and the trail is closed
+        doCallRealMethod().when(operationStore)
+                .appendAudit(any(), eq(AuditAction.ACCOUNT_DISABLED), any(), any(), any(),
+                        eq(AuditOutcome.SUCCESS));
         admin.setEnabled(keycloakId, false, UUID.randomUUID());
 
-        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("ATTEMPTED", "ATTEMPTED", "SUCCESS");
+        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("ATTEMPTED", "SUCCESS");
+        assertThat(operationStatus()).isEqualTo("DONE");
+        verify(keycloak, times(2)).setEnabled(keycloakId, false);
     }
 
     @Test
