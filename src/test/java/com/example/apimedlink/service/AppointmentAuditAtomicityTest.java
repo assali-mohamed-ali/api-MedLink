@@ -89,7 +89,7 @@ class AppointmentAuditAtomicityTest {
     void aMoveWhoseAuditCannotBeWrittenKeepsTheOldAppointmentAndLeavesTheNewSlotFree() {
         UUID patient = patient();
         UUID oldSlot = freeSlot();
-        UUID newSlot = freeSlot();
+        UUID newSlot = freeSlot(1);
         UUID booked = appointments.book(patient, oldSlot).getId();
         auditFailsFor("APPOINTMENT_RESCHEDULED");
         callerIs(patient);
@@ -107,11 +107,12 @@ class AppointmentAuditAtomicityTest {
     @Test
     void aCancelAndAMoveEachWriteOneAuditRow() {
         UUID patient = patient();
+        // One patient, three different hours: a patient holds one appointment at a time (MLink-167)
         UUID moved = appointments.book(patient, freeSlot()).getId();
-        UUID cancelled = appointments.book(patient, freeSlot()).getId();
+        UUID cancelled = appointments.book(patient, freeSlot(1)).getId();
         callerIs(patient);
 
-        UUID replacement = appointments.reschedule(moved, freeSlot()).getId();
+        UUID replacement = appointments.reschedule(moved, freeSlot(2)).getId();
         appointments.cancel(cancelled);
         appointments.cancel(cancelled);
 
@@ -162,6 +163,12 @@ class AppointmentAuditAtomicityTest {
 
     /** A practitioner of its own, working in Sfax, with one free 30-minute slot there. */
     private UUID freeSlot() {
+        return freeSlot(0);
+    }
+
+    /** As {@link #freeSlot()}, {@code hoursLater} hours after {@link #START}. */
+    private UUID freeSlot(int hoursLater) {
+        Instant start = START.plus(hoursLater, ChronoUnit.HOURS);
         UUID practitioner = UUID.randomUUID();
         UUID specialty = UUID.randomUUID();
         jdbc.update("insert into specialties (id, name) values (?, ?)", specialty, "Specialty " + specialty);
@@ -172,7 +179,7 @@ class AppointmentAuditAtomicityTest {
         jdbc.update("insert into practitioner_clinics (practitioner_id, clinic_id) values (?, ?)", practitioner, SFAX);
         UUID slot = UUID.randomUUID();
         jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) values (?, ?, ?, ?, ?, 'FREE')",
-                slot, practitioner, SFAX, Timestamp.from(START), Timestamp.from(START.plus(30, ChronoUnit.MINUTES)));
+                slot, practitioner, SFAX, Timestamp.from(start), Timestamp.from(start.plus(30, ChronoUnit.MINUTES)));
         return slot;
     }
 }
