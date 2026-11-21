@@ -21,13 +21,16 @@ import org.springframework.stereotype.Repository;
  * MLink-72 (review of #122): the durable record of the account operations that reach Keycloak, and the audit
  * entries that carry their operation id. Each call is its own statement; a caller that needs several of them to be
  * kept or lost together runs them inside one transaction. No transaction is held while Keycloak answers: an
- * operation is claimed with a short lease (locked_until), carried out, then closed.
+ * operation is claimed with a short lease (locked_until) and a fresh token (lease_token), carried out, then closed:
+ * closing it, or putting it back to wait, only works for the holder of the current token, so a worker whose lease
+ * ended and whose operation was taken over by another worker cannot change it any more.
  */
 @Repository
 public class AccountOperationStore {
 
     private static final String COLUMNS =
-            "id, action, user_id, target_role, specialty_id, clinic_ids, enabled, requested_by, ip_address, attempts";
+            "id, action, user_id, target_role, specialty_id, clinic_ids, enabled, requested_by, ip_address, attempts, "
+                    + "lease_token";
 
     private final JdbcClient db;
 
@@ -65,61 +68,76 @@ public class AccountOperationStore {
     }
 
     /**
-     * Takes this operation for {@code leaseSeconds} and counts the try. Empty when it is no longer pending or when
-     * another run holds it (its lease has not ended).
+     * Takes this operation for {@code leaseSeconds}, with a new token, and counts the try. Empty when it is no longer
+     * pending or when another run holds it (its lease has not ended).
      */
     public Optional<AccountOperation> lease(UUID id, Instant now, long leaseSeconds) {
         return db.sql("""
-                        UPDATE account_operations SET locked_until = :until, attempts = attempts + 1
+                        UPDATE account_operations SET locked_until = :until, attempts = attempts + 1,
+                                                      lease_token = :token
                         WHERE id = :id AND status = 'PENDING' AND (locked_until IS NULL OR locked_until < :now)
                         RETURNING\s""" + COLUMNS)
                 .param("id", id, Types.OTHER)
+                .param("token", UUID.randomUUID(), Types.OTHER)
                 .param("until", utc(now.plusSeconds(leaseSeconds)))
                 .param("now", utc(now))
                 .query((rs, row) -> map(rs))
                 .optional();
     }
 
-    /** Takes the operations that are due and not held, oldest first, each with a lease; several workers never share one. */
-    public List<AccountOperation> claimDue(Instant now, long leaseSeconds, int limit) {
+    /**
+     * Takes the oldest operation that is due and not held, with a lease and a new token. Called just before each
+     * operation runs, never for a whole batch at once: the lease of an operation that is still waiting its turn
+     * would otherwise run out while the ones before it are carried out. Several workers never take the same one.
+     */
+    public Optional<AccountOperation> claimNext(Instant now, long leaseSeconds) {
         return db.sql("""
-                        UPDATE account_operations SET locked_until = :until, attempts = attempts + 1
-                        WHERE id IN (SELECT id FROM account_operations
-                                     WHERE status = 'PENDING' AND next_attempt_at <= :now
-                                       AND (locked_until IS NULL OR locked_until < :now)
-                                     ORDER BY created_at LIMIT :limit FOR UPDATE SKIP LOCKED)
+                        UPDATE account_operations SET locked_until = :until, attempts = attempts + 1,
+                                                      lease_token = :token
+                        WHERE id = (SELECT id FROM account_operations
+                                    WHERE status = 'PENDING' AND next_attempt_at <= :now
+                                      AND (locked_until IS NULL OR locked_until < :now)
+                                    ORDER BY created_at LIMIT 1 FOR UPDATE SKIP LOCKED)
                         RETURNING\s""" + COLUMNS)
+                .param("token", UUID.randomUUID(), Types.OTHER)
                 .param("until", utc(now.plusSeconds(leaseSeconds)))
                 .param("now", utc(now))
-                .param("limit", limit)
                 .query((rs, row) -> map(rs))
-                .list();
+                .optional();
     }
 
-    /** Closes the operation (DONE or FAILED); false when it was already closed, so nothing is written twice. */
-    public boolean close(UUID id, String status, Instant now, String lastError) {
+    /**
+     * Closes the operation (DONE or FAILED) for the holder of {@code leaseToken}; false when it was already closed
+     * or taken over by another claim, so nothing is written twice and a stale worker changes nothing.
+     */
+    public boolean close(UUID id, UUID leaseToken, String status, Instant now, String lastError) {
         return db.sql("""
                         UPDATE account_operations SET status = :status, closed_at = :now, locked_until = NULL,
                                                       last_error = :error
-                        WHERE id = :id AND status = 'PENDING'
+                        WHERE id = :id AND status = 'PENDING' AND lease_token = :token
                         """)
                 .param("id", id, Types.OTHER)
+                .param("token", leaseToken, Types.OTHER)
                 .param("status", status, Types.VARCHAR)
                 .param("now", utc(now))
                 .param("error", lastError, Types.VARCHAR)
                 .update() == 1;
     }
 
-    /** Puts the operation back to wait: it will be tried again at {@code next}, and nothing holds it any more. */
-    public void reschedule(UUID id, Instant next, String lastError) {
-        db.sql("""
+    /**
+     * Puts the operation back to wait, for the holder of {@code leaseToken}: it will be tried again at
+     * {@code next}, and nothing holds it any more. False (nothing changed) when another claim holds it now.
+     */
+    public boolean reschedule(UUID id, UUID leaseToken, Instant next, String lastError) {
+        return db.sql("""
                         UPDATE account_operations SET next_attempt_at = :next, locked_until = NULL, last_error = :error
-                        WHERE id = :id AND status = 'PENDING'
+                        WHERE id = :id AND status = 'PENDING' AND lease_token = :token
                         """)
                 .param("id", id, Types.OTHER)
+                .param("token", leaseToken, Types.OTHER)
                 .param("next", utc(next))
                 .param("error", lastError, Types.VARCHAR)
-                .update();
+                .update() == 1;
     }
 
     /**
@@ -160,7 +178,8 @@ public class AccountOperationStore {
                 rs.getObject("enabled", Boolean.class),
                 rs.getObject("requested_by", UUID.class),
                 rs.getString("ip_address"),
-                rs.getInt("attempts"));
+                rs.getInt("attempts"),
+                rs.getObject("lease_token", UUID.class));
     }
 
     private static String clinicsText(Set<UUID> clinicIds) {

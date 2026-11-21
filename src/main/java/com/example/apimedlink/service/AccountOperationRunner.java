@@ -9,10 +9,10 @@ import com.example.apimedlink.security.CurrentUser;
 import jakarta.persistence.EntityNotFoundException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import java.util.function.Consumer;
+import java.util.function.Supplier;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -37,6 +37,11 @@ import org.springframework.web.context.request.ServletRequestAttributes;
  * outage (Keycloak, the database) leaves it PENDING, to be retried with a growing delay, until the maximum number
  * of tries is reached: then it is closed as FAILED with a FAILURE entry. The closing entry is written once: the
  * close only succeeds while the record is PENDING, and the database allows one closing entry per operation id.
+ *
+ * <p>An operation is claimed just before it runs, with a lease and a token of its own: the lease of one that waits
+ * its turn never runs out. Only the holder of the current token can close it or put it back to wait: a worker
+ * whose lease ended while it was busy, and whose operation another worker took over, changes nothing any more
+ * (the steps of an operation are idempotent, so both having run them is harmless).
  */
 @Service
 public class AccountOperationRunner {
@@ -117,10 +122,25 @@ public class AccountOperationRunner {
         complete(op, now);
     }
 
-    /** The operations that are due, carried out one by one; one that fails never stops the others. */
+    /** The operations that are due at {@code now}, carried out one by one (the tests choose the time). */
     public int runDue(Instant now, Consumer<AccountOperation> executor) {
-        List<AccountOperation> due = store.claimDue(now, leaseSeconds, BATCH);
-        for (AccountOperation op : due) {
+        return runDue(() -> now, executor);
+    }
+
+    /**
+     * The operations that are due, carried out one by one, at most one batch per call; one that fails never stops the
+     * others. Each one is claimed just before it runs, at the time the clock gives then.
+     */
+    public int runDue(Supplier<Instant> clock, Consumer<AccountOperation> executor) {
+        int taken = 0;
+        while (taken < BATCH) {
+            Instant now = clock.get();
+            Optional<AccountOperation> next = store.claimNext(now, leaseSeconds);
+            if (next.isEmpty()) {
+                break;
+            }
+            taken++;
+            AccountOperation op = next.get();
             try {
                 execute(op, executor, now);
             } catch (RuntimeException e) {
@@ -128,7 +148,7 @@ public class AccountOperationRunner {
                         e.getClass().getSimpleName());
             }
         }
-        return due.size();
+        return taken;
     }
 
     /** After a failure: closed as FAILED for a refusal or when the tries are used up, otherwise put back to wait. */
@@ -138,7 +158,7 @@ public class AccountOperationRunner {
             if (isRefusal(failed) || op.attempts() >= maxAttempts) {
                 close(op, "FAILED", AuditOutcome.FAILURE, now, error);
             } else {
-                store.reschedule(op.id(), now.plus(backoff(op.attempts())), error);
+                store.reschedule(op.id(), op.leaseToken(), now.plus(backoff(op.attempts())), error);
             }
         } catch (RuntimeException bookkeeping) {
             // The original error stays the one the caller gets; the operation is still PENDING, so it is tried again
@@ -156,7 +176,7 @@ public class AccountOperationRunner {
                     + "it stays pending and is closed by the next try", op.action(), op.userId(),
                     e.getClass().getSimpleName());
             try {
-                store.reschedule(op.id(), now, "AuditUnavailable"); // frees the lease: the next call or poll closes it
+                store.reschedule(op.id(), op.leaseToken(), now, "AuditUnavailable"); // frees the lease: the next call or poll closes it
             } catch (RuntimeException ignored) {
                 // the lease ends by itself
             }
@@ -166,10 +186,10 @@ public class AccountOperationRunner {
         }
     }
 
-    /** The record and the closing entry, together, and only once. */
+    /** The record and the closing entry, together, and only once, and only for the holder of the current lease. */
     private void close(AccountOperation op, String status, AuditOutcome outcome, Instant now, String error) {
         tx.executeWithoutResult(s -> {
-            if (store.close(op.id(), status, now, error)) {
+            if (store.close(op.id(), op.leaseToken(), status, now, error)) {
                 store.appendAudit(op.id(), op.action(), op.userId(), op.requestedBy(), op.ipAddress(), outcome);
             }
         });

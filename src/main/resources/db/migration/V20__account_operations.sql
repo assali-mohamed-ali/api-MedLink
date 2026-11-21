@@ -4,6 +4,9 @@
 -- carried it out and closed it, in one transaction with its closing audit entry. A crash after Keycloak but before
 -- the close therefore leaves a PENDING row that is retried, never an orphan ATTEMPTED entry.
 --
+-- lease_token: each claim of the operation gets a new token. Only the holder of the current token may close it or put
+-- it back to wait, so a worker whose lease ended (and whose operation was taken over) can no longer change it.
+--
 -- No foreign key on user_id: like audit_entries, a row must not depend on the user row it is about.
 -- last_error holds an exception class name only, never a message.
 CREATE TABLE account_operations (
@@ -20,6 +23,7 @@ CREATE TABLE account_operations (
     attempts        INTEGER      NOT NULL DEFAULT 0,
     next_attempt_at TIMESTAMPTZ  NOT NULL,
     locked_until    TIMESTAMPTZ,
+    lease_token     UUID,
     created_at      TIMESTAMPTZ  NOT NULL,
     closed_at       TIMESTAMPTZ,
     last_error      VARCHAR(100),

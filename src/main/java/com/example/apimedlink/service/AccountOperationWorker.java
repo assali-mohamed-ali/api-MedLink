@@ -23,7 +23,7 @@ public class AccountOperationWorker {
     @Scheduled(initialDelayString = "${app.account-operations.poll-interval:30s}",
             fixedDelayString = "${app.account-operations.poll-interval:30s}")
     public void poll() {
-        runDue(Instant.now());
+        runner.runDue(Instant::now, admin::execute);
     }
 
     /** The pending operations that are due at {@code now}; returns how many were taken (the tests choose the time). */

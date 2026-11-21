@@ -24,8 +24,10 @@ import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -53,6 +55,9 @@ class AccountOperationTest {
 
     @Autowired
     AccountOperationWorker worker;
+
+    @Autowired
+    AccountOperationRunner runner;
 
     @Autowired
     UserRepository users;
@@ -96,6 +101,23 @@ class AccountOperationTest {
 
     private static Instant later(int hours) {
         return Instant.now().plus(Duration.ofHours(hours));
+    }
+
+    /** An operation registered with its ATTEMPTED entry and due, as the request that started it would leave it. */
+    private AccountOperation pending(UUID user, Instant createdAt) {
+        AccountOperation op = AccountOperation.statusChange(user, false).requestedBy(UUID.randomUUID(), "10.0.0.1");
+        store.insert(op, createdAt);
+        store.appendAudit(op.id(), op.action(), user, op.requestedBy(), op.ipAddress(), AuditOutcome.ATTEMPTED);
+        return op;
+    }
+
+    private String statusOf(UUID operationId) {
+        return jdbc.queryForObject("select status from account_operations where id = ?", String.class, operationId);
+    }
+
+    private boolean held(UUID operationId) {
+        return Boolean.TRUE.equals(jdbc.queryForObject(
+                "select locked_until is not null from account_operations where id = ?", Boolean.class, operationId));
     }
 
     private void disable() {
@@ -240,5 +262,63 @@ class AccountOperationTest {
         verify(keycloak, never()).setEnabled(any(), anyBoolean());
         assertThat(operations()).as("the record and the entry were one transaction").isZero();
         assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).isEmpty();
+    }
+
+    @Test
+    void aWorkerWhoseLeaseEndedCannotCloseWhatAnotherWorkerTookOver() {
+        AccountOperation op = pending(id, Instant.now().minusSeconds(3600));
+        Instant start = Instant.now();
+        AccountOperation stale = store.lease(op.id(), start, 120).orElseThrow();
+        AtomicReference<AccountOperation> takenOver = new AtomicReference<>();
+
+        // The first worker is still busy when its lease ends: a second worker claims the same operation
+        runner.execute(stale, running -> takenOver.set(
+                store.lease(op.id(), start.plusSeconds(300), 120).orElseThrow()), start);
+
+        assertThat(takenOver.get().leaseToken()).as("a new claim, a new token").isNotEqualTo(stale.leaseToken());
+        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).as("the stale worker closed nothing")
+                .containsExactly("ATTEMPTED");
+        assertThat(statusOf(op.id())).isEqualTo("PENDING");
+
+        runner.execute(takenOver.get(), running -> { }, start.plusSeconds(301));
+
+        assertThat(outcomes(AuditAction.ACCOUNT_DISABLED)).containsExactly("ATTEMPTED", "SUCCESS");
+        assertThat(statusOf(op.id())).isEqualTo("DONE");
+    }
+
+    @Test
+    void aWorkerWhoseLeaseEndedCannotPutBackWhatAnotherWorkerHolds() {
+        AccountOperation op = pending(id, Instant.now().minusSeconds(3600));
+        Instant start = Instant.now();
+        AccountOperation stale = store.lease(op.id(), start, 120).orElseThrow();
+
+        assertThatThrownBy(() -> runner.execute(stale, running -> {
+            store.lease(op.id(), start.plusSeconds(300), 120).orElseThrow();
+            throw new KeycloakUnavailableException("down");
+        }, start)).isInstanceOf(KeycloakUnavailableException.class);
+
+        assertThat(held(op.id())).as("the lease of the second worker is untouched").isTrue();
+        assertThat(statusOf(op.id())).isEqualTo("PENDING");
+        assertThat(store.reschedule(op.id(), stale.leaseToken(), start, "x")).isFalse();
+        assertThat(store.close(op.id(), stale.leaseToken(), "DONE", start, null)).isFalse();
+    }
+
+    @Test
+    void theOperationsOfABatchAreTakenOneByOneJustBeforeTheyRun() {
+        UUID otherUser = UUID.randomUUID();
+        AccountOperation first = pending(id, Instant.now().minusSeconds(7200));
+        AccountOperation second = pending(otherUser, Instant.now().minusSeconds(7100));
+        List<Boolean> secondHeldWhileFirstRuns = new ArrayList<>();
+
+        runner.runDue(Instant.now(), running -> {
+            if (running.id().equals(first.id())) {
+                secondHeldWhileFirstRuns.add(held(second.id()));
+            }
+        });
+
+        assertThat(secondHeldWhileFirstRuns).as("the second one waits without a lease while the first runs")
+                .containsExactly(false);
+        assertThat(statusOf(first.id())).isEqualTo("DONE");
+        assertThat(statusOf(second.id())).isEqualTo("DONE");
     }
 }
