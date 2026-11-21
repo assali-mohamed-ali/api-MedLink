@@ -120,8 +120,8 @@ public class AppointmentService {
         Appointment moved = bookLocked(newSlot, old.getPatientId(), now);
         audit.recordWithin(AuditAction.APPOINTMENT_RESCHEDULED, "APPOINTMENT", moved.getId().toString(),
                 AuditOutcome.SUCCESS);
-        // MLink-37: a move cancels the old appointment, so the practitioner of the old slot gets its alert
-        alerts.onAppointmentCancelled(old);
+        // MLink-37: the practitioner of the old slot is told it was moved ("reporté"), and to which date
+        alerts.onAppointmentMoved(old, moved);
         return moved;
     }
 
