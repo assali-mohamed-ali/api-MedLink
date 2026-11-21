@@ -28,6 +28,14 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
     @Query("select a from Appointment a where a.id = :id")
     Optional<Appointment> findForChangeById(@Param("id") UUID id);
 
+    /** MLink-167: whether the patient holds an appointment in {@code status} that overlaps [start, end). */
+    @Query("""
+            select count(a) > 0 from Appointment a
+            where a.patientId = :patientId and a.status = :status
+              and a.slot.startsAt < :end and a.slot.endsAt > :start""")
+    boolean existsOverlapping(@Param("patientId") UUID patientId, @Param("status") AppointmentStatus status,
+            @Param("start") Instant start, @Param("end") Instant end);
+
     /**
      * MLink-110: the ids of the appointments still to remind, those in {@code status} that start after {@code from}
      * and no later than {@code until}. Only candidates: each one is locked and checked again before its mail

@@ -84,6 +84,10 @@ change the schema. **Migration V18** (`V18__app_role_grants.sql`; V17 is MLink-3
 will fail, as the API would. New env key `APP_DB_PASSWORD` (the setup scripts add it to `.env`); staging/prod also need
 `SPRING_FLYWAY_USER` / `SPRING_FLYWAY_PASSWORD`. No `-Reset` needed. No endpoint. See the MLink-165 section.
 
+**2026-11-18:** MLink-167 on `epic/MLink-8` (story MLink-27): a patient cannot hold two overlapping appointments,
+even in two clinics. A booking or a move onto such a time is **409 `PATIENT_BUSY`**. No migration, no new route,
+no shared file changed. See the MLink-167 section.
+
 **2026-11-17:** Code owner's review on #120, round 3: a cancel writes `APPOINTMENT_CANCELLED` and a move writes
 `APPOINTMENT_RESCHEDULED` (on the new appointment), each in its own transaction like a booking. `AuditAction` gains
 the two values (shared file, two lines). No migration, no new route. See the section "Review on #120".
@@ -715,6 +719,54 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-167 — one appointment at a time per patient, 409 `PATIENT_BUSY` (2026-11-18, epic/MLink-8)
+
+Found in a demo: one patient booked two appointments on the same day at 08:00, one in Sousse and one in Sfax. No rule
+stopped it, because `SLOT_TAKEN` only guards one slot.
+
+**Rule.** A booking (`POST /api/appointments`) or a move (`POST /api/appointments/{id}/reschedule`) onto a slot that
+overlaps one of the patient's `BOOKED` appointments answers **409** with code `PATIENT_BUSY` and the message
+"Vous avez déjà un rendez-vous à ce moment-là." Two times overlap when one starts before the other ends: back-to-back
+slots are fine. A cancelled appointment does not count. For a move, the appointment being moved does not count either,
+because it is cancelled in the same transaction before the new one is checked. The rule is per patient: another
+patient can book at the same time.
+
+**Design.**
+- `AppointmentRepository.existsOverlapping(patientId, status, start, end)` is checked in `bookLocked()`, after the
+  slot's FREE check. Booking and moving both go through it.
+- Two sessions of one patient could book two overlapping slots at the same instant: each slot has its own lock, so the
+  check alone would let both pass. `PatientRepository.lockForBooking` (`select id from patients where id = ? for
+  update`) now serialises one patient's bookings and moves. `book()` takes it first; `reschedule()` takes it before
+  locking the slots, in the same order, so no deadlock. An unknown patient row still answers 403
+  `PATIENT_PROFILE_REQUIRED`.
+- Other patients are not slowed down, because each patient has their own lock.
+
+**Tests.** `PatientOverlapFunctionalTest` (7 tests, real API, Keycloak and database):
+- the same time in another clinic is refused, and the second slot stays FREE;
+- a partial overlap is refused;
+- back-to-back slots and another patient at the same time are fine;
+- a cancelled appointment does not block its time;
+- a move onto another appointment's time is refused, and the old appointment is kept;
+- a move that overlaps only the moved appointment is fine;
+- two sessions booking overlapping slots at the same instant give `[201, 409]` in each of 5 rounds.
+
+`AppointmentAuditAtomicityTest` booked one patient three times at the same hour, which the new rule forbids. It now
+uses distinct hours (74ed232).
+
+Postman, folder 7: the collection now picks a slot that fits around the patient's appointments, then books a slot at
+the time of an existing appointment and expects 409 `PATIENT_BUSY`. That request is skipped when the dev seed has no
+such slot.
+
+**Proof** (Ubuntu VM with Docker):
+- Red e71b60f, with the previous code: 4 of 7 fail. The three that pass guard what was already allowed.
+- Green 2d7026f: 7/7, and 27 tests with the appointment tests run alongside, 0 failures.
+- Mutation: without the `existsOverlapping` check, 4 of 7 turn red again.
+- On 74ed232: `./mvnw -B verify` **752 tests, 0 failures**; reverse order 752, 0 failures.
+- `setup-dev --skip-tests` then newman: **208 requests, 438 assertions, 0 failures**.
+- After `master` (6cf2a6c) merged in for the code owner's review on #128 (bfb3ca0; only `report.md` conflicted, both
+  sides kept; `AppointmentService` now also calls the MLink-37 alert after the audit lines): `./mvnw -B clean verify`
+  **887 tests, 0 failures**; reverse order 887, 0 failures; newman **230 requests, 478 assertions, 0 failures**.
 
 ## Review on #120 — booking audit, reminder vs cancel, at-least-once reminders (2026-11-15, epic/MLink-8)
 
