@@ -764,6 +764,9 @@ such slot.
 - Mutation: without the `existsOverlapping` check, 4 of 7 turn red again.
 - On 74ed232: `./mvnw -B verify` **752 tests, 0 failures**; reverse order 752, 0 failures.
 - `setup-dev --skip-tests` then newman: **208 requests, 438 assertions, 0 failures**.
+- After `master` (6cf2a6c) merged in for the code owner's review on #128 (bfb3ca0; only `report.md` conflicted, both
+  sides kept; `AppointmentService` now also calls the MLink-37 alert after the audit lines): `./mvnw -B clean verify`
+  **887 tests, 0 failures**; reverse order 887, 0 failures; newman **230 requests, 478 assertions, 0 failures**.
 
 ## Review on #120 — booking audit, reminder vs cancel, at-least-once reminders (2026-11-15, epic/MLink-8)
 
