@@ -14,6 +14,8 @@ public enum AuditAction {
     APPOINTMENT_RESCHEDULED,
     SLOT_OPENED,
     SLOT_CLOSED,
+    /** Anonymised statistics were exported, or the export was refused (MLink-95): the period and indicators only. */
+    STATS_EXPORTED,
     /** A practitioner read a patient's record (MLink-31): ids only, never medical content. */
     RECORD_VIEWED,
     /** A practitioner wrote a consultation report (MLink-32): the report id only, never its text. */
