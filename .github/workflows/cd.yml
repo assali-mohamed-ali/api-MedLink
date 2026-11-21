@@ -2,7 +2,9 @@ name: CD
 
 # Release lifecycle: verify, build once, scan the exact image, generate an SBOM,
 # publish by digest, attest/sign, verify before deployment, then deploy by digest.
-# CI validates the container stack on ephemeral GitHub runners; production deployment uses Docker Compose over SSH when configured. No Kubernetes or Argo CD.
+# A staging push deploys and smoke-tests both repositories; when both staging jobs pass,
+# the same verified digest goes to production unless AUTO_DEPLOY_PROD=false.
+# Tags keep the legacy Release Please path. No Kubernetes or Argo CD.
 
 on:
   pull_request:
@@ -261,13 +263,13 @@ jobs:
         if: always()
         run: docker compose --file compose.yaml --profile full down --volumes --remove-orphans
 
-  # Once runner-based container tests pass, create a real staging -> prod
-  # PR and merge it only after its own CI/security checks complete successfully.
+  # Legacy release path, used only with AUTO_DEPLOY_PROD=false. The default path
+  # deploys the verified staging digest to production after both staging gates.
   # PROMOTION_TOKEN is a fine-grained PAT so the resulting PR workflows run.
   promote-staging-to-prod:
     name: Promote staging to prod
     needs: runner-container-test
-    if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && vars.ENABLE_AUTO_PROMOTION == 'true'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/staging' && vars.ENABLE_AUTO_PROMOTION == 'true' && vars.AUTO_DEPLOY_PROD == 'false'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
@@ -342,15 +344,16 @@ jobs:
           gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --watch --fail-fast
           gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge
 
-  deploy-prod:
+  deploy-staging:
     needs: publish-and-attest
-    if: vars.ENABLE_AUTO_PROMOTION == 'true' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.target == 'production' && startsWith(github.ref, 'refs/tags/v')))
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && (github.ref == 'refs/heads/master' || github.ref == 'refs/heads/main' || github.ref == 'refs/heads/staging'))
     runs-on: ubuntu-latest
     timeout-minutes: 20
-    environment: production
+    environment: staging
     permissions:
       contents: read
       packages: read
+      id-token: write # the OIDC token that logs in to Vault
     steps:
       - uses: actions/checkout@v7
 
@@ -374,12 +377,190 @@ jobs:
       - name: Deploy the verified immutable image
         uses: ./.github/actions/deploy-compose
         with:
-          host: ${{ vars.DEPLOY_HOST }}
-          user: ${{ vars.DEPLOY_USER }}
-          path: ${{ vars.DEPLOY_PATH }}
-          health_url: ${{ vars.DEPLOY_HEALTH_URL }}
+          host: ${{ vars.DEPLOY_HOST || '13.51.30.39' }}
+          user: ${{ vars.DEPLOY_USER || 'deploy' }}
+          path: ${{ vars.DEPLOY_PATH || '/opt/medlink/api' }}
+          health_url: ${{ vars.DEPLOY_HEALTH_URL || 'https://13.51.30.39.sslip.io/readyz' }}
           ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
           known_hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
-          env_file: ${{ secrets.DEPLOY_ENV_FILE }}
+          settings_file: deploy/env/staging.env
+          vault_addr: https://56.228.74.131.sslip.io
+          vault_role: api-staging
+          vault_path: staging/api
+          image: ${{ needs.publish-and-attest.outputs.image }}
+          ghcr_token: ${{ secrets.GITHUB_TOKEN }}
+
+  smoke-staging:
+    needs: deploy-staging
+    if: success() && ((github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && github.ref == 'refs/heads/staging'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check liveness, readiness and CSRF bootstrap
+        env:
+          BASE_URL: ${{ vars.STAGING_PUBLIC_URL || 'https://13.51.30.39.sslip.io' }}
+        run: |
+          set -euo pipefail
+          test -n "$BASE_URL"
+          live="$(curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 "$BASE_URL/livez")"
+          grep -q '"status":"UP"' <<<"$live"
+          ready="$(curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 "$BASE_URL/readyz")"
+          grep -q '"status":"UP"' <<<"$ready"
+
+          headers="$(mktemp)"
+          trap 'rm -f "$headers"' EXIT
+          status="$(curl --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
+            --dump-header "$headers" --output /dev/null --write-out '%{http_code}' \
+            "$BASE_URL/api/auth/csrf")"
+          test "$status" = "204" || {
+            echo "::error::Expected $BASE_URL/api/auth/csrf to return 204, got $status";
+            exit 1;
+          }
+          grep -qi '^set-cookie: XSRF-TOKEN=' "$headers" || {
+            echo "::error::The CSRF bootstrap endpoint did not set XSRF-TOKEN";
+            exit 1;
+          }
+
+  wait-for-frontend-staging:
+    needs: smoke-staging
+    if: success() && ((github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && github.ref == 'refs/heads/staging'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Wait for the dashboard staging deploy and smoke test
+        env:
+          CROSS_REPO_TOKEN: ${{ secrets.CROSS_REPO_TOKEN }}
+        run: |
+          bash .github/scripts/wait-for-staging.sh \
+            --repository assali-mohamed-ali/medlink-dashboard \
+            --workflow container-security.yml \
+            --job deploy-staging \
+            --job smoke-staging \
+            --timeout 1800 \
+            --interval 30 \
+            --token "$CROSS_REPO_TOKEN"
+
+  deploy-prod-from-staging:
+    needs: [publish-and-attest, wait-for-frontend-staging]
+    if: success() && vars.AUTO_DEPLOY_PROD != 'false' && ((github.event_name == 'push' && github.ref == 'refs/heads/staging') || (github.event_name == 'workflow_dispatch' && inputs.target == 'staging' && github.ref == 'refs/heads/staging'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+      id-token: write # the OIDC token that logs in to Vault
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to GHCR for signature verification
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Verify image signature before deployment
+        env:
+          IMAGE: ${{ needs.publish-and-attest.outputs.image }}
+        run: |
+          test -n "$IMAGE"
+          cosign verify --certificate-identity-regexp '^https://github.com/assali-mohamed-ali/api-MedLink/.github/workflows/cd.yml@refs/(heads/(master|main|staging|prod)|tags/v.*)$' --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
+
+      - name: Deploy the verified immutable image
+        uses: ./.github/actions/deploy-compose
+        with:
+          host: ${{ vars.DEPLOY_HOST || '13.50.114.144' }}
+          user: ${{ vars.DEPLOY_USER || 'deploy' }}
+          path: ${{ vars.DEPLOY_PATH || '/opt/medlink/api' }}
+          health_url: ${{ vars.DEPLOY_HEALTH_URL || 'https://56.228.94.12.sslip.io/readyz' }}
+          ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known_hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          settings_file: deploy/env/production.env
+          vault_addr: https://56.228.74.131.sslip.io
+          vault_role: api-production
+          vault_path: prod/api
+          image: ${{ needs.publish-and-attest.outputs.image }}
+          ghcr_token: ${{ secrets.GITHUB_TOKEN }}
+
+  smoke-prod-from-staging:
+    needs: deploy-prod-from-staging
+    if: success()
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check liveness, readiness and CSRF bootstrap
+        env:
+          BASE_URL: ${{ vars.PRODUCTION_PUBLIC_URL || 'https://56.228.94.12.sslip.io' }}
+        run: |
+          set -euo pipefail
+          test -n "$BASE_URL"
+          live="$(curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 "$BASE_URL/livez")"
+          grep -q '"status":"UP"' <<<"$live"
+          ready="$(curl --fail --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 "$BASE_URL/readyz")"
+          grep -q '"status":"UP"' <<<"$ready"
+
+          headers="$(mktemp)"
+          trap 'rm -f "$headers"' EXIT
+          status="$(curl --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 \
+            --dump-header "$headers" --output /dev/null --write-out '%{http_code}' \
+            "$BASE_URL/api/auth/csrf")"
+          test "$status" = "204" || {
+            echo "::error::Expected $BASE_URL/api/auth/csrf to return 204, got $status";
+            exit 1;
+          }
+          grep -qi '^set-cookie: XSRF-TOKEN=' "$headers" || {
+            echo "::error::The CSRF bootstrap endpoint did not set XSRF-TOKEN";
+            exit 1;
+          }
+
+  deploy-prod:
+    needs: publish-and-attest
+    if: vars.ENABLE_AUTO_PROMOTION == 'true' && ((github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')) || (github.event_name == 'workflow_dispatch' && inputs.target == 'production' && startsWith(github.ref, 'refs/tags/v')))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+      id-token: write # the OIDC token that logs in to Vault
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Log in to GHCR for signature verification
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v4.1.2
+
+      - name: Verify image signature before deployment
+        env:
+          IMAGE: ${{ needs.publish-and-attest.outputs.image }}
+        run: |
+          test -n "$IMAGE"
+          cosign verify --certificate-identity-regexp '^https://github.com/assali-mohamed-ali/api-MedLink/.github/workflows/cd.yml@refs/(heads/(master|main|staging|prod)|tags/v.*)$' --certificate-oidc-issuer https://token.actions.githubusercontent.com "$IMAGE"
+
+      - name: Deploy the verified immutable image
+        uses: ./.github/actions/deploy-compose
+        with:
+          host: ${{ vars.DEPLOY_HOST || '13.50.114.144' }}
+          user: ${{ vars.DEPLOY_USER || 'deploy' }}
+          path: ${{ vars.DEPLOY_PATH || '/opt/medlink/api' }}
+          health_url: ${{ vars.DEPLOY_HEALTH_URL || 'https://56.228.94.12.sslip.io/readyz' }}
+          ssh_key: ${{ secrets.DEPLOY_SSH_KEY }}
+          known_hosts: ${{ secrets.DEPLOY_KNOWN_HOSTS }}
+          settings_file: deploy/env/production.env
+          vault_addr: https://56.228.74.131.sslip.io
+          vault_role: api-production
+          vault_path: prod/api
           image: ${{ needs.publish-and-attest.outputs.image }}
           ghcr_token: ${{ secrets.GITHUB_TOKEN }}

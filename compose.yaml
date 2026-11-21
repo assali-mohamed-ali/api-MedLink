@@ -1,6 +1,9 @@
 # Dev dependencies; the API runs on the host: ./mvnw spring-boot:run (or the setup scripts).
 # Fixed dev-only values, never .env: they match application-dev.yml. The full stack in containers is
 # docker-compose.yml: the same services, kept alike by ComposeFilesTest; only the secrets differ there.
+# Database roles (GitHub #57): the API on the host still connects as the owner (myuser), because Spring Boot's
+# compose integration gives the container's user to the datasource and Flyway alike. The tests, the 'full'
+# profile below, docker-compose.yml, staging and prod connect as the runtime role medlink_app.
 services:
   postgres:
     image: 'postgres:18'
@@ -8,6 +11,8 @@ services:
       - 'POSTGRES_DB=mydatabase'
       - 'POSTGRES_PASSWORD=secret'
       - 'POSTGRES_USER=myuser'
+      # The API's runtime role medlink_app (GitHub #57), created by the init script below
+      - 'APP_DB_PASSWORD=dev-only-app-role-password'
       # Postgres 18 otherwise looks for its data in /var/lib/postgresql/<major>/docker.
       - 'PGDATA=/var/lib/postgresql/data'
     ports:
@@ -15,6 +20,7 @@ services:
       - '5432'
     volumes:
       - 'pgdata:/var/lib/postgresql/data'
+      - './docker/postgres/initdb/10-app-role.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro'
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER:-myuser}']
       interval: 5s
@@ -119,14 +125,20 @@ services:
       # Compose itself owns the dependency lifecycle; do not let Spring Boot launch Compose inside the API container.
       - 'SPRING_DOCKER_COMPOSE_ENABLED=false'
       - 'SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/mydatabase'
-      - 'SPRING_DATASOURCE_USERNAME=myuser'
-      - 'SPRING_DATASOURCE_PASSWORD=secret'
+      # GitHub #57: the API connects as the runtime role; Flyway (in the API) migrates as the owner
+      - 'SPRING_DATASOURCE_USERNAME=medlink_app'
+      - 'SPRING_DATASOURCE_PASSWORD=dev-only-app-role-password'
+      - 'SPRING_FLYWAY_USER=myuser'
+      - 'SPRING_FLYWAY_PASSWORD=secret'
       - 'KEYCLOAK_PUBLIC_URL=http://localhost:8180'
       - 'KEYCLOAK_INTERNAL_URL=http://keycloak:8080'
       - 'KEYCLOAK_REALM=medlink'
       - 'KEYCLOAK_CLIENT_ID=medlink-bff'
       - 'KEYCLOAK_CLIENT_SECRET=dev-only-medlink-bff-secret'
+      - 'KEYCLOAK_ADMIN_CLIENT_ID=medlink-admin'
       - 'KEYCLOAK_ADMIN_CLIENT_SECRET=dev-only-medlink-admin-secret'
+      - 'CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:4200'
+      - 'TRUSTED_PROXIES=127\.0\.0\.1|0:0:0:0:0:0:0:1'
       - 'APP_MFA_ENCRYPTION_KEY=devOnlyMfaKeyNotForProductionUseLocalOnlyMA=' # gitleaks:allow
       - 'APP_REPORT_ENCRYPTION_KEY=devOnlyReportKeyNotForProductionUseLocalOnA=' # gitleaks:allow
       - 'MAIL_HOST=mailpit'

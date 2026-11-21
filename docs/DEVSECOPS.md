@@ -5,14 +5,14 @@
 1. Pull requests run CI, CodeQL, secret scanning, dependency analysis, container/configuration scanning and the existing ZAP baseline workflow.
 2. Release builds run Maven verification, build the runtime image once, scan that exact local image, generate a CycloneDX SBOM, and only then publish it to GHCR.
 3. The workflow records the registry digest and creates a GitHub build-provenance attestation for that digest.
-4. Staging/production deployment consumes the immutable image digest through the existing Docker Compose-over-SSH action. Kubernetes and Argo CD are intentionally not used(this will be planned in sprint 3).
+4. Staging and automated production deployment consume the immutable image digest through the Docker Compose-over-SSH action. Production waits for the API and dashboard staging deploy/smoke jobs. Kubernetes and Argo CD are intentionally not used (planned for sprint 3).
 
 ## Required repository/environment configuration
 
 - Enable GitHub Actions and GHCR package publishing.
 - Configure staging and production environments with DEPLOY_HOST, DEPLOY_USER, DEPLOY_PATH, and DEPLOY_HEALTH_URL variables.
-- Configure DEPLOY_SSH_KEY, DEPLOY_KNOWN_HOSTS, and DEPLOY_ENV_FILE as environment secrets.
-- Require reviewers for the production environment; protect prod and release tags.
+- Configure DEPLOY_SSH_KEY and DEPLOY_KNOWN_HOSTS as environment secrets; the API reads application secrets from Vault, and the dashboard uses them only as its Vault fallback.
+- Set repository variable `AUTO_DEPLOY_PROD=false` to pause automatic production deployment. Require reviewers on the production environment only if production must pause for a human; protect `prod` and release tags.
 - Set CODE_SCANNING_ENABLED=true only when GitHub code scanning upload is available for this repository.
 - Enable the GitHub dependency graph and set the repository variable DEPENDENCY_GRAPH_ENABLED=true to activate Dependency Review; the action is unsupported when the dependency graph/GitHub Advanced Security is unavailable.
 - Configure NVD_API_KEY for the primary OWASP Dependency-Check path. Do not silently suppress failed scans.

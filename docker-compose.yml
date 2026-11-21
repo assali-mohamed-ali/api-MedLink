@@ -2,9 +2,11 @@ services:
   postgres:
     image: postgres:18
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-mydatabase}
-      POSTGRES_USER: ${POSTGRES_USER:-myuser}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      POSTGRES_DB: ${POSTGRES_DB:?POSTGRES_DB must be set}
+      POSTGRES_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
+      # The API's runtime role medlink_app (GitHub #57), created by the init script below
+      APP_DB_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set}
       # Postgres 18 otherwise looks in /var/lib/postgresql/<major>/docker.
       PGDATA: /var/lib/postgresql/data
     ports:
@@ -13,6 +15,7 @@ services:
       - '${POSTGRES_HOST_PORT:-5432}:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - ./docker/postgres/initdb/10-app-role.sh:/docker-entrypoint-initdb.d/10-app-role.sh:ro
     healthcheck:
       test: ['CMD-SHELL', 'pg_isready -U $${POSTGRES_USER:-myuser}']
       interval: 5s
@@ -27,15 +30,23 @@ services:
     environment:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       SPRING_DOCKER_COMPOSE_ENABLED: 'false'
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-mydatabase}
-      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-myuser}
-      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-secret}
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?POSTGRES_DB must be set}
+      # GitHub #57: the API connects as the runtime role; Flyway (in the API) migrates as the owner
+      SPRING_DATASOURCE_USERNAME: medlink_app
+      SPRING_DATASOURCE_PASSWORD: ${APP_DB_PASSWORD:?APP_DB_PASSWORD must be set}
+      SPRING_FLYWAY_USER: ${POSTGRES_USER:?POSTGRES_USER must be set}
+      SPRING_FLYWAY_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD must be set}
       KEYCLOAK_PUBLIC_URL: ${KEYCLOAK_PUBLIC_URL:-http://localhost:8180}
       KEYCLOAK_INTERNAL_URL: http://keycloak:8080
       KEYCLOAK_REALM: medlink
       KEYCLOAK_CLIENT_ID: medlink-bff
       KEYCLOAK_CLIENT_SECRET: ${KC_BFF_CLIENT_SECRET:?KC_BFF_CLIENT_SECRET must be set}
+      KEYCLOAK_ADMIN_CLIENT_ID: medlink-admin
       KEYCLOAK_ADMIN_CLIENT_SECRET: ${KC_ADMIN_CLIENT_SECRET:?KC_ADMIN_CLIENT_SECRET must be set}
+      # Staging/prod: the front's origin(s). Fallback: the dev front ports.
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:4200}
+      # Staging/prod: the reverse proxy's address, as a regex (GitHub #51). Never empty: empty trusts everyone.
+      TRUSTED_PROXIES: '${TRUSTED_PROXIES:-127\.0\.0\.1|0:0:0:0:0:0:0:1}'
       APP_MFA_ENCRYPTION_KEY: ${APP_MFA_ENCRYPTION_KEY:?APP_MFA_ENCRYPTION_KEY must be set}
       APP_REPORT_ENCRYPTION_KEY: ${APP_REPORT_ENCRYPTION_KEY:?APP_REPORT_ENCRYPTION_KEY must be set}
       # Dev and local runs: Mailpit below. Staging/prod: the real SMTP server.

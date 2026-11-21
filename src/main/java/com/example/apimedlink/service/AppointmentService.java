@@ -40,17 +40,19 @@ public class AppointmentService {
     private final PatientRepository patients;
     private final OwnershipGuard ownership;
     private final AuditService audit;
+    private final AlertService alerts;
     /** H-03: no cancel less than this before the start (app.appointments.cancel-deadline-hours). */
     private final Duration cancelDeadline;
 
     public AppointmentService(AppointmentRepository appointments, SlotRepository slots, PatientRepository patients,
-            OwnershipGuard ownership, AuditService audit,
+            OwnershipGuard ownership, AuditService audit, AlertService alerts,
             @Value("${app.appointments.cancel-deadline-hours}") long cancelDeadlineHours) {
         this.appointments = appointments;
         this.slots = slots;
         this.patients = patients;
         this.ownership = ownership;
         this.audit = audit;
+        this.alerts = alerts;
         this.cancelDeadline = Duration.ofHours(cancelDeadlineHours);
     }
 
@@ -76,6 +78,8 @@ public class AppointmentService {
         slot.setStatus(SlotStatus.FREE);
         audit.recordWithin(AuditAction.APPOINTMENT_CANCELLED, "APPOINTMENT", appointmentId.toString(),
                 AuditOutcome.SUCCESS);
+        // MLink-37 (review on #125): the practitioner's alert, in this transaction; its mail leaves after the commit
+        alerts.onAppointmentCancelled(appointment);
     }
 
     /**
@@ -116,6 +120,8 @@ public class AppointmentService {
         Appointment moved = bookLocked(newSlot, old.getPatientId(), now);
         audit.recordWithin(AuditAction.APPOINTMENT_RESCHEDULED, "APPOINTMENT", moved.getId().toString(),
                 AuditOutcome.SUCCESS);
+        // MLink-37: a move cancels the old appointment, so the practitioner of the old slot gets its alert
+        alerts.onAppointmentCancelled(old);
         return moved;
     }
 
