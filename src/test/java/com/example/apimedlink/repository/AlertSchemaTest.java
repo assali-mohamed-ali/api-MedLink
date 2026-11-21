@@ -133,6 +133,18 @@ class AlertSchemaTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    /** A move is told apart from a cancellation (V20): the database takes its type. */
+    @Test
+    void theTypeOfAMoveIsKnown() {
+        UUID pro = insertPractitioner();
+        UUID appointment = insertAppointment(pro);
+
+        jdbc.update("insert into alerts (id, practitioner_id, type, appointment_id, message) values (?, ?, 'APPOINTMENT_MOVED', ?, 'Reporté')",
+                UUID.randomUUID(), pro, appointment);
+
+        assertThat(jdbc.queryForObject("select count(*) from alerts where appointment_id = ?", Integer.class, appointment)).isEqualTo(1);
+    }
+
     @Test
     void anUnknownTypeIsRefused() {
         UUID pro = insertPractitioner();
