@@ -133,7 +133,7 @@ class AlertSchemaTest {
                 .isInstanceOf(DataIntegrityViolationException.class);
     }
 
-    /** A move is told apart from a cancellation (V20): the database takes its type. */
+    /** A move is told apart from a cancellation (V21): the database takes its type. */
     @Test
     void theTypeOfAMoveIsKnown() {
         UUID pro = insertPractitioner();

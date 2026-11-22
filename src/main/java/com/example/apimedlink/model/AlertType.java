@@ -1,6 +1,6 @@
 package com.example.apimedlink.model;
 
-/** Why an alert exists (MLink-37). The database checks the same list (V17, V20). */
+/** Why an alert exists (MLink-37). The database checks the same list (V17, V21). */
 public enum AlertType {
     /** A patient cancelled one of the practitioner's appointments. */
     APPOINTMENT_CANCELLED,

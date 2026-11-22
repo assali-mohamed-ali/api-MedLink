@@ -87,7 +87,8 @@ public class AppointmentService {
      * of a cancel. One transaction: the old appointment is cancelled and its slot freed first, then the new slot is
      * booked; when the new slot is taken (409) or unknown (404), the whole move is rolled back and the patient keeps the
      * appointment they had. Both slots are locked in one order (lower id first), so two crossed moves never deadlock.
-     * The new appointment's APPOINTMENT_RESCHEDULED audit row is part of the move (review on #120).
+     * The new appointment's APPOINTMENT_RESCHEDULED audit row is part of the move (review on #120). The slot the
+     * appointment already holds is refused (409 SAME_SLOT) before anything changes.
      */
     @Transactional
     public Appointment reschedule(UUID appointmentId, UUID newSlotId) {
@@ -97,6 +98,12 @@ public class AppointmentService {
         if (old.getStatus() == AppointmentStatus.CANCELLED) {
             throw new ApiException(HttpStatus.CONFLICT, "APPOINTMENT_CANCELLED",
                     "Ce rendez-vous est annulé : réservez un nouveau créneau.");
+        }
+        // Code owner's review on the MLink-10 PR: the slot it already holds is not a move. Refused before any change:
+        // otherwise the slot would be freed, then booked again by this same move (and told as "reporté" to itself)
+        if (old.getSlot().getId().equals(newSlotId)) {
+            throw new ApiException(HttpStatus.CONFLICT, "SAME_SLOT",
+                    "Ce rendez-vous est déjà sur ce créneau : choisissez-en un autre.");
         }
         // MLink-167: the patient before the slots, as a booking does
         patients.lockForBooking(old.getPatientId());
