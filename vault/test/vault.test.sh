@@ -77,6 +77,9 @@ login() { in_vault "$NAME" vault write -field=token "auth/jwt-github/login" "rol
 AUD=medlink-vault
 API=repo:assali-mohamed-ali/api-MedLink
 FRONT=repo:assali-mohamed-ali/medlink-dashboard
+# GitHub's immutable subject claims for these repositories (Settings > Actions > OIDC).
+API_IMMUTABLE=repo:assali-mohamed-ali@110344042/api-MedLink@1410478132
+FRONT_IMMUTABLE=repo:assali-mohamed-ali@110344042/medlink-dashboard@1419301443
 # GitHub's other claims for a job: $1 repository, $2 workflow file, $3 ref, $4 event
 claims() {
     printf ',"repository":"assali-mohamed-ali/%s","workflow_ref":"assali-mohamed-ali/%s/.github/workflows/%s@%s","ref":"%s","event_name":"%s"' \
@@ -123,6 +126,8 @@ refused "staging token on the production role"  api-production "$(jwt "$API:envi
 refused "production token on the staging role"  api-staging    "$(jwt "$API:environment:production" "$AUD" 300 "$API_CD_STAGING")"
 refused "front token on the API role"           api-staging    "$(jwt "$FRONT:environment:staging" "$AUD" 300 "$FRONT_CD_STAGING")"
 refused "another repository"                    api-staging    "$(jwt "repo:someone-else/api-MedLink:environment:staging" "$AUD" 300 "$API_CD_STAGING")"
+refused "an immutable subject for another repository" api-staging \
+    "$(jwt "repo:assali-mohamed-ali@1/other@2:environment:staging" "$AUD" 300 "$API_CD_STAGING")"
 refused "a pull request run"                    api-staging    "$(jwt "$API:pull_request" "$AUD" 300 "$(claims api-MedLink cd.yml refs/pull/7/merge pull_request)")"
 refused "a branch run without environment"      api-staging    "$(jwt "$API:ref:refs/heads/staging" "$AUD" 300 "$API_CD_STAGING")"
 refused "another audience"                      api-staging    "$(jwt "$API:environment:staging" "sigstore" 300 "$API_CD_STAGING")"
@@ -152,6 +157,15 @@ accepted "the API production deploy from the verified staging run" api-productio
     "$(jwt "$API:environment:production" "$AUD" 300 "$(claims api-MedLink cd.yml refs/heads/staging push)")"
 accepted "the dashboard production deploy from the verified staging run" front-production \
     "$(jwt "$FRONT:environment:production" "$AUD" 300 "$(claims medlink-dashboard container-security.yml refs/heads/staging push)")"
+# GitHub now puts the repository ids in sub (immutable subject claims): the roles accept both forms.
+accepted "an immutable subject on the staging API role" api-staging \
+    "$(jwt "$API_IMMUTABLE:environment:staging" "$AUD" 300 "$API_CD_STAGING")"
+accepted "an immutable subject on the production API role" api-production \
+    "$(jwt "$API_IMMUTABLE:environment:production" "$AUD" 300 "$API_CD_TAG")"
+accepted "an immutable subject on the staging dashboard role" front-staging \
+    "$(jwt "$FRONT_IMMUTABLE:environment:staging" "$AUD" 300 "$FRONT_CD_STAGING")"
+accepted "an immutable subject on the production dashboard role" front-production \
+    "$(jwt "$FRONT_IMMUTABLE:environment:production" "$AUD" 300 "$FRONT_CD_PROD")"
 accepted "a dashboard release tag in production" front-production \
     "$(jwt "$FRONT:environment:production" "$AUD" 300 "$(claims medlink-dashboard container-security.yml refs/tags/v1.0.0 push)")"
 

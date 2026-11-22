@@ -15,12 +15,16 @@ Everything Vault holds for MedLink is configured from `vault/` in this repositor
 
 ## Who can read what
 
-| GitHub role | Claim `sub` | Claim `workflow_ref` (workflow file) and `ref` | Policy | Can do |
+| GitHub role | Claim `sub` (old or immutable form) | Claim `workflow_ref` (workflow file) and `ref` | Policy | Can do |
 |---|---|---|---|---|
-| `api-staging` | `repo:assali-mohamed-ali/api-MedLink:environment:staging` | `cd.yml` on `refs/heads/staging`, `master` or `main` | `medlink-staging-api` | read `medlink/staging/api` |
-| `api-production` | `repo:assali-mohamed-ali/api-MedLink:environment:production` | `cd.yml` on `refs/heads/staging` (automatic deploy from the verified staging run) or `refs/tags/v*` | `medlink-prod-api` | read `medlink/prod/api` |
-| `front-staging` | `repo:assali-mohamed-ali/medlink-dashboard:environment:staging` | `container-security.yml` on `staging`, `master` or `main` | `medlink-staging-front` | read `medlink/staging/front` |
-| `front-production` | `repo:assali-mohamed-ali/medlink-dashboard:environment:production` | `container-security.yml` on `refs/heads/staging` (from the verified staging run), `refs/heads/prod` or `refs/tags/v*` | `medlink-prod-front` | read `medlink/prod/front` |
+| `api-staging` | `repo:assali-mohamed-ali/api-MedLink:environment:staging` or `repo:assali-mohamed-ali@<owner id>/api-MedLink@<repo id>:environment:staging` | `cd.yml` on `refs/heads/staging`, `master` or `main` | `medlink-staging-api` | read `medlink/staging/api` |
+| `api-production` | `repo:assali-mohamed-ali/api-MedLink:environment:production` or the immutable form | `cd.yml` on `refs/heads/staging` (automatic deploy from the verified staging run) or `refs/tags/v*` | `medlink-prod-api` | read `medlink/prod/api` |
+| `front-staging` | `repo:assali-mohamed-ali/medlink-dashboard:environment:staging` or `repo:assali-mohamed-ali@<owner id>/medlink-dashboard@<repo id>:environment:staging` | `container-security.yml` on `staging`, `master` or `main` | `medlink-staging-front` | read `medlink/staging/front` |
+| `front-production` | `repo:assali-mohamed-ali/medlink-dashboard:environment:production` or the immutable form | `container-security.yml` on `refs/heads/staging` (from the verified staging run), `refs/heads/prod` or `refs/tags/v*` | `medlink-prod-front` | read `medlink/prod/front` |
+
+GitHub repositories created after 2026-07-15 use immutable subject claims, which append the numeric owner and repository
+ids to the `sub` (for example `repo:assali-mohamed-ali@110344042/api-MedLink@1410478132:environment:staging`). Each role
+accepts both forms; `vault/setup.sh` writes both patterns. A token from another repository is still refused.
 
 Every role also requires `event_name` `push` or `workflow_dispatch`. The environment alone is not enough: any workflow of
 the repository that enters an environment gets the same `sub`, so Vault also checks which workflow file asks, from which
