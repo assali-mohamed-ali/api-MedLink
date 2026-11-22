@@ -45,6 +45,9 @@ jobs:
       - name: Test the cross-repository staging gate
         run: bash .github/scripts/test/wait-for-staging.test.sh
 
+      - name: Test the CD image attestation configuration
+        run: bash .github/scripts/test/cd-attestations.test.sh
+
       # GitHub #67: backup and restore refuse unsafe use, encrypt, never leak the passphrase (offline, real gpg).
       - name: Test the database backup and restore scripts
         run: bash scripts/db-backup.test.sh
