@@ -9,6 +9,7 @@ import com.example.apimedlink.model.EmailToken.Purpose;
 import com.example.apimedlink.model.Practitioner;
 import com.example.apimedlink.model.Specialty;
 import com.example.apimedlink.model.User;
+import com.example.apimedlink.repository.AccountOperation;
 import com.example.apimedlink.repository.ClinicRepository;
 import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.repository.PractitionerRepository;
@@ -38,13 +39,16 @@ import org.springframework.transaction.support.TransactionTemplate;
  * mail goes out; when our rows fail, the Keycloak user is deleted, so no account is left half made. Patients are
  * never created here: they register.
  *
- * <p>No change is made without its audit entry (MLink-72, review of #121). A new account is saved with its entry in
- * one transaction: both or neither. A role change or a status change reaches Keycloak, which no transaction covers,
- * so the entry comes first: an ATTEMPTED entry is committed before anything is touched (and when it cannot be
- * written, nothing is done and the answer is 503), then the change is made, then a SUCCESS or FAILURE entry closes
- * it. When that last entry cannot be written the answer is 503 too, never a silent success: the ATTEMPTED entry
- * stays in the trail, and staff send the change again (every step is idempotent). A refusal changes nothing; its
- * FAILURE entry is written, and if even that fails the original error is kept and the gap is logged.
+ * <p>No change is made without its audit entry (MLink-72, reviews of #121 and #122). A new account is saved with
+ * its entry in one transaction: both or neither. A role change or a status change reaches Keycloak, which no
+ * transaction covers, so it is a durable operation ({@link AccountOperationRunner}): its record and its ATTEMPTED
+ * entry are written together before anything is touched (when they cannot be written, nothing is done and the
+ * answer is 503); it is then carried out; and its record is closed together with its SUCCESS or FAILURE entry,
+ * which carries the same operation id. When the request fails on an outage, or the process stops, the operation
+ * stays pending and the worker ({@link AccountOperationWorker}) carries it out again until it is closed: every
+ * step is idempotent, and asking again for the same change reuses the pending operation instead of starting a new
+ * one. A refusal changes nothing; its FAILURE entry is written, and if even that fails the original error is kept
+ * and the gap is logged.
  */
 @Service
 public class AdminUserService {
@@ -74,13 +78,15 @@ public class AdminUserService {
     private final EmailTokenService tokens;
     private final MailService mail;
     private final AuditService audit;
+    private final AccountOperationRunner operations;
     private final TransactionTemplate tx;
 
     public AdminUserService(KeycloakAdminService keycloak, UserRepository users, PatientRepository patients,
                             PractitionerRepository practitioners, SpecialtyRepository specialties,
                             ClinicRepository clinics, PractitionerProfiles profiles,
                             SessionRevocationStore revocations, EmailTokenService tokens,
-                            MailService mail, AuditService audit, TransactionTemplate tx) {
+                            MailService mail, AuditService audit, AccountOperationRunner operations,
+                            TransactionTemplate tx) {
         this.keycloak = keycloak;
         this.users = users;
         this.patients = patients;
@@ -92,6 +98,7 @@ public class AdminUserService {
         this.tokens = tokens;
         this.mail = mail;
         this.audit = audit;
+        this.operations = operations;
         this.tx = tx;
     }
 
@@ -148,29 +155,30 @@ public class AdminUserService {
     }
 
     /**
-     * Changes the role. Everything that can be refused is refused first, then the user's sessions are refused by
-     * the API (session_revocations) before anything is changed, so a failure half-way never leaves an admin
-     * session valid: the user logs in again, the safe outcome. A promotion adds the practitioner profile, then
-     * moves the user to the new Keycloak group. A demotion moves the group first and deletes the profile only
-     * after Keycloak succeeded, so a Keycloak failure never leaves a PRACTITIONER without their profile. Keycloak
-     * then signs the user out: a session keeps the roles it was opened with. Every step is idempotent: after an
-     * error staff send the change again. The change is audited before it starts and sealed once it is done.
+     * Changes the role. Everything that can be refused is refused first. Then the change is a durable operation:
+     * registered with its audit entry, carried out, closed with its closing entry (see the class comment). Carrying
+     * it out refuses the user's sessions in the API (session_revocations) before anything is changed, so a failure
+     * half-way never leaves an admin session valid: the user logs in again, the safe outcome. A promotion adds the
+     * practitioner profile, then moves the user to the new Keycloak group. A demotion moves the group first and
+     * deletes the profile only after Keycloak succeeded, so a Keycloak failure never leaves a PRACTITIONER without
+     * their profile. Keycloak then signs the user out: a session keeps the roles it was opened with. Every step is
+     * idempotent, and the checks are made again each time the operation runs, so a retry works from the current state.
      *
      * @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404)
      * @throws ApiException 409 {@code PATIENT_ROLE_CHANGE_UNSUPPORTED} for a patient (a person holds one role; the
      *     history of a patient is not migrated), 409 {@code PRACTITIONER_HAS_SLOTS} when a practitioner who holds
      *     slots would lose their profile, 400 {@code VALIDATION_FAILED} when a new practitioner has no valid
-     *     specialty or clinics, 503 {@code AUDIT_UNAVAILABLE} when the audit entry cannot be written
+     *     specialty or clinics, 409 {@code OPERATION_PENDING} when another change of this account is pending,
+     *     503 {@code AUDIT_UNAVAILABLE} when the audit entry cannot be written
      */
     public void changeRole(UUID id, String role, UUID specialtyId, Set<UUID> clinicIds) {
-        RoleChange change;
         try {
-            change = checkRoleChange(id, role, specialtyId, clinicIds);
+            checkRoleChange(id, role, specialtyId, clinicIds);
         } catch (RuntimeException refused) {
             recordFailure(AuditAction.ROLE_CHANGED, id.toString(), refused);
             throw refused;
         }
-        traced(AuditAction.ROLE_CHANGED, id, () -> applyRoleChange(id, change));
+        operations.submit(AccountOperation.roleChange(id, role, specialtyId, clinicIds), this::execute);
     }
 
     /** Every check of a role change: it throws before anything is touched. */
@@ -227,11 +235,12 @@ public class AdminUserService {
     /**
      * Enables or disables an account. A disable writes the local revocation (session_revocations) first, as
      * changeRole does: the API validates already-issued tokens locally, so if that write fails nothing has changed
-     * in Keycloak and staff send the request again, while a failure after it only leaves the account enabled with
-     * its sessions refused (the user logs in again). Keycloak then disables the account and ends its sessions.
-     * The change is audited before it starts and sealed once it is done.
+     * in Keycloak and the operation is carried out again, while a failure after it only leaves the account enabled
+     * with its sessions refused (the user logs in again). Keycloak then disables the account and ends its sessions.
+     * The change is a durable operation, like a role change (see the class comment).
      *
-     * @throws ApiException 409 {@code CANNOT_DISABLE_SELF} when staff disable their own account, 503
+     * @throws ApiException 409 {@code CANNOT_DISABLE_SELF} when staff disable their own account, 409
+     *     {@code OPERATION_PENDING} when another change of this account is pending, 503
      *     {@code AUDIT_UNAVAILABLE} when the audit entry cannot be written
      */
     public void setEnabled(UUID id, boolean enabled, UUID actingUser) {
@@ -242,7 +251,20 @@ public class AdminUserService {
             recordFailure(action, id.toString(), refused);
             throw refused;
         }
-        traced(action, id, () -> applyEnabled(id, enabled));
+        operations.submit(AccountOperation.statusChange(id, enabled), this::execute);
+    }
+
+    /**
+     * Carries out one registered operation: what the request does, and what the worker does again after a crash or
+     * an outage. Idempotent, and the checks of a role change are made again here, against the current state.
+     */
+    public void execute(AccountOperation op) {
+        switch (op.action()) {
+            case ROLE_CHANGED -> applyRoleChange(op.userId(),
+                    checkRoleChange(op.userId(), op.targetRole(), op.specialtyId(), op.clinicIds()));
+            case ACCOUNT_ENABLED, ACCOUNT_DISABLED -> applyEnabled(op.userId(), Boolean.TRUE.equals(op.enabled()));
+            default -> throw new IllegalArgumentException("Not an account operation: " + op.action());
+        }
     }
 
     private void applyEnabled(UUID id, boolean enabled) {
@@ -252,37 +274,6 @@ public class AdminUserService {
         keycloak.setEnabled(id, enabled);
         if (!enabled) {
             keycloak.endSessions(id);
-        }
-    }
-
-    /**
-     * Trace first, act, then seal. The ATTEMPTED entry is committed before anything is touched: without it nothing
-     * is done. If the change fails, a FAILURE entry closes it and the original error goes on. If it succeeds, a
-     * SUCCESS entry closes it, and when that entry cannot be written the caller gets a 503, never a silent success.
-     */
-    private void traced(AuditAction action, UUID id, Runnable change) {
-        String resourceId = id.toString();
-        try {
-            audit.record(action, RESOURCE, resourceId, AuditOutcome.ATTEMPTED);
-        } catch (RuntimeException e) {
-            log.error("AUDIT_UNAVAILABLE: {} for {} was not started, its entry cannot be written ({})",
-                    action, resourceId, e.getClass().getSimpleName());
-            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AUDIT_UNAVAILABLE",
-                    "L'opération n'a pas été exécutée : sa trace n'a pas pu être enregistrée. Réessayez.");
-        }
-        try {
-            change.run();
-        } catch (RuntimeException failed) {
-            recordFailure(action, resourceId, failed);
-            throw failed;
-        }
-        try {
-            audit.record(action, RESOURCE, resourceId, AuditOutcome.SUCCESS);
-        } catch (RuntimeException e) {
-            log.error("AUDIT_UNAVAILABLE: {} for {} was done but its closing entry cannot be written ({}): "
-                    + "check the ATTEMPTED entry", action, resourceId, e.getClass().getSimpleName());
-            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "AUDIT_UNAVAILABLE",
-                    "L'opération a été exécutée mais sa trace n'a pas pu être finalisée : envoyez la demande à nouveau.");
         }
     }
 
