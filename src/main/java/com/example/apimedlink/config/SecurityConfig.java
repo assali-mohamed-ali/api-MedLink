@@ -98,6 +98,12 @@ public class SecurityConfig {
                         // The reports too, before the body is read: a patient sending a bad body gets 403 (MLink-32)
                         .requestMatchers("/api/patients/*/reports")
                         .hasRole(Roles.PRACTITIONER)
+                        // MLink-123/125: staff upload; staff or the owner patient list and download.
+                        // The controller repeats the rule with @PreAuthorize, and the service checks ownership.
+                        .requestMatchers(HttpMethod.POST, "/api/patients/*/documents")
+                        .hasRole(Roles.ADMINISTRATIVE_STAFF)
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/documents", "/api/patients/*/documents/*")
+                        .hasAnyRole(Roles.PATIENT, Roles.ADMINISTRATIVE_STAFF)
                         // Staff only, decided before any body is read: a patient sending a bad body gets 403, not 400
                         .requestMatchers("/api/admin/**")
                         .hasRole(Roles.ADMINISTRATIVE_STAFF)

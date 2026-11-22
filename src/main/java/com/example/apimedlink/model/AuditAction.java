@@ -14,12 +14,18 @@ public enum AuditAction {
     APPOINTMENT_RESCHEDULED,
     SLOT_OPENED,
     SLOT_CLOSED,
+    /** Anonymised statistics were exported, or the export was refused (MLink-95): the period and indicators only. */
+    STATS_EXPORTED,
     /** A practitioner read a patient's record (MLink-31): ids only, never medical content. */
     RECORD_VIEWED,
     /** A practitioner wrote a consultation report (MLink-32): the report id only, never its text. */
     REPORT_CREATED,
     /** A practitioner read a patient's consultation reports (MLink-32): the patient id only. */
     REPORT_VIEWED,
+    /** Staff uploaded a patient document (MLink-123/125): the document id only. */
+    DOCUMENT_UPLOAD,
+    /** A patient or staff member read a patient document (MLink-123/125): the document id only. */
+    DOCUMENT_READ,
     /** A sign-in attempt; the outcome says whether it worked (MLink-114). */
     LOGIN,
     /** The password is right but must be changed first: no session exists yet (MLink-114). */
@@ -27,5 +33,13 @@ public enum AuditAction {
     /** An account was modified (MLink-114). */
     ACCOUNT_UPDATED,
     /** A user read sensitive data; the resource type says which (MLink-114). */
-    DATA_READ
+    DATA_READ,
+    /** A staff account was created (MLink-72). */
+    ACCOUNT_CREATED,
+    /** A staff account changed role (MLink-72). */
+    ROLE_CHANGED,
+    /** A staff account was enabled (MLink-72). */
+    ACCOUNT_ENABLED,
+    /** A staff account was disabled (MLink-72). */
+    ACCOUNT_DISABLED
 }
