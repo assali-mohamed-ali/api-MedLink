@@ -9,7 +9,6 @@ import io.minio.PutObjectArgs;
 import io.minio.RemoveObjectArgs;
 import io.minio.StatObjectArgs;
 import io.minio.errors.ErrorResponseException;
-import java.io.ByteArrayInputStream;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
@@ -48,7 +47,7 @@ public class MinioDocumentStorage implements DocumentStorage {
             client.putObject(PutObjectArgs.builder()
                     .bucket(bucket)
                     .object(key)
-                    .stream(new ByteArrayInputStream(bytes), bytes.length, -1)
+                    .data(bytes, bytes.length)
                     .contentType("application/octet-stream")
                     .build());
         } catch (Exception failure) {
