@@ -111,6 +111,28 @@ class RescheduleAppointmentFunctionalTest extends FunctionalTestBase {
         assertThat(status("slots", newSlot.toString())).isEqualTo("FREE");
     }
 
+    /** Code owner's review on the MLink-10 PR: the slot the appointment already holds is not a move. */
+    @Test
+    void aMoveToTheSlotTheAppointmentAlreadyHoldsIsRefusedAndNothingChanges() throws Exception {
+        UUID slot = insertSlot(insertPractitioner("Hela", "Mansour", insertSpecialty("Cardiologie (report même créneau)")),
+                insertClinic("Clinique Report Même Créneau"), LATER, "FREE");
+        Patient holder = patient();
+        String old = book(holder, slot);
+
+        HttpResponse<String> response = reschedule(holder.browser(), old, "{\"newSlotId\":\"" + slot + "\"}");
+
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(409);
+        Map<String, Object> body = body(response);
+        assertThat(body.get("code")).isEqualTo("SAME_SLOT");
+        assertThat(body.get("message")).isEqualTo("Ce rendez-vous est déjà sur ce créneau : choisissez-en un autre.");
+        assertThat(status("appointments", old)).isEqualTo("BOOKED");
+        assertThat(status("slots", slot.toString())).isEqualTo("BOOKED");
+        assertThat(jdbc.queryForObject("select count(*) from appointments where slot_id = ?", Integer.class, slot))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from alerts where appointment_id = ?::uuid", Integer.class, old))
+                .isZero();
+    }
+
     @Test
     void aCancelledAppointmentCannotBeMoved() throws Exception {
         UUID practitioner = insertPractitioner("Sami", "Trabelsi", insertSpecialty("Cardiologie (report annulé)"));

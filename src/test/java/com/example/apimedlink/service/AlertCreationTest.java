@@ -124,6 +124,55 @@ class AlertCreationTest {
         assertThat(jdbc.queryForObject("select count(*) from alerts where appointment_id = ?", Integer.class, appointment)).isEqualTo(1);
     }
 
+    // ---- A move is not a cancellation: the alert says "reporté", from the old date to the new one ----
+
+    @Test
+    void aMoveGivesOneAlertSayingReporteFromTheOldDateToTheNewOne() {
+        UUID pro = practitioner();
+        UUID patient = patient();
+        Instant from = FIRST_SLOT.plus(NEXT_SLOT.getAndIncrement(), ChronoUnit.HOURS);
+        Instant to = FIRST_SLOT.plus(NEXT_SLOT.getAndIncrement(), ChronoUnit.HOURS);
+        UUID old = appointment(pro, clinic("Clinique MedLink Sousse"), from, "CANCELLED", patient);
+        UUID moved = appointment(pro, clinic("Clinique MedLink Tunis"), to, "BOOKED", patient);
+
+        alerts.onAppointmentMoved(load(old), load(moved));
+
+        List<Map<String, Object>> rows = jdbc.queryForList("select practitioner_id, type, appointment_id, message from alerts "
+                + "where appointment_id in (?, ?)", old, moved);
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).get("practitioner_id")).isEqualTo(pro);
+        assertThat(rows.get(0).get("type")).isEqualTo("APPOINTMENT_MOVED");
+        assertThat(rows.get(0).get("appointment_id")).isEqualTo(old);
+        assertThat(rows.get(0).get("message")).isEqualTo("Rendez-vous reporté : Amel Ben Salah, du " + tunis(from)
+                + " (Clinique MedLink Sousse) au " + tunis(to) + ".");
+    }
+
+    @Test
+    void theSameMoveTwiceGivesOneAlertOnly() {
+        UUID pro = practitioner();
+        UUID patient = patient();
+        UUID old = appointment(pro, clinic("Clinique MedLink Sfax"), FIRST_SLOT.plus(NEXT_SLOT.getAndIncrement(), ChronoUnit.HOURS), "CANCELLED", patient);
+        UUID moved = appointment(pro, clinic("Clinique MedLink Tunis"), FIRST_SLOT.plus(NEXT_SLOT.getAndIncrement(), ChronoUnit.HOURS), "BOOKED", patient);
+
+        alerts.onAppointmentMoved(load(old), load(moved));
+        alerts.onAppointmentMoved(load(old), load(moved));
+
+        assertThat(jdbc.queryForObject("select count(*) from alerts where appointment_id in (?, ?)", Integer.class, old, moved))
+                .isEqualTo(1);
+    }
+
+    @Test
+    void aMoveWhoseOldAppointmentIsNotCancelledGivesNoAlert() {
+        UUID pro = practitioner();
+        UUID patient = patient();
+        UUID old = appointment(pro, clinic("Clinique MedLink Sfax"), FIRST_SLOT.plus(NEXT_SLOT.getAndIncrement(), ChronoUnit.HOURS), "BOOKED", patient);
+        UUID moved = appointment(pro, clinic("Clinique MedLink Tunis"), FIRST_SLOT.plus(NEXT_SLOT.getAndIncrement(), ChronoUnit.HOURS), "BOOKED", patient);
+
+        alerts.onAppointmentMoved(load(old), load(moved));
+
+        assertThat(jdbc.queryForObject("select count(*) from alerts where appointment_id in (?, ?)", Integer.class, old, moved)).isZero();
+    }
+
     private Appointment load(UUID appointment) {
         return appointments.findById(appointment).orElseThrow();
     }
@@ -153,12 +202,20 @@ class AlertCreationTest {
         return id;
     }
 
-    private UUID appointment(UUID practitioner, UUID clinic, Instant start, String status) {
-        jdbc.update("insert into practitioner_clinics (practitioner_id, clinic_id) values (?, ?)", practitioner, clinic);
+    private UUID patient() {
         UUID patient = UUID.randomUUID();
         jdbc.update("insert into users (id, username, email) values (?, ?, ?)", patient, "patient-" + patient, "patient-" + patient + "@example.com");
         jdbc.update("insert into patients (id, first_name, last_name, birth_date) values (?, 'Amel', 'Ben Salah', ?)",
                 patient, Date.valueOf("1990-04-12"));
+        return patient;
+    }
+
+    private UUID appointment(UUID practitioner, UUID clinic, Instant start, String status) {
+        return appointment(practitioner, clinic, start, status, patient());
+    }
+
+    private UUID appointment(UUID practitioner, UUID clinic, Instant start, String status, UUID patient) {
+        jdbc.update("insert into practitioner_clinics (practitioner_id, clinic_id) values (?, ?)", practitioner, clinic);
         UUID slot = UUID.randomUUID();
         jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) values (?, ?, ?, ?, ?, ?)",
                 slot, practitioner, clinic, Timestamp.from(start), Timestamp.from(start.plus(30, ChronoUnit.MINUTES)),
