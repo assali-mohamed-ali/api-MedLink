@@ -5,67 +5,53 @@ Tickets MLink-168 to MLink-173 (YouTrack, assigned to Mohamed, subtasks of MLink
 Background and test results: `report.md`, section "Staging and production preparation". Runbooks:
 `docs/operations/vault.md`, `docs/operations/servers.md`, `docs/DEPLOYMENT.md`.
 
-## Hand-over for the next session (2026-11-19, 20:00 UTC)
+## Hand-over for the next session (2026-11-22)
 
 **Start every session with:** GitHub (new commits on `master`/`staging`/`prod`, PRs, reviews, CI) and YouTrack (new
-comments on MLink-168..173 and the tickets touching accounts), then `git fetch` + merge `origin/master`, and free RAM
-(about 3 GB before the test suite). The full reference with diagrams, every address and where each secret lives is a
-PDF on Mohamed's machine, not in git: `Docs/Deployment/MedLink-Infrastructure-and-Deployment-Reference.pdf`.
+comments on MLink-5, MLink-9, MLink-168..174), then `git fetch`, and free RAM (about 3 GB before the test suite). The
+full reference with diagrams, every address and where each secret lives is a PDF on Mohamed's machine, not in git:
+`Docs/Deployment/MedLink-Infrastructure-and-Deployment-Reference.pdf`.
 
-**Two rules from Mohamed:** deploys go **only through the CD workflows**, never by hand over SSH (host preparation,
-Vault configuration and diagnostics over SSH are fine). Never handle a password, private key or unseal key in chat.
+**Rules from Mohamed:** deploys go **only through the CD workflows** (`staging` then `prod` branches), never by hand
+over SSH (host preparation, Vault configuration and diagnostics over SSH are fine). The production images deployed by
+hand on 2026-11-19 stay as they are until the whole app ships through CD. Never handle a password, private key or
+unseal key in chat.
 
 ### Where things stand
 
 | Part | State |
 |---|---|
-| Production (api-medlink `13.50.114.144` + frontend-medlink `56.228.94.12`) | Works end to end: dashboard, API through the front (`/readyz` 200), Gmail mail (account `medlinq2026@gmail.com`). Images `medlink-api:0be7983`, `medlink-front:72a61af`, deployed by hand on 2026-11-19 (before the workflow-only rule) |
-| Staging (`13.51.30.39`, disk 40 GB) | Dashboard live, Postgres up; API and Keycloak not deployed: CD will do it on the first push to `staging` |
-| Vault (`56.228.74.131`) | Unsealed, secrets seeded. **#133's roles applied live on 2026-11-20** (bound to the deploy workflow, refs and push/dispatch; read back OK); setup token revoked, no root token. Same roles as `master`'s `setup.sh` since #133 merged |
-| First admin (production) | Invited on Mohamed's school address (no password; API activation mail). The dashboard's `/activer-compte` is a placeholder, so activation uses `Docs/Deployment/activate-account.sh` with the newest mail (17:23 UTC, valid to 2026-11-20 17:23 UTC; a new one: `POST /api/auth/account/activate/resend`) |
-| Specialties | None in staging or production (only the dev seed has them): an admin cannot create a practitioner yet |
+| Production (api-medlink `13.50.114.144` + frontend-medlink `56.228.94.12`) | Works end to end, healthy. Images `medlink-api:0be7983`, `medlink-front:72a61af`, deployed by hand on 2026-11-19 |
+| Staging (`13.51.30.39`) | Dashboard and Postgres up; API 502 (never deployed: every CD run stops at the Vault login) |
+| Vault (`56.228.74.131`) | Unsealed, secrets seeded, #133's roles live (2026-11-20). **#137's roles not applied yet** (immutable `sub` of GitHub's OIDC token): every deploy job gets HTTP 400 at the login. Disk: 892 MB free |
+| Front host | 1.9 GB free disk |
+| GitHub environments | `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`, `DEPLOY_HEALTH_URL`, `DEPLOY_KNOWN_HOSTS`, **`DEPLOY_SSH_KEY` set in all four (2026-11-20, checked)** |
+| Specialties | MLink-174 merged (#134): V19, 15 specialties in every environment |
 
 | Git | State |
 |---|---|
-| api-MedLink `master` | Has #130 (Vault deploys), the owner's #132 (production deploys automatically from the verified staging run unless `AUTO_DEPLOY_PROD=false`) and #131 (MLink-37) |
-| PR #133 (`chore/vault-deploy` → `master`) | **Merged 2026-11-19 20:55 UTC** (approved by the owner). The hand-over docs commits that came after it: branch `docs/deploy-handover` |
-| medlink-dashboard `master` | Has #18 (appointments epic), #20, #21 (auto prod deploy). Activation page (MLink-20, Chourouk) only on `epic/MLink-11` (Ahlem's commit 17/11), no PR, 56 ahead / 20 behind |
-| `staging`, `prod` (both repos) | Far behind `master` (api `staging` 270+ commits). Every branch needs the owner's review (CODEOWNERS `*`); Mohamed has push, not admin |
-
-GitHub environments (both repos, `staging` and `production`): `DEPLOY_HOST`, `DEPLOY_USER`, `DEPLOY_PATH`,
-`DEPLOY_HEALTH_URL`, `DEPLOY_KNOWN_HOSTS` set on 2026-11-19. `DEPLOY_SSH_KEY`: Mohamed sets it (command in the chat;
-check with `gh api repos/assali-mohamed-ali/<repo>/environments/<env>/secrets`). The owner received a message listing
-what needs him: review #133, `master` → `staging` sync, `AUTO_DEPLOY_PROD`, production deployment rules, the unused
-`DEPLOY_ENV_FILE` secret, `CROSS_REPO_TOKEN`, the activation page PR, the nightly gitleaks finding on his branch
-`fix/workflow-security-and-reliability`, dev users and unseal keys.
-
-YouTrack: MLink-168, 169, 170, 171 *À vérifier*; 172, 173 *En cours*; comments posted on 168, 169 (#133) and on MLink-20.
+| `integration/whole-app` (both repos, from `staging`) | Every open piece of work merged, conflict-free: api PR **#139**, dashboard PR **#28**, both → `staging`. Local: api 1018+ tests in both orders, dashboard 475 |
+| api #139 | MLink-9's MinIO client moved to 9.0.4 (Trivy 8 HIGH/CRITICAL → 0; kotlin 2.4.21 for Dependency-Check). Patient documents in the CD deploy, **option b** (Mohamed, 2026-11-22): each API host runs MinIO on the compose network only, plain HTTP inside the host, documents AES-256-GCM sealed by the API; Vault generates `APP_DOCUMENTS_ENCRYPTION_KEY`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` (`seed-env.sh`) |
+| dashboard #28 | Green; publish job now has `artifact-metadata: write` (the 2026-11-22 staging publish failed with "tlog entry 404", like the API before #138) |
 
 ### Next, in order
 
-1. **Check and sync** (above). Merge `master` into the working branch first.
-2. **Vault: DONE 2026-11-20** (setup token by Mohamed, `setup.sh` from this branch run from `~/medlink-vault-pr133` on the host, roles checked, token revoked and shredded; `seed-front.sh` skipped). Kept for the next time: (needs Mohamed's setup token; the permission check refuses Claude reading the unseal keys). Mohamed runs,
-   from Git Bash, `Docs/Deployment/new-setup-token.sh` fed with three unseal keys (the exact one-liner is in the chat
-   of 2026-11-19; by hand: `generate-root` steps in `vault.md`). It writes a 3-hour `/root/medlink-setup.token` and
-   revokes the root token. Then: copy `vault/` to the host, `setup.sh` (new roles), check one role with
-   `vault read auth/jwt-github/role/api-production`, revoke the setup token. `seed-front.sh` needs the private deploy
-   key on the vault host: skip it, the dashboard falls back to its GitHub secrets.
-3. **Specialties: IN PROGRESS, MLink-174** (branch `feat/MLink-174-specialties`, V19 with 15 usual specialties; Mohamed has no official list). Original plan: new ticket, `V19__specialties_reference_data.sql` like V15 (same ids as
-   the dev seed, `ON CONFLICT DO NOTHING`), red test first, PR to `master`. List: the 3 dev specialties unless Mohamed
-   gives the real one.
-4. **Whole-app integration branch (Mohamed's request)**: `integration/whole-app` from `master` in each repo, merge the
-   other branches, resolve, both test orders green, then decide with Mohamed and the owner whether it can go to
-   `master`. Care: most open PRs have *changes requested* (#128 epic/MLink-8, #127, #122, #121, #90, dependabot #115
-   #114 #110 #75); teammates' code stays theirs (comment on their tickets, do not rewrite it); `DEPLOYMENT.md` warns
-   against blindly merging the legacy `staging`/`prod` differences. First list every remote branch with ahead/behind
-   and its PR/review state, skip merged or stale ones, merge in dependency order, one merge commit per branch.
-5. **Deploy through CD only**: when `master` has what must ship, the owner merges a `master` → `staging` sync in both
-   repos; CD deploys staging, smoke-tests, waits for the other repository, then deploys the same digest to production.
-   Then check: a real signup on staging receives its mail (MLink-172), the admin logs in, both environments pass the
-   checks of the PDF (MLink-173).
+1. **Vault** (needs Mohamed's setup token: `Docs/Deployment/new-setup-token.sh` fed with three unseal keys). Then, from
+   `staging`'s (or #139's) `vault/`: `setup.sh` (#137 roles), `seed-env.sh staging` and `seed-env.sh prod` (adds only
+   the three document/MinIO values, never changes an existing one), read one role back, revoke the token.
+2. **Owner settings**: `CROSS_REPO_TOKEN` in both repositories; `AUTO_DEPLOY_PROD=false` in both, so the first CD run
+   stops after staging and production keeps its images.
+3. **Disk**: look at what fills the Vault and front hosts (MinIO also adds a volume on each API host); delete only
+   after asking.
+4. **Merge #139 and #28 into `staging`** (owner review, AI boxes ticked by Mohamed). CD deploys staging, smoke-tests,
+   waits for the other repository. Check MLink-172 (a signup mail arrives), MLink-173 (the PDF's checks), MLink-174
+   (specialties listed), a document upload and read back (MLink-9).
+5. **Production**: when the team says go, `staging` → `prod` through the workflow (`AUTO_DEPLOY_PROD` back on, or the
+   promotion PR). CD replaces the hand-deployed images with the verified staging digest.
 6. **Before production opens**: delete `staff.dev`, `practitioner.dev`, `patient.dev` from the production realm
    (destructive: ask), split the 5 unseal keys between 3+ people, delete `Docs/Server Keys/MedLink-Prod app key.txt`.
-7. **Proposed, not done**: a database backup just before each rollout in `.github/actions/deploy-compose`.
+7. **Proposed, not done**: a database backup just before each rollout in `.github/actions/deploy-compose`; memory on
+   the 1 GB hosts with MinIO added (watch `docker stats` after the first staging deploy).
 
 ### Files on Mohamed's machine (never in git)
 
