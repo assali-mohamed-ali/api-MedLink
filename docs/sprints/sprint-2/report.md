@@ -2,6 +2,41 @@
 
 Updated by every sub-sprint PR. Newest information first inside each section.
 
+## MLink-26 — Agenda multi-sites (back-end)
+
+**Tickets:** MLink-133, 134, 135, 136, 137, 138, 141. Front (MLink-139, 140) in `web-MedLink`.
+
+**Routes** (class-level `@PreAuthorize(PRACTITIONER)`; the practitioner is always the caller):
+
+| Route | Answer |
+|---|---|
+| `GET /api/practitioner/agenda?from=&to=` | `{clinics, items}`; period up to 31 days; past slots included; patient names only |
+| `POST /api/practitioner/slots` | 201 + the slot; 409 `SLOT_OVERLAP`; 400 `VALIDATION_FAILED` |
+| `PATCH /api/practitioner/slots/{id}` | `{"status":"OPEN"\|"CLOSED"}`; 409 `SLOT_BOOKED`, `SLOT_IN_PAST`; 403 if not the caller's slot |
+
+**Decisions**
+- V15 inserts the three reference clinics (no endpoint creates a clinic) and adds the `CLOSED` slot status.
+- The overlap is enforced by the database (`slots_no_overlap`); the application check only names the slot in the way, and a lost race is translated to the same 409 (never a 500).
+- A closed slot keeps its time range: reopening it frees the time (decision D4, to confirm).
+- Closing is one conditional `UPDATE` (free and no active appointment): a concurrent booking cannot end on a closed slot. The booking (MLink-102, merged with #87) locks the slot (`SELECT … FOR UPDATE`) and refuses any slot that is not `FREE`, so a closed slot answers 409 `SLOT_TAKEN`; in a race, Postgres's row lock makes one side see the other's status.
+- Spring converts query parameters and the JSON body before `@PreAuthorize` runs, so a patient sending `from=not-a-date` got 400 instead of 403 (code owner's review on #116). **`SecurityConfig` now limits `/api/practitioner/**` to `PRACTITIONER`** in the filter chain, before any conversion (shared file, changed at the code owner's request); the class-level `@PreAuthorize` stays as a second check. Nothing is `@Valid` or required either: a patient or staff member gets 403, never 400, whatever they send.
+- Two overlapping openings at once: the exclusion constraint can make each insert wait for the other, and Postgres aborts one with a deadlock (40P01), which reached the client as 500. `AgendaService.open` retries once after a `PessimisticLockingFailureException`: the overlap check or the constraint then answers 409 `SLOT_OVERLAP`; a second deadlock also answers 409. Found while revalidating the review fix.
+- The agenda is not audited per read (it is not the medical record); slot changes are (`SLOT_OPENED`, `SLOT_CLOSED`); refusals are (`ACCESS_DENIED`).
+- Duration 10 min to 8 h and horizon 180 days are assumptions (constants in `AgendaService`), not in the cahier des charges.
+
+**Proofs**
+- Repository queries: `SlotRepositoryAgendaTest` (9 tests) with `AppointmentSchemaTest`, `AppointmentDomainRepositoryTest` and `SlotSearchFunctionalTest` still green (39 tests).
+- Access matrix: 3 new lines, 73 cases green.
+- `AgendaFunctionalTest`: 21 tests green, including `aClosedSlotCannotBeBookedEvenByItsIdAndNoAppointmentIsCreated` (added after the merge of `master`): checked once that it turns red when the booking refuses only `BOOKED` slots.
+- Postman: new folder 9 "Practitioner agenda (MLink-26)", 25 requests: anonymous 401 and patient 403 on every route (403, never 400, even without dates or body); a disposable practitioner through the code step gets 400 without dates, 409 `PRACTITIONER_PROFILE_MISSING` and 403 on a slot that is not theirs. Folder alone: 26 requests, 41 assertions, 0 failures. Whole collection, `npx newman@6.2.1 run`: **158 requests, 355 assertions, 0 failures**, twice in a row. The full flow (three clinics, overlap, close, reopen) needs a practitioner profile, which no endpoint creates yet (SS5): it stays proven by `AgendaFunctionalTest`.
+- Review on #116 (2026-11-10): `patientsAndStaffGet403EvenWithMalformedDatesOrJson` (malformed dates, malformed JSON, an id that is not a UUID, on the three routes, for a patient and a staff member) committed red first: `expected: 403 but was: 400`; green with the `SecurityConfig` rule. `twoSimultaneousOverlappingOpeningsLeaveExactlyOneSlotAndNoServerError` was red 4 runs out of 5 (201 + 500, SQLSTATE 40P01), green 10 runs out of 10 with the retry. Full suite `./mvnw -B verify`: **519 tests, 0 failures**; reverse class order: 519 tests, 0 failures. Postman folder 9 on the rebuilt dev stack: 26 requests, 41 assertions, 0 failures.
+- Full suite `./mvnw -B verify`: 476 tests, 0 failures; reverse class order (`-Dsurefire.runOrder=reversealphabetical`): 476 tests, 0 failures.
+- After merging `master` (2026-11-10, booking and slot search index included): `./mvnw -B verify` 517 tests, 0 failures; reverse class order 517 tests, 0 failures (before the closed-slot booking test was added).
+- `pre-commit run --all-files`: all 14 hooks passed (gitleaks, checkov, detect-private-key included).
+- One isolated failure of `QrCodesTest` (MLink-62) was seen once in a full run; not reproduced in 10 separate runs nor in the next full runs; unrelated to this PR.
+
+**Follow-ups:** `AuditService.recordInCurrentTransaction` (MLink-114) to write the audit in the business transaction; `SlotRepository` is shared with MLink-98; the enum conflict with MLink-114 is to be resolved at rebase (keep all values).
+
 ## Status
 
 | Sub-sprint | Scope | State | PR | Date |
@@ -9,9 +44,177 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | 0 | Sprint plan, backend-only design, YouTrack re-mapped | Done | docs/sprint-2-plan | 2026-10-14 |
 | 1 | Registration and email verification (endpoints 1–4) | Done; review fixes landing (`fix/land-pr-39`) | [#32](https://github.com/assali-mohamed-ali/api-MedLink/pull/32) | 2026-10-14 |
 | 2 | Login and session (endpoints 5–7) | **In progress, split** (see below): login done | [#38](https://github.com/assali-mohamed-ali/api-MedLink/pull/38), [#41](https://github.com/assali-mohamed-ali/api-MedLink/pull/41) | — |
-| 3 | Staff code, TOTP (endpoints 8–9) | **Merged** (#97, MLink-62/63); review round 1 **in review** on `fix/ss3-review-round-1`: see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97) | 2026-10-29 |
+| 3 | Staff code, TOTP (endpoints 8–9) | **Done** (MLink-62/63): #97, review round 1 in #99; see the section below; plan and history in [ss3-staff-totp.md](ss3-staff-totp.md) | [#97](https://github.com/assali-mohamed-ali/api-MedLink/pull/97), [#99](https://github.com/assali-mohamed-ali/api-MedLink/pull/99) | 2026-10-29 |
 | 4 | Passwords (endpoints 10–11) | **In progress**: MLink-87 merged (#88); MLink-91/88/90 in review | [#89](https://github.com/assali-mohamed-ali/api-MedLink/pull/89) | 2026-10-23 |
 | 5 | Accounts and access (endpoints 12–16) | To do | — | — |
+
+**2026-11-19:** Staging and production preparation applied on the hosts: Vault in a container, hosts prepared. **Production works end to end** (dashboard, API through the front, Gmail mail) since the repo owner opened port 8080 and enlarged the staging disk. Staging: dashboard live, API and Keycloak waiting for a fresh Vault setup token. PR #130: the three review findings fixed (CI YAML check, staging dispatch condition, Vault roles bound to the CD workflow, refs and event). No migration, no endpoint, no Java change. See [deploy-prep.md](deploy-prep.md).
+
+**2026-11-18:** Staging and production preparation (MLink-168 to MLink-173, Mohamed) on `chore/vault-deploy`:
+MLink-168 Vault as code and MLink-171 host preparation done, scripts and runbooks only (no migration, no endpoint, no
+Java change); `ci.yml` gains two steps. Nothing applied on the servers yet. See the section "Staging and production
+preparation".
+
+**2026-11-18:** MLink-166 (GitHub #67) on `chore/db-backup-restore`: encrypted backup and all-or-nothing restore of
+both databases, scripts and a runbook, restore drill done on the dev stack. No migration, no endpoint, no Java change.
+`ci.yml` gains one step. See the MLink-166 section.
+
+**2026-11-19:** MLink-37 37.7, API part: the agenda shows a cancellation. `GET /api/practitioner/agenda` gives, on a slot nobody holds, its latest cancelled appointment (`appointment.status` `CANCELLED`, the patient's id and names, as for a booking); a booking always wins over an older cancellation; a slot never booked has no `appointment`. One more query, `AppointmentRepository.findCancelledWithPatient` (latest `cancelled_at` first), only for the slots of the week nobody holds. No migration, no new route. Tests, red first: `aBookedSlotShowsItsPatientsNamesAndNothingMoreAndAFreedSlotShowsItsCancelledAppointment` (was `…ACancelledAppointmentIsNotShown`: the contract changes on purpose), `aRebookedSlotShowsItsBookingAndASlotCancelledTwiceShowsTheLatestCancellation`, `afterARealCancellationTheAgendaShowsTheSlotOpenWithTheCancelledAppointment` (book and cancel through the real routes).
+
+**2026-11-18:** MLink-37, code owner's review on #125 (2/2), after #120 (US-15) merged: `master` merged in (conflicts in `report.md` and `MailService`, both sides kept: the cancellation mail and the reminder mail). A real cancellation now creates the practitioner's alert: `AppointmentService.cancel()` calls `alerts.onAppointmentCancelled(appointment)` right after its `APPOINTMENT_CANCELLED` audit row, and `reschedule()` calls it for the old appointment after its `APPOINTMENT_RESCHEDULED` row (a move cancels the old one), both inside the change's transaction; the mail still leaves after the commit and never blocks it. Coordinated with Ela on #120. Tests, red first, through the real routes: the 37.8 story now books and cancels with `POST /api/appointments` and `POST /api/appointments/{id}/cancel` (no direct service call), `movingAnAppointmentWarnsThePractitionerOfTheOldSlotWithAMail`, `aCancelRefusedByTheDeadlineGivesNoAlert`, `cancellingTwiceGivesOneAlert`.
+
+**2026-11-17:** MLink-37, code owner's review on #125 (1/2): the alert list is bounded, since the bell polls it every minute and unread alerts are kept until read. `GET /api/practitioner/alerts` takes `page` (from 0) and `size` (20 by default, 50 at most), sorted newest first then by id, so alerts of the same instant are never repeated or skipped across pages; a page or size out of range (or not a number) is 400 `VALIDATION_FAILED` naming the parameter, as on `/api/admin/users`. The answer is still a JSON array: the front's bell is unchanged. Tests, red first: `theListIsPagedTwentyAtATimeByDefaultNewestFirst`, `alertsOfTheSameInstantArePagedInOneStableOrder`, `aPageSizeAboveFiftyOrAPageOutOfRangeIsRefusedNamingTheParameter`; Postman folder 12 gains size=50 (200) and size=51 (400). (2/2), the wiring into the real cancellation, waits for #120 (US-15) to merge first.
+
+**2026-11-17:** MLink-37, before the PR: `master` merged in (V16 then V17; conflicts only in this file and `AccessMatrixFunctionalTest`, both sides kept). Postman folder 12 "Cancellation alerts": a patient gets 403 on both routes, a disposable practitioner (code step included) gets 200 and an empty list (unread and `unread=false`), 403 for an alert that is not theirs or an id that is not a UUID, anonymous 401. An alert itself needs a cancelled appointment, which no endpoint creates yet (US-15): proven by `AlertFunctionalTest`, `AlertCreationTest`, `AlertMailFunctionalTest`.
+
+**2026-11-13:** MLink-37 37.8, the acceptance criteria and their tests. One end-to-end story, `AlertFunctionalTest.anAlertReceivedWhileLoggedOutIsThereAtTheNextLoginWithItsMailThenMarkedRead`: the practitioner logs out, the appointment is cancelled, (1) the alert row and the mail exist (read in Mailpit), (2) logged in again the alert is still listed unread, (3) once marked read it leaves the list, also after another login, (4) another practitioner neither sees it nor marks it (403). Details per criterion: `AlertCreationTest` (one alert, Tunis time, not twice, a failing mail never blocks), `AlertMailFunctionalTest` (the mail's content), the other `AlertFunctionalTest` cases (list shape, ownership, roles), `AlertSchemaTest` (table rules). The cancel route itself is US-15's (epic MLink-8): the story calls `AlertService.onAppointmentCancelled` as its cancel code will. `./mvnw -B verify` and the reversed class order green before the push.
+
+**2026-11-13:** MLink-37 37.4 (H-06): with its alert, the practitioner gets a mail "Un rendez-vous a été annulé" (`MailService.sendAppointmentCancelled`, French, plain text and HTML): the patient's name, the date and time in Tunis, the clinic and a link to the agenda; no medical content, no birth date or phone. It leaves after the commit (`TransactionSynchronization.afterCommit`), so never for a rolled-back cancellation, and never blocks it: a failure is logged by the alert id only (no address, no name) and the alert stays. No alert, no mail (not cancelled, already alerted). Tests: `AlertMailFunctionalTest` (the mail read in Mailpit), `AlertCreationTest` (a failing mail keeps the alert, throws nothing).
+
+**2026-11-13:** MLink-37 37.2: `AlertService.onAppointmentCancelled(appointment)` gives one `APPOINTMENT_CANCELLED` alert to the practitioner of the slot: "Rendez-vous annulé : <patient>, <jour date à HH:mm Tunis>, <clinic>." Nothing for an appointment that is not cancelled; one alert per cancellation (checked, and held by the V17 unique constraint), so a cancel processed twice changes nothing. It joins the caller's transaction: the cancellation and its alert are kept together. The cancel route is US-15's (`AppointmentService.cancel`, epic MLink-8, not merged): until then the method is tested directly (`AlertCreationTest`); its owner calls it after `slot.setStatus(FREE)` in `cancel()` (asked on their ticket, their file is not changed here).
+
+**2026-11-13:** MLink-37 37.3: `GET /api/practitioner/alerts?unread=true` (the default; `false` gives all) → the caller's alerts newest first, `{ id, type, message, appointmentId, createdAt }`, the contract the front's bell was built on (37.5); `POST /api/practitioner/alerts/{id}/read` → 204, harmless when repeated (the first reading time stays). Ownership: every query is scoped to the caller (`findByIdAndPractitionerId`), so another practitioner's alert, an unknown one and a malformed id get the same 403. `OwnershipGuard` is not used here on purpose: it lets staff through, and an alert's owner is only known by reading it; the URL rule `/api/practitioner/**` (#116) already keeps staff and patients out before anything is read. `Alert.createdAt` kept to the microsecond (as #123). Access matrix: two rows. `master` merged first (V15 now there, V16 still on #123).
+
+**2026-11-12:** MLink-37 37.1 (`feat/MLink-37-cancellation-alerts`): `V17__alerts.sql`, the practitioner's alerts, kept until read (H-06: an offline practitioner finds them at the next login). Columns of the ticket; `practitioner_id` references `practitioners` (= `users.id`, stricter than `users`: only a practitioner gets an alert); `type` checked (`APPOINTMENT_CANCELLED`); one alert per (type, appointment), so a cancellation processed twice gives one alert (37.2); partial index for the unread list. Entity `Alert`, `AlertType`, `AlertRepository` (unread newest first, own alert by id, already alerted). **V17 because V15 (#116, agenda) and V16 (MLink-32, reports) come first: this branch merges after both.**
+
+**2026-11-17:** MLink-165 (GitHub #57) on `fix/db-hardening`: two database roles. Flyway migrates as the owner
+(`POSTGRES_USER`), the API connects as `medlink_app`, which may only append to and read the audit trail and cannot
+change the schema. **Migration V18** (`V18__app_role_grants.sql`; V17 is MLink-37's, now present from `master`). **Every test now runs as
+`medlink_app`** (`TestcontainersConfiguration`, shared file): a new test that needs a privilege the API does not have
+will fail, as the API would. New env key `APP_DB_PASSWORD` (the setup scripts add it to `.env`); staging/prod also need
+`SPRING_FLYWAY_USER` / `SPRING_FLYWAY_PASSWORD`. No `-Reset` needed. No endpoint. See the MLink-165 section.
+
+**2026-11-18:** MLink-167 on `epic/MLink-8` (story MLink-27): a patient cannot hold two overlapping appointments,
+even in two clinics. A booking or a move onto such a time is **409 `PATIENT_BUSY`**. No migration, no new route,
+no shared file changed. See the MLink-167 section.
+
+**2026-11-17:** Code owner's review on #120, round 3: a cancel writes `APPOINTMENT_CANCELLED` and a move writes
+`APPOINTMENT_RESCHEDULED` (on the new appointment), each in its own transaction like a booking. `AuditAction` gains
+the two values (shared file, two lines). No migration, no new route. See the section "Review on #120".
+
+**2026-11-15:** Code owner's review on #120 (`epic/MLink-8`), three fixes: a booking and its audit row in one
+transaction (MLink-104); each reminder locks and rechecks its appointment before the mail, so a cancel during the run
+stops it (MLink-110); reminder delivery is stated as **at least once**, with one Message-ID per appointment (MLink-111).
+Shared file: none changed (`AuditService.recordWithin` came with #116). No migration, no new route. See the section
+"Review on #120".
+
+**2026-11-08:** MLink-111 on `epic/MLink-8`: a failed reminder is tried 3 times then logged (id only) and left for the
+next run; one reminder only. New property `app.appointments.reminder-retry-backoff`. See the MLink-111 section.
+
+**2026-11-08:** MLink-110 on `epic/MLink-8`: a **scheduled job** mails a reminder 24 hours before a booked appointment
+(H-02 = `app.appointments.reminder-hours-before`). No route, no migration. See the MLink-110 section.
+
+**2026-11-08:** MLink-107 on `epic/MLink-8`: **new route `POST /api/appointments/{id}/reschedule`** (move to another
+slot, all or nothing); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-107 section.
+
+**2026-11-08:** MLink-106 on `epic/MLink-8`: **new route `POST /api/appointments/{id}/cancel`** (the holder cancels up
+to 12 hours before, H-03 = `app.appointments.cancel-deadline-hours`); one new line in `AccessMatrixFunctionalTest`;
+**`SecurityConfig`** (shared): every POST under `/api/appointments` is PATIENT-only in the filter chain. No migration.
+`QrCodesTest` (MLink-62/63) errored once in the reverse order and passed on reruns: reported as flaky. See the
+MLink-106 section.
+
+**2026-11-08:** MLink-108 on `epic/MLink-8`: **new route `GET /api/appointments/me`** (a patient's own appointments,
+latest first, cancelled included); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-108 section.
+
+**2026-11-08:** MLink-104 on `epic/MLink-8`: every booking writes one audit line (`APPOINTMENT_BOOKED`, SUCCESS,
+ids only). `AuditAction` and `AuditOutcome` gain a value each (`SUCCESS` is also added by MLink-114 and epic MLink-9).
+No migration, no new route. See the MLink-104 section.
+
+**2026-11-08:** PR #87 (epic MLink-8, first batch: MLink-97, 98, 99, 100, 163, 102, 103) **merged into `master`**
+(f71c577). `epic/MLink-8` goes on for the rest of the epic. Post-merge review fix on it: **`SecurityConfig`** (shared)
+makes `POST /api/appointments` PATIENT-only in the filter chain, so a malformed body from a non-patient is 403, not
+400. See the MLink-102 section.
+
+**2026-11-12:** MLink-32 (`feat/MLink-32-consultation-report`): 32.1 `V16__consultation_reports.sql` (immutable rows, content sealed only), 32.2 `ReportCipher` (AES-256-GCM, own key `APP_REPORT_ENCRYPTION_KEY`, report and patient ids as associated data), 32.3 `POST`/`GET /api/patients/{id}/reports` for the practitioners the patient is attached to (the record's rule, MLink-31): body `{ content }` (not blank, 10 000 characters at most, `details.content` on a 400), answer `{ id, createdAt, content }`, newest first; any other caller gets the record's 403, checked before the text; a failed save answers 500 `REPORT_SAVE_FAILED` and keeps nothing. Shared files: `SecurityConfig` (one URL rule, `/api/patients/*/reports` for PRACTITIONER, so a patient's bad body is 403, not 400), two rows in `AccessMatrixFunctionalTest`, Postman folder 11. The migration is V16: this branch merges after #116 (V15).
+
+**2026-11-12:** MLink-32 32.4: every report written adds one `REPORT_CREATED` row (resource `CONSULTATION_REPORT`, the report id), in the same transaction as the report: a report is never kept without its trace, and a failed row answers `REPORT_SAVE_FAILED`. Every read adds one `REPORT_VIEWED` row (resource `PATIENT_REPORTS`, the patient id) before the list leaves, like the record's `RECORD_VIEWED`. Ids only, never a text. Refusals stay `ACCESS_DENIED`. `AuditService.recordWithin` is the same method as on #116 (identical lines, so the two branches merge cleanly there); `AuditAction` gains two values (an additive conflict with #116's `SLOT_OPENED`/`SLOT_CLOSED` when both merge).
+
+**2026-11-15:** MLink-32, code owner's second review on #123. (1) `ReportWriteGuard` refuses every write of unknown length with 411, not only a chunked one: an HTTP/2 hop may forward a body with neither `Content-Length` nor `Transfer-Encoding`, and only a stated length is a bound Tomcat enforces. Tests: `ReportWriteGuardTest` (HTTP/2 and HTTP/1.1 forms, unit), `aWriteWithNeitherContentLengthNorTransferEncodingIsRefusedWith411` (raw socket, real API). (2) `report_encryption_key` is in the three `terraform.tfvars.*.example` files and in the README's required settings (distinct from the MFA key, back it up); `TerraformExamplesTest` checks that every variable without a default is in each example and in the README. Red first.
+
+**2026-11-14:** MLink-32, code owner's review on #123. (1) A report write is checked before Spring reads its body: `ReportWriteGuard`, a handler interceptor on `/api/patients/*/reports` (registered in the new `WebConfig`), checks the attachment first (403 for a malformed, huge or unsized body from a practitioner who is not attached), then a hard size: no `Content-Length` (chunked) is 411 `LENGTH_REQUIRED`, over 64 KiB is 413 `PAYLOAD_TOO_LARGE` (10 000 characters at their longest JSON escape still fit). The service keeps its own checks. (2) A traced read no longer holds its read transaction's connection while its audit row is written in its own (`REQUIRES_NEW`): `list` reads in a read-only `TransactionTemplate`, then calls `audit.record`. Same fix for `PatientRecordService.read` (MLink-31, same pattern). Tests, red first: three in `ConsultationReportFunctionalTest`, and `ReadAuditConnectionTest` (a pool of one connection: a read holding two would time out; the committed row is read back; a read whose trace fails is not answered). No migration, no new route; `SecurityConfig` unchanged.
+
+**2026-11-13:** MLink-32, CI of #123: a report's `createdAt` is kept to the microsecond, as PostgreSQL stores it. Linux clocks (the CI's) give nanoseconds, so the POST answered a time the GET never gave back (green on macOS, red on Linux). Test `theCreationTimeKeptByTheEntityIsTheOneTheDatabaseStores`.
+
+**2026-11-12:** MLink-32 32.7, the acceptance criteria and their tests: (1) the content column is not the text: `theContentIsSealedInTheDatabaseNeverInPlainText`, and `theSameTextIsSealedDifferentlyEachTimeAndNeverAsItsPlainBase64` (a new IV each time, no plain base64); (2) writing for a patient not attached is 403 and saves nothing: `aPractitionerWhoIsNotAttachedGetsTheRecordsSame403AndNothingIsSaved`; (3) a failing save answers `REPORT_SAVE_FAILED` and stores nothing: `ReportSaveFailureTest` (the database cannot fail on demand through the API, so the service is called with its repository, then its audit, made to fail); (4) write and read are audited: `everyWriteAddsOneReportCreatedEntryWithTheIdsOnly`, `everyReadAddsOneReportViewedEntryForThePatient`. `./mvnw -B verify` and the reversed class order green before the push.
+
+**2026-11-12:** MLink-26, code owner's second review on #116: a slot change and its audit row are now one unit. The slot was committed before its audit row (written in its own `REQUIRES_NEW` transaction), so a failed audit could answer 500 after a kept change, with no trace. `AuditService.recordWithin` (new, `MANDATORY`) writes the row in the change's transaction; `AgendaService` calls it for an opening, a closing and a reopening, and the controller no longer audits. If the row cannot be written, the change rolls back. `AuditService.record` (own transaction) is unchanged for refusals. New test `AgendaAuditAtomicityTest` (audit repository made to fail). Shared file: `AuditService` (one method added). No migration, no new route.
+
+**2026-11-10:** MLink-26, code owner's review on #116: `SecurityConfig` gains a role rule for `/api/practitioner/**` (the role is checked before Spring converts dates and JSON: 403, never 400, for a patient). Shared file: no other route changes. Also fixed: two overlapping slot openings at once could end in a 500 (Postgres deadlock), now 409. No migration, no new route.
+
+**2026-11-10:** MLink-26 (`feat/MLink-26-agenda`): `master` merged after #87 and #113, so the agenda migration is renumbered **V15** (`V15__agenda_reference_data.sql`; V14 is MLink-99's slot search index). Dev databases that ran the branch's old V14 need the setup script with `--reset` (`-Reset`) once. Conflicts kept both sides (`SlotRepository`, access matrix). New test: a closed slot cannot be booked. See the MLink-26 section.
+
+**2026-11-11:** MLink-164 (GitHub #64) on `fix/db-hardening`: staging and prod refuse to start without real database
+credentials, and `docker-compose.yml` requires `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD`. No migration, no
+endpoint. **Before the next deploy:** the deploy secret (`DEPLOY_ENV_FILE`) must hold those three keys with real
+values. One PR with #57 (MLink-165, next). See the MLink-164 section.
+
+**2026-11-10:** MLink-31 (`feat/MLink-31-patient-record`): `GET /api/patients/{id}/record` for the practitioners the patient is attached to (a `BOOKED` appointment). No migration. **One new line in `AccessMatrixFunctionalTest`**, one new rule in `SecurityConfig`. See the MLink-31 section.
+
+**2026-10-31, updated 2026-11-08:** MLink-65 (sub-sprint 3 part, `feat/ss3-setup-staff-code-check`): both setup
+scripts check the session with `GET /api/auth/me` (#107): `patient.dev` gets 200 with exactly the roles `["PATIENT"]`, and
+`practitioner.dev`'s password alone opens no session (login 200 with `mfaRequired`, then 401). Scripts and README
+only: no migration, no endpoint.
+
+**2026-11-07:** MLink-103 on `epic/MLink-8`, PR #87: two patients booking one slot at once get one appointment and
+one 409 `SLOT_TAKEN`; a double booking only the unique index catches also answers 409, never 500. No migration (the
+index is in V13), no new route. See the MLink-103 section.
+
+**2026-11-07:** MLink-102 on `epic/MLink-8`, PR #87: **new route `POST /api/appointments`** (patients book a slot);
+one new line in `AccessMatrixFunctionalTest`. No migration. **New dev user `patient.demo@medlink.local`** (dev password):
+`patient.dev` has no patient profile, so it cannot book (403 `PATIENT_PROFILE_REQUIRED`); `setup-dev` imports the new
+user at the next start. See the MLink-102 section.
+
+**2026-11-07:** MLink-163 on `epic/MLink-8`, PR #87: **new route `GET /api/slots/filters`** (patients only, the
+lists of the search form); one new line in `AccessMatrixFunctionalTest`. No migration. See the MLink-163 section.
+
+**2026-11-07:** MLink-99 (slot search index) on `epic/MLink-8`, PR #87: **migration V14**
+(`V14__slot_search_index.sql`, one partial index on the free slots); dev databases need the setup script once
+(V14 runs on start, no `--reset` needed). No new route. See the MLink-99 section.
+
+**2026-11-07:** `epic/MLink-8` (PR #87): current `master` merged (Scalar instead of Swagger UI, so the SCA run is
+green again); `GET /api/slots` now checks the role before reading any parameter, so a non-patient gets 403 even with
+`clinicId=abc` (code owner's review, see the MLink-100 section). The migration stays **V13**. No new route.
+
+**2026-10-29 (night):** MLink-53, `GET /api/auth/me` (endpoint 6, `feat/mlink-53-auth-me`): the user object of the
+login, read from the session the login opened (the id token and the granted roles), with no Keycloak or database
+call; 401 `UNAUTHENTICATED` without a session, after a logout, or with only a pending code step. React needs it to
+restore who is logged in after a page refresh (the front's MLink-128). Taken over from Ahlem with her agreement. No
+migration. The tests and setup scripts that check a session with `/api/users/_health` can now use it.
+
+**2026-10-29 (evening):** MLink-68 (story MLink-19) on `feat/mlink-68-lockout-check`: `scripts/check-lockout.sh`
+proves the lockout on the running dev stack: 5 wrong passwords 1.2 s apart (Keycloak's quick-login guard would lock
+after 2 otherwise), then the right password is refused (401, like a wrong password: a 423 would reveal that the
+account exists) and Keycloak's brute-force status says locked; `patient.dev` is unlocked at the end. `PASS` on the dev
+stack, `FAIL` with `failureFactor` raised to 50 through the admin API. No migration, no endpoint.
+Review of #103 (2026-10-30): the script refuses a non-local `APP_URL` or `KEYCLOAK_URL` before any request (exit 2),
+so a mistaken staging/prod URL cannot lock or unlock a real account; a remote dev stack needs
+`ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack`. `scripts/check-lockout.test.sh` (offline, fake `curl`, run by CI's
+`build-test`) covers 14 cases, lookalikes included (`localhost.evil.com`, `localhost:8180@evil.com`); two mutants of the
+guard turn it red. The cookie jar is removed in the `EXIT` trap.
+Review of #103 (2026-11-02): the unlock is now checked. It needs an admin token and Keycloak's 204; otherwise it says
+why on stderr and the run fails (exit 1, never `PASS`), at the start (the count would prove nothing), at the end (the
+unlock runs before the result is printed) and in the `EXIT` trap (an interrupted run). The offline test plays a fake
+dev stack: final unlock answered 500 or 401, no admin token, first unlock refused (19 cases); mutants without the status
+check or the token check turn it red. `PAUSE_SECONDS` (default 1.2) lets the test skip the waits.
+Review of #103 (2026-11-06): the guard read `https://prod.example.com#@localhost` (or `?@`, `\@`) as localhost,
+because it dropped the user-info before the query and fragment: the admin and test passwords would have gone to
+prod. `url_host()` now cuts the host at the first `/`, `?`, `#` or `\` before dropping the user-info; 5 new cases
+(24 in all), red before the fix.
+
+**2026-10-29 (evening), updated 2026-10-30:** MLink-127 follow-up and GitHub #65 on `fix/65-swagger-off-in-prod`:
+staging and prod serve neither the API reference UI nor `/v3/api-docs` (404 over HTTP, `ApiDocsExposureIntegrationTest`),
+dev keeps both (DAST runs the dev profile). After #100 (Scalar replaces Swagger UI) the UI is Scalar at `/scalar`:
+`scalar.enabled: false` in staging and prod switches it off on its own (today `springdoc.api-docs.enabled: false` also
+hides it, as a side effect of Scalar's configuration depending on springdoc's; staging mutants: no switch exposes
+`/scalar`, `/scalar/scalar.js` and `/v3/api-docs`; `scalar.enabled: false` alone hides Scalar). The test lists
+`/scalar`, `/scalar/scalar.js` and the old Swagger UI paths, with soft assertions. The DOMPurify 3.4.16 suppression
+of the first version is dropped: Swagger UI is no longer a dependency and Scalar's bundle embeds no DOMPurify.
+No migration, no endpoint.
+
+**2026-10-29:** `epic/MLink-8` (PR #87, ready for review): `master` merged after #97 and #99, so the appointment
+migration is renumbered **V13** (`V13__appointment_domain.sql`); dev databases that ran an older number need the
+setup script with `--reset` (`-Reset`) once. Code owner's review: a slot must be in one of its practitioner's clinics
+(composite foreign key), see the MLink-97 section. No new route.
 
 **2026-10-29:** #97 (MLink-62/63) was merged before its review round 1 reached it, so `master` still has the
 first-enrolment takeover and the `/patients` default group. `fix/ss3-review-round-1` (one PR based on `master`)
@@ -45,8 +248,28 @@ private management port 9000; the public port keeps `/livez` and `/readyz`. **Ev
 `d7b0585` (2026-10-23). For a PDF, print the HTML (A4 is set in its CSS); the PDF is not committed (2.4 MB,
 over the 1 MB limit of the large-file hook in #91). This file stays the engineering log. No code change.
 
+**2026-10-24:** MLink-100 (slot search input rules, "no result" message) on `epic/MLink-8`, draft PR #87: no
+migration, no new route.
+
+**2026-10-23:** `master` merged into `epic/MLink-8` after #89: the appointment migration is renumbered
+**V10** (`V10__appointment_domain.sql`), since #89 merged first with `V9__session_revocations.sql` (the code owner's
+call on #87: the PR merged second takes the next free number). Conflicts kept both sides: the access matrix lines,
+this report, and the Postman collection (the slot search becomes folder 7, after #89's folder 6). Dev databases that
+ran the old V9 need the setup script with `--reset` (`-Reset`) once.
+
+**2026-10-23:** MLink-98 (slot search, `GET /api/slots`, the epic's first endpoint) on `epic/MLink-8`, draft PR #87:
+no migration. **One new line in `AccessMatrixFunctionalTest`.**
+
 **2026-10-23:** MLink-91, MLink-88 and MLink-90 on `feat/ss4-password-change`, one PR based on `master`.
 Endpoints 10 and 11 work end to end; see the section below for the proofs.
+
+**2026-10-22:** MLink-97, code owner's review on draft PR #87 addressed on `epic/MLink-8`: one active appointment
+per slot is now a database rule (partial unique index in V9), and the three dev practitioners left the shared realm
+file for a dev-only file imported by a dev-only compose service. **The realm file is back to `master`'s**; a new
+service `keycloak-dev-users` appears in `compose.yaml` only (`ComposeFilesTest` gains a `DEV_ONLY` list).
+
+**2026-10-21:** MLink-97 (epic MLink-8, appointments: tables and dev seed) ready on `epic/MLink-8`: migration
+**V9** (after V8 `rate_limits`), no endpoint. The endpoints of the epic (MLink-98…) come next on the same branch.
 
 **2026-10-20:** MLink-119 (GitHub #66, part 1) in review (#78): README rewritten to match `master` (password-grant
 login, auth flow diagram, endpoints, security rules, team workflow, CI). No code change. Part 2:
@@ -76,6 +299,223 @@ migration, no endpoint.
 number: a database that already applied V9 makes Flyway refuse a V8 that arrives later.
 
 **2026-10-19:** MLink-113 (GitHub #52, one compose setup per workflow) merged (#61): no migration, no endpoint.
+
+## MLink-174 — reference specialties in every environment (2026-11-19, feat/MLink-174-specialties)
+
+- Found while preparing production: staging and production had no specialty (only the dev seed inserts them), and a
+  practitioner needs one (`specialty_id NOT NULL`), so an admin could not create a practitioner there.
+- `V19__specialties_reference_data.sql`, like V15 for the clinics: 15 usual consultation specialties (Médecine
+  générale, Cardiologie, Pédiatrie, Dermatologie, Gynécologie-obstétrique, Ophtalmologie, ORL, Neurologie, Pneumologie,
+  Gastro-entérologie, Endocrinologie, Rhumatologie, Psychiatrie, Urologie, Néphrologie) with `ON CONFLICT DO NOTHING`.
+  The first three keep the dev seed's ids, so the dev seed skips them. Mohamed had no official list (2026-11-20): this
+  one is a proposal; a change goes in a new migration (no endpoint creates a specialty).
+- Test: `AppointmentSchemaTest.outsideTheDevProfileTheReferenceSpecialtiesExistWithTheDevSeedIds` (red commit first).
+  Existing tests insert specialties with their own suffixed names and check `/api/slots/filters` with `contains`, so
+  the new rows do not disturb them. One exception: `DevSeedTest.theThreeSpecialtiesAreSeeded` expected exactly the
+  seed's three; it now checks they are among the specialties (`containsAll`), since V19 adds the others everywhere.
+
+## Staging and production preparation — MLink-168 to MLink-173 (2026-11-18, chore/vault-deploy)
+
+The repo owner created four EC2 hosts (staging, production API, production front, Vault; Ubuntu 26.04, t3.micro)
+and gave Mohamed their launch keys to prepare the deploys of both repositories. Only the repo owner has the AWS
+console and Vault's root token. Hosts, roles and edges: [docs/operations/servers.md](../../operations/servers.md).
+**Plan and hand-over for the next session: [deploy-prep.md](deploy-prep.md).**
+
+Found on the hosts (read-only check, 2026-11-18): Vault 1.21.0 already initialised and unsealed behind Caddy (TLS via
+sslip.io), Caddy edges on staging and front, ufw active, Docker 29 on the app hosts, empty `/opt/medlink`, nothing
+running. **Too small for the API stack:** 908 MB of RAM and about 2 GB of free disk per host, against about 2.5 GB of
+RAM for API + Keycloak + two Postgres: staging and api to resize (t3.medium, 20 GB), after Elastic IPs.
+
+| Ticket | What | State |
+|---|---|---|
+| MLink-168 | Vault as code: `vault/` (policies, `setup.sh`, `seed-env.sh`, `install-host.sh`, `snapshot.sh`), runbook [vault.md](../../operations/vault.md) | applied: Vault 1.21.0 in a container on the vault host, secrets seeded |
+| MLink-171 | Host preparation: `deploy/prepare-host.sh` (deploy user, restricted key, SSH keys only, security updates, Docker log rotation, daily backup job), runbook [servers.md](../../operations/servers.md) | applied on the staging, api and front hosts |
+| MLink-169 | API deploy reads Vault; staging deploy job (master's `cd.yml` has none); prod split across api and front | done on the branch; production API running; CD runs after the merge |
+| MLink-170 | Front deploy: extend the CD already in `medlink-dashboard` (`container-security.yml`), container on `127.0.0.1:8081` only | dashboard PR #20; production front running |
+| MLink-172 | Mail through the team Gmail account (SMTP, app password typed by its holder into `seed-env.sh`) | config ready; waits for the app password typed by its holder |
+| MLink-173 | First staging deploy checked end to end, then production | production up behind the security group; staging waits for a larger disk |
+
+- **Vault design.** KV v2 at `medlink/<staging|prod>/<api|front>`; GitHub Actions log in with their OIDC token
+  (JWT auth at `jwt-github/`), one role per repository and environment bound to the `sub` claim
+  (`repo:assali-mohamed-ali/<repo>:environment:<env>`), audience `medlink-vault`, read-only on its own path,
+  10-minute tokens. The set-up runs with a short-lived `medlink-setup` token, never root; secrets are generated on the
+  vault host and never shown. Audit log (rotated) and daily raft snapshot.
+- **Tests.** `vault/test/vault.test.sh` (58 checks, throwaway Vault 1.21.0 + Ubuntu 26.04: each role reads only its
+  path; wrong repository, environment, audience, key, event or an expired token refused; no value in clear in the
+  audit log; seed never overwrites) and `deploy/test/prepare-host.test.sh` (46 checks on Ubuntu 26.04: refusals before
+  any change, users, modes, `sshd -t` and the effective settings, idempotence, key rotation, the front gets no backup
+  job). Both in CI. Each committed red then green; rules broken on purpose in a copy (3 for Vault, 3 for the hosts)
+  each turned a test red.
+- **Found on the way:** `docker-compose.yml` has no `restart:` policy, so containers do not come back after a reboot
+  (fix with MLink-169).
+- **Waiting on the repo owner** (#125, #126, #129 merged 2026-11-18): the resize and the new IPs; a `medlink-setup` token;
+  `staging` brought up to `master`, branch rules, GitHub environments in both repositories; an S3 bucket for the
+  backups and Vault snapshots; the front's `Production` branch renamed `prod`. He proposes Terraform for the hosts (scope not agreed yet).
+
+## MLink-166 — backup and tested restore of both databases, GitHub #67 (2026-11-18, chore/db-backup-restore)
+
+Part C of the database hardening (Parts A and B, #64 and #57, are in PR #126). No migration, no endpoint, no Java
+change.
+
+- `scripts/db-backup.sh <dir>`: `pg_dump --format=custom` of the app database, then Keycloak's, inside each
+  container with its own credentials; encrypted on the way out with gpg (AES-256, integrity-protected), so nothing in
+  clear touches the disk; each file decrypted in full once and checked to be a pg_dump archive before it gets its
+  final name. Refuses a passphrase under 20 characters, a missing directory, or a directory inside the repository.
+- `scripts/db-restore.sh <app|keycloak> <file> --yes-overwrite`: decrypts and checks the whole file first (a wrong
+  passphrase or a damaged file never reaches the database), then `pg_restore --clean --if-exists --no-owner
+  --single-transaction --exit-on-error`: fully restored or unchanged.
+- **Change from the plan:** gpg instead of `openssl enc -aes-256-cbc`. CBC has no integrity check, so a damaged or
+  altered backup would only show up halfway through a restore; gpg refuses it before.
+- The passphrase comes from the environment only and reaches gpg through a file descriptor: never an argument, never
+  printed. The test checks this on every output, on docker's arguments and on gpg's.
+- **Tests:** `scripts/db-backup.test.sh`, 17 cases, offline with a fake `docker` and the real gpg; new CI step in
+  `ci.yml` (code owner's file: one step). Committed red, then green. Each rule broken once in a copy of the scripts
+  (passphrase as an argument, no check before restore, no repository guard, no partial file, no single
+  transaction): the test turned red every time. shellcheck 0.10.0: clean.
+- **Drill (2026-11-18, dev stack):** marker rows in both databases, backup (3 s), both volumes deleted with
+  `docker compose down -v`, restore into empty databases (2 s), the API up and its checks passed in 53 s:
+  `patient.dev` logs in, `practitioner.dev` is asked for its code, a signup works; the Keycloak id of `patient.dev`
+  is unchanged. First attempt refused: the dump grants rights to `medlink_app` (#57) and the empty database had no
+  such role. Nothing was restored (one transaction). After #126, a new volume gets the role from
+  `docker/postgres/initdb/10-app-role.sh`; the runbook has the fix.
+- **Runbook:** [docs/operations/backup-restore.md](../../operations/backup-restore.md): policy (daily, 7 daily + 4
+  weekly, RPO 24 h, RTO measured), cron line, off-host copy, restore and verification steps, drill log.
+- **For whoever runs the server:** install `gnupg`, put `BACKUP_PASSPHRASE` in the team's secret store and in a
+  root-only env file, add the cron line and the off-host copy (runbook, "Set up on a server"). None of this is in the
+  deploy action yet.
+
+## MLink-165 — two database roles, the audit trail out of the API's reach, GitHub #57 (2026-11-17, fix/db-hardening)
+
+Plan and step-by-step history: [db-hardening.md](db-hardening.md) (Part B).
+
+**Built:**
+- `docker/postgres/initdb/10-app-role.sh`: the one place that creates the runtime role `medlink_app` (login, password
+  from `APP_DB_PASSWORD`, no superuser or create rights). Run by the postgres image on a new volume (both compose
+  files and the tests' container), and by the setup scripts on an existing one. Safe to run again.
+- `V18__app_role_grants.sql`: `SELECT, INSERT, UPDATE, DELETE` on the app's tables, **only `SELECT, INSERT` on
+  `audit_entries`**, nothing on `flyway_schema_history`, sequences, and default privileges for the tables of later
+  migrations. No ownership, so no `ALTER`, `DROP`, `TRUNCATE` or `TRIGGER`; no `CREATE` in the schema. It creates
+  the role without login when missing (an old volume), so it never fails there.
+- Staging and prod: `spring.flyway.user/password` (`SPRING_FLYWAY_USER` / `_PASSWORD`, no default) is the owner,
+  `spring.datasource.*` the runtime role. `DatabaseCredentialsCheck` applies the #64 rules to the Flyway values too,
+  and **refuses to start when the datasource user is the Flyway owner** (the protection would be gone silently).
+- `docker-compose.yml`: the app connects as `medlink_app` with `APP_DB_PASSWORD` (required), Flyway as
+  `POSTGRES_USER`; postgres mounts the init script. `compose.yaml` the same with dev values. Terraform:
+  `db_flyway_username` / `db_flyway_password`. Setup scripts: generate `APP_DB_PASSWORD`, run the init script before
+  the API starts.
+- Tests: `TestcontainersConfiguration` limits the service connection to Flyway (owner) and gives the datasource its own
+  `JdbcConnectionDetails` as `medlink_app`.
+
+**Found on the way:**
+- A plain `@ServiceConnection` (and Spring Boot's compose integration) gives the container's owner to **both** the
+  datasource and Flyway; connection details win over `spring.flyway.user`. Hence `type = FlywayConnectionDetails.class`.
+- A `DynamicPropertyRegistrar` comes too late for a `RANDOM_PORT` test: the embedded server opens the pool in
+  `onRefresh`, before registrars run. Hence a connection-details bean.
+- Git Bash on Windows rewrites `/docker-entrypoint-initdb.d/...` into a Windows path: `MSYS_NO_PATHCONV=1`.
+
+**Proof:** `RuntimeRoleGrantsTest` (the app's own datasource): INSERT and SELECT on the trail work; UPDATE, DELETE,
+TRUNCATE, DROP TRIGGER, DISABLE TRIGGER, DROP TABLE, CREATE TABLE are refused for a missing privilege (SQLState
+42501, not the trigger's P0001). Red first (7 of 8). `DatabaseCredentialsStartupTest` 44 cases (16 new, red first);
+`compose-credentials.test.sh` 9 cases (2 new, red first). Mutations: no `REVOKE` on `audit_entries` turns UPDATE and
+DELETE red; no same-user check turns its 2 cases red. The whole suite runs as `medlink_app`. Setup scripts, 0
+failures: `setup-dev.ps1 -KeepData` on a pre-#57 volume, `setup-dev.sh --full-stack`, `setup-dev.ps1 -FullStack`.
+
+**For whoever deploys:** the deploy secret must also hold `APP_DB_PASSWORD` (docker-compose.yml requires it); it is
+the only new key (`docker-compose.yml` gives Flyway `POSTGRES_USER` / `POSTGRES_PASSWORD`). The deploy action copies the
+role script to the server and runs it before the API starts, on every deploy. At first it did not copy it: a fresh
+server could not have initialised its database, and an older one would have kept `medlink_app` without a login (found
+after the PR opened). Proof: `DeployComposeActionTest` (red first), and the action's remote steps replayed on a
+disposable compose project: fresh volume, a role left without login, a second run; `medlink_app` logs in each time. The
+Terraform path creates the role by hand (`terraform/README.md`, "Database roles").
+
+**Limits:**
+- The API on the host (`mvnw spring-boot:run`, dev) still connects as the owner: Spring Boot's compose integration
+  gives the container's user to both. The tests, the full stack, staging and prod use `medlink_app`.
+- Flyway runs inside the API, so the API process holds the owner's password in its environment: an SQL injection
+  runs as `medlink_app`, but code execution inside the API would reach the owner. Next step: migrate in a one-shot
+  container and give the API only the runtime role.
+- A later append-only table needs its own `REVOKE` (the default privileges grant DML).
+
+## MLink-164 — no default database credentials outside dev, GitHub #64 (2026-11-11, fix/db-hardening)
+
+Plan and step-by-step history: [db-hardening.md](db-hardening.md) (Part A).
+
+**Built:**
+- `application-prod.yml`, `application-staging.yml`: `SPRING_DATASOURCE_USERNAME` / `_PASSWORD` with no default.
+- `config/DatabaseCredentialsCheck` (staging and prod): a `BeanFactoryPostProcessor`, so it runs before Flyway and
+  nothing connects with guessable credentials. It refuses a missing, empty or unresolved value, the dev values
+  `myuser` / `secret`, and anything starting with `change-me` (any case: every placeholder of `.env*.example` and
+  `terraform.tfvars*.example`). The message names the variable, never the value.
+- `docker-compose.yml`: `${POSTGRES_DB|USER|PASSWORD:?...}`, so `docker compose` stops when one is missing. Dev keeps
+  its fixed values (`compose.yaml`, `application-dev.yml`). It also passes `CORS_ALLOWED_ORIGINS`, `TRUSTED_PROXIES`
+  and `KEYCLOAK_ADMIN_CLIENT_ID` to the API container, which it did not before (`ComposeFilesTest`).
+- Examples (`.env*.example`, `terraform.tfvars*.example`) say the placeholders are refused.
+
+**Why the check is needed:** removing the yml default alone does not fail closed. `spring.datasource.*` is bound as
+configuration properties, and the binder keeps an unresolved `${SPRING_DATASOURCE_USERNAME}` as plain text: the API
+would try to log in as that literal user and fail later with a misleading error.
+
+**Proof:** `DatabaseCredentialsStartupTest` starts the real API under prod and staging with a fake process
+environment and a closed database port (no Docker): 28 cases, committed red first each time (18 then 8 failures).
+Mutation checks: a default back in prod's yml, and a case-sensitive prefix, each turn cases red.
+`scripts/compose-credentials.test.sh` (CI step): 7 cases with an empty `--env-file`, so the developer's `.env` cannot
+make it pass. Both setup scripts pass in full-stack mode (2026-11-11).
+
+**For whoever deploys:** the deploy secret must hold `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` with real
+values, or the deploy stops at `docker compose` (on purpose). Staging and prod tests that start a staging/prod
+profile must pass `TestcontainersConfiguration.UNUSED_DB_CREDENTIAL`.
+
+**Limits:** ~~Flyway and the API still share one database user, the owner of every table~~: closed by GitHub #57
+(MLink-165, section above, 2026-11-17).
+
+## MLink-31 — Accéder au dossier du patient (back-end)
+
+**Tickets:** 31.1, 31.2, 31.3, 31.6 (story MLink-31, epic MLink-10). Front (31.4, 31.5) in `web-MedLink`.
+
+**Route:** `GET /api/patients/{id}/record` → 200 `{"patient": {"id", "firstName", "lastName", "birthDate", "phone"}, "reports": []}`. Practitioners only; the practitioner is always the caller.
+
+**Decisions** (agreed 2026-11-10, comment on 31.1)
+- D1 — "attached" = the practitioner has a `BOOKED` appointment with the patient, past or upcoming (`appointments → slots.practitioner_id`). A cancelled appointment does not attach: the patient was never seen (secret médical). No new table, no migration (`AppointmentRepository.existsByPractitionerAndPatient`).
+- D2 — not attached, unknown patient and an id that is not a UUID get the same 403 (`AccessDeniedException`, so the refusal is audited as `ACCESS_DENIED`); the link is checked before anything is read.
+- D3 — `RECORD_VIEWED` (`SUCCESS`, resource `PATIENT_RECORD`, ids only) is written before the record is returned: a read that cannot be traced is not answered. `AuditService` writes in its own transaction.
+- Identity only: no address, no email (31.2). `reports` stays empty until MLink-32 gives it its type.
+- `SecurityConfig` checks the `PRACTITIONER` role for `GET /api/patients/*/record` before Spring reads the request (lesson of the review on #116); the class-level `@PreAuthorize` stays. The id is read as text, so nothing is converted before the role check.
+- New enum values: `AuditAction.RECORD_VIEWED`, `AuditOutcome.SUCCESS` (#116 also adds `SUCCESS`: keep one at merge).
+
+**Proofs**
+- `PatientRecordFunctionalTest` (5 tests), committed red first (5 of 5 failing with 404), then green: attached practitioner 200 with identity only and `Cache-Control: no-store`; a past appointment attaches; not attached, cancelled only, unknown and malformed ids all get the same 403 and 4 `ACCESS_DENIED` rows, no `RECORD_VIEWED`; patient (even the one concerned) and staff 403, anonymous 401; two reads → two `RECORD_VIEWED` rows with the practitioner's id.
+- Mutation checks: any appointment instead of `BOOKED` → `expected: 403 but was: 200`; without the audit call → `Expected size: 2 but was: 0`.
+- Access matrix: one new line, `GET /api/patients/{id}/record` L,F,F,F.
+- `./mvnw -B clean verify`: **484 tests, 0 failures**; reverse class order: 484 tests, 0 failures. One earlier run had one error that did not come back in the next runs.
+- Postman folder 10 (access rules; the 200 needs a practitioner profile and an appointment, which no endpoint creates yet): 19 requests, 31 assertions, 0 failures. Whole collection: **151 requests, 345 assertions, 0 failures**, twice in a row, after `setup-dev.sh --reset`.
+
+**Found on the way:** after switching branches, `./mvnw verify` without `clean` kept another branch's `V15__agenda_reference_data.sql` in `target/classes`, and `AppointmentSchemaTest.outsideTheDevProfileThereIsNoSeedData` failed locally (3 clinics). Not a code issue (CI starts from an empty `target/`): use `./mvnw clean verify` after a branch switch when migrations differ.
+
+## MLink-65 — setup scripts check the session and the staff code (2026-10-31, updated 2026-11-07, feat/ss3-setup-staff-code-check)
+
+- **Built:** `scripts/setup-dev.ps1` and `scripts/setup-dev.sh` (same behaviour, bash 3.2 safe). The `patient.dev`
+  login check now calls `GET /api/auth/me` (#107): `[OK]` only for 200 with the `roles` array exactly `["PATIENT"]`. Then a fresh
+  browser logs in as `practitioner.dev` with the right password: `[OK]` only when the login answers 200 with `"mfaRequired": true` **and** the same cookies get 401 on `/api/auth/me` (no
+  session before the code); anything else is a warning. The cookie and answer files are deleted afterwards; the
+  password is never printed. README and the scripts' header mention the check.
+- **Proof:** on a fresh realm, `setup-dev.ps1 -SkipTests -Reset` (Windows PowerShell) and `setup-dev.sh --skip-tests`
+  (Git Bash 5.2, volumes re-imported): **0 failures, 0 warnings**, both print `[OK] staff code asked`. Again after
+  the switch to `/api/auth/me` (2026-11-07, `master` with #107 and #103 merged in): `setup-dev.ps1 -SkipTests` and
+  `setup-dev.sh --skip-tests`, **0 warnings** each, both print the `PATIENT` role line and `[OK] staff code asked`.
+- **2026-11-07:** the first version checked the session on `/api/users/_health`, because `/api/auth/me` was not on
+  `master` yet; after #107 merged, both checks use it, as the ticket asks.
+- **Review of #113 (2026-11-08):** the first `/api/auth/me` check searched the whole answer for `"PATIENT"`, so
+  `PATIENT` plus a privileged role would still have passed. Both scripts now read the `roles` array (`tr`/`sed` in
+  bash 3.2, `ConvertFrom-Json` in PowerShell) and want exactly `["PATIENT"]`. Checked offline on 8 fake answers in
+  bash, Windows PowerShell 5.1 and PowerShell 7: only `["PATIENT"]` (compact or pretty-printed) passes; `PATIENT`
+  with `ADMINISTRATIVE_STAFF` or `PRACTITIONER`, an empty array, no array, `patient` in lower case and a missing
+  answer all fail. `master` merged in (52 commits). Live: `setup-dev.ps1 -SkipTests` and `setup-dev.sh --skip-tests`
+  0 warnings each (`roles exactly ["PATIENT"]`, `staff code asked`); `./mvnw -B verify` 475/475 and reverse class
+  order 475/475.
+- **Found on the way:** after an API run started by `setup-dev.sh` (Git Bash on Windows), both `setup-dev.ps1 -Stop`
+  and `setup-dev.sh --stop` stop the containers, but the API's Java process (forked by `spring-boot:run`) keeps port
+  8080, so the next run stops at "Free these ports first". A run started by `setup-dev.ps1` stops cleanly. To report
+  as an issue; not fixed here.
 
 ## MLink-62, MLink-63 - staff code, TOTP (2026-10-25, feat/ss3-staff-totp)
 
@@ -279,6 +719,658 @@ Postman). Lesson: **no stacked PRs, always base on `master`** (CLAUDE.md, Git).
   (`oauth2Login` in `config/SecurityConfig`), dev users' rows created nowhere yet.
 - On the lead's machine the local database applied an earlier V3: run the setup script with
   `-Reset` once.
+
+## MLink-167 — one appointment at a time per patient, 409 `PATIENT_BUSY` (2026-11-18, epic/MLink-8)
+
+Found in a demo: one patient booked two appointments on the same day at 08:00, one in Sousse and one in Sfax. No rule
+stopped it, because `SLOT_TAKEN` only guards one slot.
+
+**Rule.** A booking (`POST /api/appointments`) or a move (`POST /api/appointments/{id}/reschedule`) onto a slot that
+overlaps one of the patient's `BOOKED` appointments answers **409** with code `PATIENT_BUSY` and the message
+"Vous avez déjà un rendez-vous à ce moment-là." Two times overlap when one starts before the other ends: back-to-back
+slots are fine. A cancelled appointment does not count. For a move, the appointment being moved does not count either,
+because it is cancelled in the same transaction before the new one is checked. The rule is per patient: another
+patient can book at the same time.
+
+**Design.**
+- `AppointmentRepository.existsOverlapping(patientId, status, start, end)` is checked in `bookLocked()`, after the
+  slot's FREE check. Booking and moving both go through it.
+- Two sessions of one patient could book two overlapping slots at the same instant: each slot has its own lock, so the
+  check alone would let both pass. `PatientRepository.lockForBooking` (`select id from patients where id = ? for
+  update`) now serialises one patient's bookings and moves. `book()` takes it first; `reschedule()` takes it before
+  locking the slots, in the same order, so no deadlock. An unknown patient row still answers 403
+  `PATIENT_PROFILE_REQUIRED`.
+- Other patients are not slowed down, because each patient has their own lock.
+
+**Tests.** `PatientOverlapFunctionalTest` (7 tests, real API, Keycloak and database):
+- the same time in another clinic is refused, and the second slot stays FREE;
+- a partial overlap is refused;
+- back-to-back slots and another patient at the same time are fine;
+- a cancelled appointment does not block its time;
+- a move onto another appointment's time is refused, and the old appointment is kept;
+- a move that overlaps only the moved appointment is fine;
+- two sessions booking overlapping slots at the same instant give `[201, 409]` in each of 5 rounds.
+
+`AppointmentAuditAtomicityTest` booked one patient three times at the same hour, which the new rule forbids. It now
+uses distinct hours (74ed232).
+
+Postman, folder 7: the collection now picks a slot that fits around the patient's appointments, then books a slot at
+the time of an existing appointment and expects 409 `PATIENT_BUSY`. That request is skipped when the dev seed has no
+such slot.
+
+**Proof** (Ubuntu VM with Docker):
+- Red e71b60f, with the previous code: 4 of 7 fail. The three that pass guard what was already allowed.
+- Green 2d7026f: 7/7, and 27 tests with the appointment tests run alongside, 0 failures.
+- Mutation: without the `existsOverlapping` check, 4 of 7 turn red again.
+- On 74ed232: `./mvnw -B verify` **752 tests, 0 failures**; reverse order 752, 0 failures.
+- `setup-dev --skip-tests` then newman: **208 requests, 438 assertions, 0 failures**.
+- After `master` (6cf2a6c) merged in for the code owner's review on #128 (bfb3ca0; only `report.md` conflicted, both
+  sides kept; `AppointmentService` now also calls the MLink-37 alert after the audit lines): `./mvnw -B clean verify`
+  **887 tests, 0 failures**; reverse order 887, 0 failures; newman **230 requests, 478 assertions, 0 failures**.
+
+## Review on #120 — booking audit, reminder vs cancel, at-least-once reminders (2026-11-15, epic/MLink-8)
+
+The code owner kept *changes requested* on #120 for three reliability findings (the Trivy CVE of 2026-11-11 was fixed
+on `master` meanwhile). Each fix: red test commit, green commit, then a mutation check.
+
+**1. A booking and its audit row are one unit (MLink-104).** Before, `AppointmentController` wrote
+`APPOINTMENT_BOOKED` with `AuditService.record` (`REQUIRES_NEW`) after `book()` had committed: a failed audit write
+answered 500 for a slot that stayed booked, and the patient's retry met `SLOT_TAKEN`. Now `AppointmentService.book`
+writes the row with `AuditService.recordWithin` (`MANDATORY`, added by #116 for the same review on the agenda) inside
+the booking transaction; the controller no longer audits.
+- Test `AppointmentAuditAtomicityTest` (service, Testcontainers, audit repository made to fail as in
+  `AgendaAuditAtomicityTest`): a failed audit leaves no appointment and a FREE slot; a booking writes exactly one
+  `APPOINTMENT_BOOKED` row. Red with the previous code (609f323, checked with the code of the commit before): 2 of 2
+  fail. Green (eea5401): 15 tests with the booking and audit functional tests, 0 failures.
+- Mutation note: swapping `recordWithin` for `record` *inside* the transaction does not turn it red (the audit
+  failure still propagates and rolls the booking back); the guarded defect is the audit written after the commit,
+  which is exactly what the red run proves.
+
+**2. A reminder never crosses a cancel (MLink-110).** Before, the job read the due appointments once and sent from
+that detached list: a cancel during the run still got its reminder, and the marker update did not check the status.
+Now `findRemindersDue` returns ids only; for each one, a short transaction locks the row (`findForChangeById`, the
+lock a cancel takes), checks it again (still `BOOKED`, `reminder_sent_at` empty, still in the window), sends, and sets
+`reminder_sent_at` on that locked row. A cancel and a reminder run one after the other; a second API instance waits
+on the lock and then finds the reminder marked. `markReminderSent` is removed. The lock is held at most one SMTP
+attempt (timeouts 5 s connect, 10 s read/write); retries release it between attempts.
+- Test `AppointmentReminderRaceTest` (service, Testcontainers, mail sender spied so nothing is sent): the second due
+  appointment is cancelled while the first one's mail is being sent; it gets no reminder and stays unmarked.
+
+**3. Delivery is at least once, and said so (MLink-111).** SMTP cannot join the database transaction: if the mail
+server accepts a reminder and the marker then fails to commit (crash, database), the next run sends it again. That
+is now the documented contract, logged as "sent but not marked", and both copies carry the same
+`Message-ID: <appointment-reminder-{appointmentId}@medlink.local>` (`MailService.reminderMessageId`), so mail systems
+can recognise the duplicate.
+- `AppointmentReminderJobTest` (unit, 5 tests): outage → 3 attempts, logged by id only, nothing committed; server back
+  → sent and marked; one failure then success; **sent but marker commit fails → sent again next run, same
+  appointment**; found cancelled when locked → no mail. `AppointmentReminderFunctionalTest` checks the Message-ID in
+  Mailpit.
+
+**4. A cancel and a move are audited too (MLink-106, MLink-107), round 3 of the review.** A move created its new
+appointment through `bookLocked()` with no audit row, and a cancel changed the appointment with none. Now `cancel()`
+writes `APPOINTMENT_CANCELLED` (resource: the cancelled appointment) and `reschedule()` writes `APPOINTMENT_RESCHEDULED`
+(resource: the new appointment), both with `recordWithin` in the change's transaction; a cancel of an already
+cancelled appointment changes nothing and writes no row. `AppointmentAuditAtomicityTest` (+3): a cancel whose audit
+fails leaves the appointment BOOKED and its slot taken; a move whose audit fails keeps the old appointment and leaves
+the new slot free with no appointment; a move and a cancel (twice) write exactly one row each. Red b49c4ef (the events
+are matched by name, so the test compiles on the previous code), green cab279b. The cancellation alert of MLink-37
+(#125, Ahlem) will be called right after these audit lines, for a cancel and for the old appointment of a move.
+Proof on b3b8640 (after `master` with #93 merged in): red 3 of 5 failing with the previous `AppointmentService`;
+green 5/5, with the cancel and move functional tests (21, 0 failures); `./mvnw -B verify` **745 tests, 0 failures**,
+reverse order 745, 0 failures; newman **204 requests, 431 assertions, 0 failures**.
+
+**Proof** (Ubuntu VM with Docker):
+- Red (4286db7, run with the code of the commit before): `AppointmentReminderRaceTest` fails (the cancelled one got
+  its mail) and the Mailpit test fails (no stable Message-ID). Green (f79fd9c): 10 reminder tests, 0 failures.
+- Mutation (fix 2): without the `BOOKED` recheck under the lock, `AppointmentReminderRaceTest` turns red.
+- `./mvnw -B verify` **639 tests, 0 failures**; reverse order 639, 0 failures (one earlier run had `AgendaFunctionalTest`
+  miss its staff-code mail while `setup-dev` ran in parallel; alone it passed, 22/22, then the full run was green).
+- `setup-dev --skip-tests` then newman: **191 requests, 413 assertions, 0 failures** (after #116 and #117 merged in).
+
+## MLink-111 — one reminder only, retried and logged on failure (2026-11-08, epic/MLink-8)
+
+Task 36.2 of MLink-36: "un échec d'envoi est réessayé et consigné", and never two reminders.
+
+**Built** (in `AppointmentReminderJob`, no new dependency):
+- A failed mail (`MailException`) is tried 3 times in the run, waiting `app.appointments.reminder-retry-backoff` (2 s),
+  then twice that. After the third failure: one `WARN` line with the appointment id only (never the address, the
+  practitioner or the clinic), `reminder_sent_at` stays empty, and the next run (15 minutes later) tries again.
+- `reminder_sent_at` is set only after a sent mail (MLink-110), and the job's query skips rows where it is set: two runs
+  send one mail. If the application stops during a wait, the reminder is left for the next start.
+
+**Proof:**
+- `AppointmentReminderFunctionalTest.theJobRunningTwiceSendsOneReminderOnly` (Mailpit): two runs, one mail,
+  `reminder_sent_at` unchanged by the second.
+- `AppointmentReminderJobTest` (unit, mocked mail server, the outage a functional test cannot cause on demand): down →
+  3 attempts, the failure logged without the address, `markReminderSent` never called; server back → the next run sends
+  and marks it; one failure then success → sent at the second attempt.
+- Red first (the tests alone): they do not compile without the backoff in the job's constructor.
+- Mutation check (the ticket's): with `reminder_sent_at` set before sending, the outage test and the "server back" test
+  turn red (3 tests, 2 failures).
+- `./mvnw -B verify` **519 tests, 0 failures**; reverse order 519, 0 failures. Postman: no endpoint changed.
+
+## MLink-110 — reminder mail before an appointment, scheduled job (2026-11-08, epic/MLink-8)
+
+Task 36.1 of MLink-36: a patient gets a reminder before their appointment.
+
+**Rule:** every 15 minutes (`app.appointments.reminder-interval`), each `BOOKED` appointment that starts within the next
+H-02 hours (`app.appointments.reminder-hours-before=24`, UTC, the shared `Clock`) and has no `reminder_sent_at` gets one
+mail. A cancelled appointment, or one further away, gets none. No new route, no migration (`reminder_sent_at` is in V13).
+
+**Built:**
+- `AppointmentReminderJob.sendDueReminders()` (`@Scheduled`, first run one interval after start so a restart never sends
+  a burst; `synchronized` so two runs never overlap): `AppointmentRepository.findRemindersDue` (slot, clinic and
+  practitioner in one query), the holders' `patients` rows in one `findAllById`, the mail, then
+  `markReminderSent` (only when still empty). A failed mail (`MailException`) is logged with the appointment id only and
+  `reminder_sent_at` stays empty: the next run tries again. Retries with backoff are MLink-111.
+- `MailService.sendAppointmentReminder(to, firstName, clinic, practitioner, startsAt)`: French, text + HTML, subject
+  "Rappel de votre rendez-vous MedLink"; date and time in Tunisia's time (`Africa/Tunis`), practitioner, clinic, and a
+  link to "Mes rendez-vous" to cancel or move it. No medical detail.
+- `@EnableScheduling` was already on `config/RateLimitConfig` (MLink-112): no configuration file changed.
+- One API instance today; several would need a lock on the job (out of this task).
+
+**Proof** (Ubuntu VM with Docker): `AppointmentReminderFunctionalTest`, 3 tests calling the job directly, mails read in
+Mailpit: booked within 24 h → one mail with date, time, practitioner and clinic, `reminder_sent_at` set; cancelled → no
+mail; 30 h away → no mail.
+- Red first (a90a02e, the test alone): it does not compile without the job.
+- Mutation check (the ticket's): without the `BOOKED` filter, `aCancelledAppointmentGetsNoReminder` turns red (3 tests,
+  1 failure). Green (e93f2dc): 3 tests, 0 failures.
+- `./mvnw -B verify` **515 tests, 0 failures**; reverse order 515, 0 failures.
+- Postman: no endpoint changed.
+
+## MLink-107 — move an appointment, `POST /api/appointments/{id}/reschedule` (2026-11-08, epic/MLink-8)
+
+Task 28.2 of MLink-28: a patient moves their appointment to another free slot, without losing it if that slot is taken.
+
+**Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments/{id}/reschedule { "newSlotId" }`
+→ 200, the new appointment (MLink-102's body). 400 `VALIDATION_FAILED` (`newSlotId` missing: "Le nouveau créneau est
+obligatoire.", not a UUID: "Identifiant invalide.") · 401 · 403 `FORBIDDEN` (MLink-106's cases: someone else's, unknown
+or unreadable `{id}`, a non-patient, no CSRF header) · 404 unknown new slot · 409 `SLOT_TAKEN` · 409
+`APPOINTMENT_CANCELLED` "Ce rendez-vous est annulé : réservez un nouveau créneau." (not in the ticket: a cancelled
+appointment has nothing to move) · 422 `CANCEL_DEADLINE_PASSED` (H-03 on the current appointment).
+
+**Built:**
+- `AppointmentService.reschedule`, one transaction: the appointment locked (unknown → the shared 403),
+  `OwnershipGuard`, a cancelled one → 409; both slots locked in one order, lower id first, so two crossed moves never
+  wait on each other (no deadlock); H-03 on the old slot; the old appointment is cancelled and its slot freed, then the
+  new slot is booked (`bookLocked`, shared with `book`: FREE and not started, or 409; the unique index as last guard).
+  Any refusal after the first change rolls the whole move back: the patient keeps the appointment they had.
+- `AppointmentController.reschedule`: `{id}` read as for a cancel (unreadable → 403), then `newSlotId` (400). For a
+  patient the body is checked before the appointment, which tells nothing about `{id}`: hence the access matrix line
+  `POST /api/appointments/{id}/reschedule` (anonymous 401, patient past security with its 400, practitioner and staff
+  403 from the filter chain). Path and body ids are read by two shared helpers (`appointmentId`, `slotId`).
+- Postman folder 7: book a slot two days ahead, move it to the next one (200), my appointments shows the old one
+  CANCELLED and the new one BOOKED, moving the cancelled one → 409 `APPOINTMENT_CANCELLED`.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (the tests alone; checked with the code of the commit before): `RescheduleAppointmentFunctionalTest` 9 tests,
+  6 failures.
+- Green (a1fadb7): with the access matrix, 94 tests, 0 failures.
+- Mutation check (the ticket's): without `@Transactional` on `reschedule`, 6 tests turn red, among them
+  `whenTheNewSlotIsTakenTheOldAppointmentIsKeptAsItWas`.
+- `./mvnw -B clean verify` **512 tests, 0 failures**; reverse order 512, 0 failures.
+- `setup-dev --skip-tests` then newman: **146 requests, 341 assertions, 0 failures**.
+
+## MLink-106 — cancel an appointment, `POST /api/appointments/{id}/cancel` (2026-11-08, epic/MLink-8)
+
+Task 28.1 of MLink-28: a patient cancels their own appointment, within the allowed time.
+
+**Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments/{id}/cancel` → 204. 401
+`UNAUTHENTICATED` · 403 `FORBIDDEN`, one answer for someone else's appointment, an unknown id, an unreadable id, a
+non-patient or a missing CSRF header (never tell whether an appointment exists) · 422 `CANCEL_DEADLINE_PASSED` "Ce
+rendez-vous ne peut plus être annulé moins de 12 heures avant son début." An already cancelled appointment: 204, nothing
+changes.
+
+**Built:**
+- `AppointmentController.cancel` (`@PostMapping("/{id}/cancel")`, `@PreAuthorize` PATIENT, so administrative staff,
+  whom `OwnershipGuard` lets through, cannot cancel here: the story says the holder only). `{id}` is text; an
+  unreadable one is refused with the same 403 as an unknown one.
+- `AppointmentService.cancel`, one transaction: `AppointmentRepository.findForChangeById` locks the appointment (an
+  unknown id → `AccessDeniedException`, the shared 403), `OwnershipGuard.check(patientId)`, a CANCELLED appointment is
+  left as it is (even if its slot has been booked again since), then the slot is locked (`findForBookingById`, as for
+  a booking); less than the H-03 deadline before the start → 422; otherwise the appointment becomes CANCELLED with
+  `cancelled_at` and the slot FREE.
+- H-03 is `app.appointments.cancel-deadline-hours=12` (`application.properties`), computed on the server in UTC.
+- `SecurityConfig` (shared): the PATIENT rule of the filter chain now covers `POST /api/appointments` and
+  `/api/appointments/**`, so a path or body Spring cannot read never gives a non-patient anything but 403.
+- `AccessMatrixFunctionalTest`: one line, `POST /api/appointments/{id}/cancel` (anonymous 401, and 403 for every role:
+  `{id}` is a random id, someone else's). Postman folder 7: book a slot two days ahead, cancel it (204), it shows
+  CANCELLED in my appointments, the slot is offered again, cancel again (204), an unknown id (403).
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (the tests alone; checked with the code of the commit before): `CancelAppointmentFunctionalTest` 7 tests,
+  5 failures (the route did not exist; anonymous 401 and the missing-CSRF 403 already held).
+- Green (596fb4f): with the access matrix, 88 tests, 0 failures.
+- Mutation check (the ticket's): without `ownership.check`, `anotherPatientAnUnknownIdAndAnUnreadableIdGetTheSame403…`
+  turns red.
+- `./mvnw -B clean verify` **499 tests, 0 failures**. Reverse order: once `QrCodesTest.scanningTheQrCodeGivesBackTheUrl`
+  errored (ZXing `NotFoundException`, MLink-62/63, not touched here); it passed three times alone, and the reverse
+  order run again gave **499, 0 failures**: a flaky decoding test, reported on its ticket.
+- `setup-dev --skip-tests` then newman: **141 requests, 331 assertions, 0 failures**.
+
+## MLink-108 — my appointments, `GET /api/appointments/me` (2026-11-08, epic/MLink-8)
+
+Task 28.3 of MLink-28: a patient sees their own appointments, to cancel or reschedule them (28.1, 28.2, 28.4).
+
+**Contract:** session required, PATIENT only. `GET /api/appointments/me?page=0&size=20` → 200 `{ "items": [ { "id",
+"status", "clinic": { "id", "name" }, "practitioner": { "id", "firstName", "lastName" }, "startsAt", "endsAt" } ],
+"total" }`, latest first (`startsAt` descending, then id), cancelled appointments included. 400 `VALIDATION_FAILED`
+for `page` below 0 or `size` outside 1–50 (the slot search's messages) · 401 · 403 for a non-patient. No id in the URL:
+always the caller's appointments.
+
+**Built:**
+- `AppointmentController.mine` (`@GetMapping("/me")`, `@PreAuthorize` PATIENT): `page` and `size` arrive as text and
+  are read after the role check (a non-patient gets 403 even with `size=abc`); the patient is `currentUser.id()`.
+- `AppointmentService.mine` → `AppointmentRepository.findByPatientId` with `@EntityGraph({"slot", "slot.clinic",
+  "slot.practitioner"})` (one query, no N+1), sorted by `slot.startsAt` then id, descending. `AppointmentMapper` →
+  `AppointmentPageResponse` (items are MLink-102's `AppointmentDto`). A patient without a profile simply has none.
+- `AccessMatrixFunctionalTest`: one line, `GET /api/appointments/me` (anonymous 401, patient open, practitioner and
+  staff 403). Postman folder 7: the 201 booking keeps the appointment id; a new request checks the demo patient's list
+  holds it, latest first.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (dcd1b27; checked with the code of the commit before): `MyAppointmentsFunctionalTest` 6 tests, 4 failures
+  and 1 error (the route did not exist; the anonymous 401 already held). Tests: patient A sees only A's, never B's,
+  latest first, the cancelled one included; paging and `total`; an empty list; `size=51` and `page=-1` → 400;
+  anonymous 401; practitioner and staff 403.
+- Green (12596de): with the access matrix, 83 tests, 0 failures.
+- `./mvnw -B clean verify` **488 tests, 0 failures**; reverse order 488, 0 failures.
+- `setup-dev --skip-tests` then newman: **133 requests, 319 assertions, 0 failures**.
+
+## MLink-104 — every booking in the audit trail (2026-11-08, epic/MLink-8)
+
+Task 27.3 of MLink-27: each booking leaves a trace in the shared audit trail (MLink-59).
+
+**Built:**
+- `AuditAction.APPOINTMENT_BOOKED` and `AuditOutcome.SUCCESS` (MLink-114 and epic MLink-9 add `SUCCESS` on their
+  branches too: a one-line conflict to keep once when the branches meet).
+- `AppointmentController.book` calls `AuditService.record(APPOINTMENT_BOOKED, "APPOINTMENT", <appointment id>, SUCCESS)`
+  once `AppointmentService.book` has returned, so the booking is committed: a refused (409, 404, 403) or rolled-back
+  booking writes no SUCCESS. The line holds ids only: the caller (from the session, in `AuditService`), the appointment
+  id and the client IP; never a name or a medical detail.
+- `AppointmentAuditFunctionalTest` (real API): a booking writes exactly one `APPOINTMENT_BOOKED` line with the
+  caller, `APPOINTMENT`, the appointment id, SUCCESS and an IP; a booking refused with 409 writes no SUCCESS line.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (94941ad, the tests alone; checked with the code of the commit before): 2 tests, 1 failure, the
+  one-line test (no audit line). The refused-booking test already held: without an audit call there is no SUCCESS.
+- Green (49e2d73); `./mvnw -B clean verify` **478 tests, 0 failures**; reverse order 478, 0 failures. No endpoint
+  changed.
+
+## MLink-103 — one booking per slot under concurrency, 409 `SLOT_TAKEN` (2026-11-07, epic/MLink-8)
+
+Task 27.2 of MLink-27, its acceptance criterion: "if two patients choose the same slot, one appointment is made and the
+other is told".
+
+**Built:**
+- No migration: the unique index the ticket asked for, `appointments_one_active_per_slot ON appointments (slot_id)
+  WHERE status = 'BOOKED'`, is already in V13 (code owner's review of MLink-97).
+- Two guards. First, the slot row lock of MLink-102 (`findForBookingById`, `SELECT … FOR UPDATE`) serves two bookings
+  one after the other, and the second sees the slot taken. Second, the unique index: `AppointmentService.book` saves
+  with `saveAndFlush`, and a violation of `appointments_one_active_per_slot` now answers the same 409 `SLOT_TAKEN`
+  ("Ce créneau n'est plus disponible. Choisissez-en un autre.") instead of a 500; any other integrity error still
+  fails as before (never hidden).
+- `AppointmentRaceFunctionalTest` (real API): two patients post the same slot at the same instant (two threads
+  released together), five rounds: each round one 201, one 409 `SLOT_TAKEN`, one BOOKED row. And the race lost after
+  the checks (the slot still FREE with an active appointment already in the table): 409, not 500, nothing added.
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (9a9b7eb, the tests alone): 2 tests, 1 failure, the last-guard test (expected 409 but was 500). The
+  concurrent test was already green: the lock of MLink-102 holds; it proves the acceptance criterion.
+- Green (663b46d): both race tests and `AppointmentBookingFunctionalTest`, 12 tests, 0 failures.
+- Mutation check: when the translation no longer recognises the index, the last-guard test turns red again (500).
+- `./mvnw -B clean verify` **475 tests, 0 failures**; reverse order 475, 0 failures. No endpoint changed: Postman as
+  for MLink-102.
+
+## MLink-102 — book an appointment, `POST /api/appointments` (2026-11-07, epic/MLink-8)
+
+Task 27.1 of MLink-27: a patient books a free slot online and sees the confirmation.
+
+**Code owner's post-merge review on #87 (2026-11-08): the role before the body.** Reading `slotId` as text after the
+role check (below) is not enough: a body Spring cannot parse at all (`{"slotId":`, `not json`, `[]`) failed during the
+`@RequestBody` conversion, before the method-level `@PreAuthorize`, so a practitioner or staff member got the parsing's
+400 instead of 403. `SecurityConfig` (shared file) now makes `POST /api/appointments` PATIENT-only in the filter chain,
+before the body is read; the method keeps its `@PreAuthorize`. New test
+`aPractitionerAndStaffAreRefusedEvenWithMalformedJson`. Proof: red first (c785ea4; with the previous `SecurityConfig`,
+1 failure, expected 403 but was 400, which is also the mutation check), green (137f7f8); `./mvnw -B clean verify`
+**476 tests, 0 failures**, reverse order 476, 0 failures.
+
+**Contract:** session and `X-XSRF-TOKEN` required, PATIENT only. `POST /api/appointments { "slotId" }` → 201
+`{ "id", "status": "BOOKED", "clinic": { "id", "name" }, "practitioner": { "id", "firstName", "lastName" },
+"startsAt", "endsAt" }`. 400 `VALIDATION_FAILED` (`slotId` missing: "Le créneau est obligatoire.", not a UUID:
+"Identifiant invalide.") · 401 · 403 for a non-patient or without the CSRF header · **403 `PATIENT_PROFILE_REQUIRED`**
+"Complétez votre profil patient avant de réserver." · 404 `NOT_FOUND` unknown slot · 409 `SLOT_TAKEN` "Ce créneau
+n'est plus disponible. Choisissez-en un autre." (already booked, or started).
+
+**Built:**
+- `AppointmentController.book` (`@PreAuthorize` PATIENT): `slotId` arrives as text in `BookAppointmentRequest` and
+  is read after the role check, so a non-patient gets 403 even with `"abc"` or `{}` (same reason as the MLink-100
+  review). The patient is always the caller: `patient_id` = `booked_by` = `currentUser.id()`; any id in the body is
+  ignored. `AppointmentMapper` → `AppointmentDto` (the practitioner's names only).
+- `AppointmentService.book`, one transaction: the patient profile exists, then `SlotRepository.findForBookingById`
+  locks the slot row (`SELECT … FOR UPDATE`), the slot must be FREE and not started, it becomes BOOKED and the
+  appointment is saved. Two bookings of one slot run one after the other: the second sees it taken (MLink-103 proves
+  the race and translates the unique-index violation, the last guard).
+- **Gap found and closed:** `appointments.patient_id` references `patients`, a row only registration makes. A patient
+  made elsewhere (the Keycloak console, the realm's `patient.dev`) has none, and booking hit a 500. The service now
+  answers 403 `PATIENT_PROFILE_REQUIRED`. For the dev stack, `keycloak/dev/dev-practitioners.json` gets a demo patient,
+  **`patient.demo@medlink.local`** (fixed id `d0c70000-0000-4000-8000-000000000010`, group `/patients`, dev password),
+  and the dev seed its `users` and `patients` rows. Still dev only (`RealmImportSeparationTest`).
+- `AccessMatrixFunctionalTest`: one line, `POST /api/appointments` (anonymous 401, patient open, practitioner and staff
+  403). Postman folder 7: ten requests (earliest free slot; `patient.dev` → 403 `PATIENT_PROFILE_REQUIRED`; log in as
+  `patient.demo` → 201; the slot leaves the search; the same slot again → 409 `SLOT_TAKEN`).
+
+**Proof** (Ubuntu VM with Docker, then CI):
+- Red first (be498f4): `AppointmentBookingFunctionalTest` 10 tests, 8 failures (404, the route did not exist; the
+  anonymous 401 and the missing-CSRF 403 already held) and the access matrix.
+- Green (4bb50bc): the two classes, 83 tests, 0 failures.
+- Mutation check: without `slot.setStatus(SlotStatus.BOOKED)`, two tests turn red (`aPatientBooksAFreeSlotAndItLeavesTheSearch`:
+  the slot stays FREE; `aTakenSlotIsRefusedAndTheFirstBookingStays`: the unique index answers 500 instead of 409).
+- Demo patient: red first (34a3f36; its CI run was cancelled by the next push, so proved in the VM with the data of
+  4bb50bc: `RealmImportSeparationTest` and `DevSeedTest`, 2 failures, exactly the two new checks), green (6155802).
+- `./mvnw -B clean verify` **473 tests, 0 failures**; reverse order 473, 0 failures; CI on 6155802 green
+  (`build-test`, `dependency-check`).
+- `setup-dev --skip-tests` (0 warnings) then newman: **132 requests, 314 assertions, 0 failures**.
+
+## MLink-163 — the slot search form's lists, `GET /api/slots/filters` (2026-11-07, epic/MLink-8)
+
+Task 25.6 of MLink-25, added for the search page (MLink-101): the form offers lists (clinic, specialty,
+practitioner) instead of ids to type, and choosing a clinic shows only its practitioners.
+
+**Contract:** session required, PATIENT only. `GET /api/slots/filters` → 200
+`{ "clinics": [ { "id", "name", "city" } ], "specialties": [ { "id", "name" } ], "practitioners": [ { "id",
+"firstName", "lastName", "specialtyId", "clinicIds": [ ] } ] }`, each list in French order by name (practitioners by
+last name, then first name); 401 `UNAUTHENTICATED` without a session; 403 for a practitioner or staff. Of a
+practitioner, only what the form needs: never an email or a username.
+
+**Built:**
+- `SlotController.filters()` (`@GetMapping("/filters")`, `@PreAuthorize` PATIENT) → `SlotMapper.toFiltersResponse`
+  → `SlotFiltersResponse` (records `ClinicItem`, `SpecialtyItem`, `PractitionerItem`).
+- `SlotService.filters()` returns `SlotFilters` (entities, no DTO), sorted with a French `Collator` in Java: a few
+  dozen rows, and SQL ordering would depend on the database collation ("Pédiatrie" must come before
+  "Pneumologie", not after "Z").
+- `PractitionerRepository.findAllBy()` with `@EntityGraph({"specialty", "clinics"})`: every practitioner with
+  their specialty and clinics in one query, no N+1.
+- `AccessMatrixFunctionalTest`: one line, `GET /api/slots/filters` (anonymous 401, patient open, practitioner and
+  staff 403). Postman folder 7: one request on the dev seed (the three clinics and specialties, the cardiologist's
+  specialty and two clinics, no `@` in the body).
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (26a1a96, the tests alone): `SlotFiltersFunctionalTest` and the access matrix, 6 failures (404 instead
+  of 200 or 403, and a matrix line with no route).
+- Green (64ca169): both classes pass.
+- Mutation check: without the `@PreAuthorize` of `filters()`, `aPractitionerAndStaffAreRefused` turns red
+  (expected 403 but was 200).
+- `./mvnw -B clean verify` **458 tests, 0 failures**; reverse order 458, 0 failures.
+- `setup-dev` then newman (b8d75aa): **122 requests, 295 assertions, 0 failures**.
+
+## MLink-99 — slot search index, an answer in less than 2 seconds (2026-11-07, epic/MLink-8)
+
+Task 25.3 of MLink-25, its acceptance criterion: "the results show in less than 2 seconds".
+
+**Built:**
+- `V14__slot_search_index.sql`: `CREATE INDEX slots_free_by_start ON slots (starts_at, id) WHERE status = 'FREE'`.
+  Partial (free slots only) and in the search's own order (`ORDER BY starts_at, id`): the search reads the first
+  rows of the period and stops at the page, instead of reading the whole table and sorting it. No code change.
+- No index for the practitioner filter: `slots_practitioner_starts_at_unique (practitioner_id, starts_at)` (V13)
+  already serves it. No clinic or specialty index: a test with one clinic could not show it helps, so none without
+  proof (the ticket asked for them only "if the EXPLAIN shows it").
+- `SlotSearchIndexTest` (real PostgreSQL, Testcontainers): 50,000 slots (50 practitioners × 1,000 back-to-back
+  30-minute slots, every fifth booked), `ANALYZE`, then `EXPLAIN` of the search's SQL with no filter (the widest
+  search): the plan uses `slots_free_by_start` and holds no `Seq Scan on slots`.
+- `SlotSearchPerformanceFunctionalTest` (real API, real port, a patient logged in): the same 50,000 slots, in 2031
+  so no other test sees them, then `GET /api/slots` over 31 days with `size=50`: 200 in less than 2 seconds,
+  `total` 40,000, 50 items. The rows are deleted afterwards (`@AfterEach`).
+
+**Proof** (Ubuntu VM with Docker):
+- Red first (e95aab9, the tests alone): `SlotSearchIndexTest` fails; the timing test is already green (50,000 rows
+  are little for PostgreSQL: it guards the criterion, the index test proves the index). The plan without the index:
+  ```
+  Limit  (cost=3046.61..3046.66 rows=20 width=920)
+    ->  Sort  (cost=3046.61..3146.85 rows=40097 width=920)
+          Sort Key: s.starts_at, s.id
+          ->  Hash Join  (cost=55.97..1979.64 rows=40097 width=920)
+                ...
+                                  ->  Seq Scan on slots s  (cost=0.00..1493.00 rows=40097 width=64)
+                                        Filter: ((starts_at >= '2031-03-03 08:00:00+00') AND (starts_at < '2031-04-03 08:00:00+00') AND ((status)::text = 'FREE'::text))
+  ```
+  every free slot of the month read, joined, then sorted, to keep 20.
+- Green (32fd3f1): both tests pass; the plan reads `slots_free_by_start`.
+- Mutation check: without the `CREATE INDEX` line, `SlotSearchIndexTest` turns red again (`Seq Scan on slots`).
+- `./mvnw -B clean verify` **450 tests, 0 failures**; reverse order 450, 0 failures.
+- `setup-dev --reset` then newman: **121 requests, 290 assertions, 0 failures**.
+
+## MLink-100 — slot search input rules and "no result" message (2026-10-24, epic/MLink-8)
+
+Task 25.4 of MLink-25: wrong input to `GET /api/slots` is refused clearly, and an empty search says so.
+
+**Contract** (added to MLink-98's): every broken rule answers 400 `VALIDATION_FAILED`, one entry per field in
+`details`, in French:
+
+| Input | `details` |
+|---|---|
+| `from` or `to` missing (MLink-98) | `from`: "La date de début est obligatoire." / `to`: "La date de fin est obligatoire." |
+| `to` not after `from` | `to`: "La date de fin doit être après la date de début." |
+| more than 31 days between `from` and `to` (31 days exactly is accepted) | `to`: "La période ne peut pas dépasser 31 jours." |
+| `page` below 0 | `page`: "Le numéro de page ne peut pas être négatif." |
+| `size` outside 1–50 | `size`: "La taille de page doit être comprise entre 1 et 50." |
+| an id that is not a UUID | the field (`clinicId`, `practitionerId`, `specialtyId`): "Identifiant invalide." |
+| a date that cannot be read | the field: "Date invalide (format attendu : 2026-10-27T09:00:00Z)." |
+
+Nothing matches at all: 200 `{ "items": [], "total": 0, "message": "Aucun créneau disponible. Élargissez la
+recherche (dates, clinique ou spécialité)." }`; `message` is absent whenever something matches (and on a page past
+the last one, where `total` is not 0).
+
+**Code owner's review on PR #87 (2026-11-02): the role before the parameters.** Spring converted the typed
+parameters (`Instant`, `UUID`, `int`) before `@PreAuthorize` ran, so a practitioner sending `clinicId=abc` got this
+controller's 400 instead of the 403 of a patient-only endpoint (the "Limits" below). `SlotController.search` now
+takes every parameter as text and reads it itself, after the role check (`instant`, `uuid`, `integer`), with the same
+French messages; the local `MethodArgumentTypeMismatchException` handler is gone, and an unreadable value is now
+listed together with the other broken fields. A patient sees no change. New functional test
+`aPractitionerAndStaffAreRefusedEvenWithUnreadableParameters`: a practitioner and a staff member send `clinicId=abc`,
+`practitionerId=abc`, `from=demain`, `page=x`, `size=51` and no parameter at all, and get 403 every time. The same day
+`master` was merged (75 commits, conflict in this report only, both sides kept): Scalar replaces Swagger UI, which
+clears the SCA finding (DOMPurify) that blocked this PR. Proof:
+- red first (a31ac35): `SlotSearchFunctionalTest` 12 tests, 1 failure, `practitioner …&clinicId=abc`
+  expected 403 but was 400;
+- green (1eef08b): `./mvnw -B clean verify` **448 tests, 0 failures**; reverse order 448, 0 failures;
+- `setup-dev --reset` then newman: **121 requests, 290 assertions, 0 failures**;
+- CI on 1eef08b: every check green, `SCA-Dependency-Check` included; PR mergeable.
+
+**Built:**
+- `SlotController`: the rules, all collected before answering, so one call lists every broken field. The
+  31-day bound and the 50-slot page bound the work one request can ask of the database (`MAX_PERIOD`,
+  `MAX_PAGE_SIZE`). An unreadable parameter (`MethodArgumentTypeMismatchException`) gets our error body through an
+  `@ExceptionHandler` local to this controller: the shared `GlobalExceptionHandler` is unchanged.
+- `SlotSearchResponse` gains `message` (`@JsonInclude(NON_NULL)`); `SlotMapper` sets it when `total` is 0.
+- `SlotSearchFunctionalTest`: 5 new tests through the real API (end before start; 31 days accepted, 31 days and
+  one second refused; unreadable ids and date named; `size` 0 and 51 and `page` -1 refused, 1 and 50 accepted;
+  the message when nothing matches, absent when something does).
+- Postman folder 7: five more requests (end before start, 32 days, `clinicId=abc`, `size=51`, a week next year
+  with nothing seeded: the message).
+
+**Proof** (Ubuntu VM with Docker, then CI):
+- Red first (59cdab5, the tests alone): `SlotSearchFunctionalTest` 11 tests, 5 failures, exactly the 5 new ones;
+  MLink-98's six stay green.
+- Green (3b601aa): `./mvnw -B clean verify` **284 tests, 0 failures**; reverse order: 284, 0 failures. CI on PR #87:
+  9 checks green.
+- Mutation check: with a 10-year bound instead of 31 days, `thePeriodIsThirtyOneDaysAtMost` turns red.
+- `scripts/setup-dev.sh --skip-tests`: 0 warnings. Postman, `npx newman@6.2.1 run`: **80 requests, 211 assertions,
+  0 failures** (folder 7 with the five new cases).
+
+**Decisions** (also in the log below): the messages above; 31 days at most, exactly 31 accepted; pages of 1 to
+50, numbered from 0; the type-mismatch handler local to `SlotController`; the message only when nothing matches.
+
+**Limits:** ~~an unreadable parameter is converted by Spring before `@PreAuthorize`: a practitioner sending
+`clinicId=abc` gets this 400, not 403~~. Fixed on 2026-11-07 after the code owner's review (see above).
+
+## MLink-98 — slot search, `GET /api/slots` (2026-10-23, epic/MLink-8)
+
+Endpoint 25.2 of epic MLink-8, the first endpoint of the epic: a patient searches the free slots.
+
+**Contract** (patients only): `GET /api/slots?from=&to=&clinicId=&practitionerId=&specialtyId=&page=0&size=20`,
+`from` and `to` required (ISO-8601), the three filters optional and combined. 200
+`{ "items": [ { "slotId", "startsAt", "endsAt", "clinic": { "id", "name" }, "practitioner": { "id", "firstName",
+"lastName" }, "specialty" } ], "total" }`: only `FREE` slots starting in `[from, to)`, never in the past (a past
+`from` starts at now), earliest first; `total` counts every match. 400 `VALIDATION_FAILED` when `from` or `to` is
+missing (one entry per field in `details`); 401 anonymous; 403 practitioner and staff.
+
+**Built:**
+- `dto/SlotDto` (nested `ClinicRef`, `PractitionerRef`), `dto/SlotSearchResponse`, `mapper/SlotMapper`.
+- `service/SlotService.searchFree(...)`: one JPA Specification (status, period, optional filters), sorted by
+  `startsAt`, paged; returns entities. `SlotRepository` gains `JpaSpecificationExecutor` and an
+  `@EntityGraph` on `findAll(spec, pageable)`, so the practitioner, specialty and clinic come in the same query.
+- `controller/SlotController`: `@PreAuthorize` `PATIENT` (constants of `security/Roles`). `from` and `to` are
+  declared optional and checked in the method: Spring checks a required parameter *before* `@PreAuthorize`, so a
+  practitioner without dates would get 400 instead of 403.
+- `AccessMatrixFunctionalTest` (MLink-60, said on MLink-60): `GET /api/slots` → anonymous 401, patient past
+  security, practitioner 403, staff 403.
+- Postman: folder 7 (folder 6 until #89) logs in as `patient.dev` and searches the dev seed (401 without a session, 200 with the
+  expected shape, earliest first, no email, filter by practitioner, 400 without `from`).
+
+**Proof** (Ubuntu VM with Docker):
+- `functional/SlotSearchFunctionalTest` (real API, Keycloak, database; each test writes its own practitioners,
+  clinics, specialties and slots): only the free slots of the period come back, earliest first, never a booked,
+  later or past one (a past `from` starts at now), with the expected JSON and no email; each filter narrows and
+  they combine; paging (`size=2`: 2 + 1, `total` 3); 400 without `from`; anonymous 401; `practitioner.dev` and
+  `staff.dev` 403.
+- Red first, with the tests and the matrix line only: `SlotSearchFunctionalTest` 3 failures and 2 errors (no
+  route: 404), `AccessMatrixFunctionalTest` red on the route list and on the practitioner and staff cells (404,
+  not 403); the anonymous cases already answer 401 (every `/api` path needs a session).
+- Mutation check: without the `FREE` rule in `SlotService`,
+  `aPatientGetsOnlyTheFreeSlotsOfThePeriodThatStartInTheFutureEarliestFirst` turns red (the booked slot comes back).
+- `./mvnw -B clean verify`: **242 tests, 0 failures** (with the overlap fix below); reverse order: 242, 0 failures.
+- `scripts/setup-dev.sh --reset --skip-tests`: 0 warnings. Postman, `npx newman@6.2.1 run`: **57 requests,
+  163 assertions, 0 failures**, the slot search folder included (before the merge of #89).
+
+**Decisions** (also in the log below): patients only; a past `from` starts at now; `page=0`, `size=20` by
+default; earliest first; of the practitioner only the id and names.
+
+**Limits:** the other input rules (from before to, at most 31 days, page size 1–50, invalid UUID as our error body)
+and the "no result" message are MLink-100 (25.4); today an invalid UUID or date gets Spring's 400. The 2-second
+target on a large data set is MLink-99 (25.3).
+
+## MLink-97 — appointment domain tables and dev seed (2026-10-21, epic/MLink-8)
+
+First task of epic MLink-8 (MLink-25 search, 27 booking, 28 cancel/reschedule, 36 reminders). Everything the epic's
+endpoints need in the database, and enough dev data to try them. No endpoint. Shared files touched by the review
+fixes: `compose.yaml` (one dev-only service) and `ComposeFilesTest` (a `DEV_ONLY` list), announced to Mohamed.
+
+**Built:**
+- `V13__appointment_domain.sql` (V9, then V10 after #89, V12 after #97 took V11, V13 since #99 took V12 for `email_token_mfa_enrolment`): `clinics`, `specialties`, `practitioners` (id = `users.id`, the Keycloak id; names
+  and specialty), `practitioner_clinics`, `slots` and `appointments`. Rules held by the database: one practitioner
+  never has two slots starting at the same time (`UNIQUE (practitioner_id, starts_at)`), a slot ends after it
+  starts, slot status is `FREE`/`BOOKED`, appointment status `BOOKED`/`CANCELLED`, an appointment belongs to a
+  patient (`patient_id` → `patients`, the owner checked on cancel/reschedule) and remembers who booked it
+  (`booked_by` → `users`). Times are `timestamptz` (UTC).
+- `model/`: `Clinic`, `Specialty`, `Practitioner extends User` (JOINED, like `Patient`), `Slot`, `Appointment`
+  and their status enums; one plain `JpaRepository` each.
+- Dev seed `db/dev-seed/R__dev_appointment_seed.sql`, loaded by the `dev` profile only (`application-dev.yml`,
+  `spring.flyway.locations`): Sousse, Sfax and Tunis clinics; Médecine générale, Cardiologie, Pédiatrie; three
+  practitioners in two clinics each; free 30-minute slots Monday to Friday, 08:00–12:00 and 13:00–17:00 Tunis
+  time, for the next 14 days. Every insert skips what exists, so the seed can run again.
+- Dev practitioners: three Keycloak users with **fixed ids** (`generalist.dev`, `cardiologist.dev`,
+  `pediatrician.dev`, ids `d0c70000-0000-4000-8000-00000000000{1,2,3}`), so they log in onto their seeded rows.
+  They are **not** in the shared realm file: they live in `keycloak/dev/dev-practitioners.json` and are added by
+  the dev-only compose service `keycloak-dev-users` (see the review below). `practitioner.dev` is unchanged.
+
+**Code owner's third review on PR #87 (2026-10-29): a slot is in one of its practitioner's clinics.**
+Nothing stopped a slot in a clinic where its practitioner does not work. The slots table now carries
+`CONSTRAINT slots_practitioner_works_in_clinic FOREIGN KEY (practitioner_id, clinic_id) REFERENCES
+practitioner_clinics (practitioner_id, clinic_id)`; a clinic that still holds a practitioner's slots cannot be taken
+off them. The dev seed already put each slot in one of its practitioner's two clinics: no seed change. The slot
+helpers of `AppointmentSchemaTest` and `SlotSearchFunctionalTest` link the practitioner to the clinic first, and
+`AppointmentDomainRepositoryTest` flushes the practitioner before saving a slot (Hibernate writes the
+`practitioner_clinics` rows after the entity inserts). New tests: a slot in a clinic where the practitioner does not
+work is refused, a slot in one of their clinics is accepted. Same day, `master` merged twice: #97 took V11 and #99
+took V12, so the migration is now **V13** (17986d0); a dev database that ran an older number needs `--reset` once.
+The first merge dropped the `devPassword` Postman variable (folder 7's login answered 401); restored in 1e2c6ec.
+Proof:
+- red first (172e4a0, CI red on that commit): `AppointmentSchemaTest` 16 tests, 1 failure,
+  `aSlotInAClinicWhereThePractitionerDoesNotWorkIsRefused`; green (4107099): the four touched classes, 35 tests,
+  0 failures;
+- mutation check: without the constraint, the same test turns red again (16 tests, 1 failure);
+- `./mvnw -B clean verify` 411 tests, 0 failures (4107099); after the V13 merge, reverse order
+  (`-Dsurefire.runOrder=reversealphabetical`) 434 tests, 0 failures, and CI `build-test` green (7cec64c);
+- `setup-dev --reset` then newman: 119 requests, 285 assertions, 0 failures (V13).
+
+**Code owner's second review on draft PR #87 (2026-10-23): slots of a practitioner must not overlap.**
+`UNIQUE (practitioner_id, starts_at)` only refused equal start times: 09:00–10:00 and 09:30–10:00 could both exist.
+V9 (still not merged, changed in place) now creates the `btree_gist` extension and adds
+`CONSTRAINT slots_no_overlap EXCLUDE USING gist (practitioner_id WITH =, tstzrange(starts_at, ends_at, '[)') WITH &&)`:
+two slots of one practitioner never overlap, in any clinic; `[)` makes 09:00–09:30 and 09:30–10:00 adjacent, so
+both are accepted. The unique start time stays (agenda index, the dev seed's `ON CONFLICT` target). New tests in
+`AppointmentSchemaTest`: an overlapping slot is refused even in another clinic, adjacent slots are accepted, two
+practitioners may have slots at the same time. Proof: red first (14 tests, 1 failure:
+`overlappingSlotsOfOnePractitionerAreRefusedEvenInAnotherClinic`), then green; `./mvnw -B clean verify` 242 tests,
+0 failures, both orders; mutation check: without `slots_no_overlap` the overlap test turns red again.
+
+**Code owner's review on draft PR #87 (2026-10-22):**
+- *One active appointment per slot, enforced by the database.* V9 (not merged yet, so changed in place) gains
+  `CREATE UNIQUE INDEX appointments_one_active_per_slot ON appointments (slot_id) WHERE status = 'BOOKED'`: two
+  racing bookings cannot both hold a slot, and a cancelled appointment does not block a new booking. MLink-103
+  (27.2) keeps the API side: translate the violation into 409 `SLOT_TAKEN` and prove the race through the API.
+- *No dev users in what deployed environments import.* `keycloak/realm-medlink.json` (copied to the servers by
+  `.github/actions/deploy-compose`, mounted by `docker-compose.yml`) is back to `master`'s content. The three
+  practitioners moved to `keycloak/dev/dev-practitioners.json`; a one-shot service in `compose.yaml` only,
+  `keycloak-dev-users` (Keycloak image, `keycloak/dev/import-dev-users.sh`), waits for Keycloak, logs in as the dev
+  admin and runs Keycloak's partial import (`kcadm.sh create partialImport`, existing users skipped), which keeps
+  the fixed ids. The partial import does not resolve `${...}`, so the script fills `${KC_DEV_USERS_PASSWORD}` from
+  its environment; the file holds no password. The setup scripts are unchanged: they start every service of
+  `compose.yaml`. `ComposeFilesTest` (MLink-113) gains a `DEV_ONLY` list, left out of the dev/full comparison.
+- New `RealmImportSeparationTest` (reads the files, no Docker): the dev file holds the three practitioners with
+  fixed ids and a password placeholder; the shared realm holds none of their usernames or ids;
+  `docker-compose.yml` and the deploy action never mention `keycloak/dev` or the service; in `compose.yaml` only
+  `keycloak-dev-users` mounts `keycloak/dev`. Red first (dev file and service missing: 3 of 4 red, the "nothing
+  used to deploy mentions the dev folder" guard green), then green with `ComposeFilesTest` (9 tests, 0 failures).
+  Mutation check: a dev practitioner put back into the shared realm turns
+  `theSharedRealmHoldsNoneOfTheDevPractitioners` red.
+- Proof of the review fixes (Ubuntu VM with Docker): red first with the new tests only, `AppointmentSchemaTest`,
+  `DevSeedTest` and `RealmImportSeparationTest` give 21 tests, 2 failures and 3 errors, all expected
+  (`aSlotHoldsOneActiveAppointmentOnly`: a second active appointment is still accepted; the dev users file and the
+  dev-only service do not exist yet). With the fixes, `./mvnw -B clean verify`: **228 tests, 0 failures**; reverse
+  order: 228, 0 failures. Mutation check: without `appointments_one_active_per_slot`,
+  `aSlotHoldsOneActiveAppointmentOnly` turns red. `scripts/setup-dev.sh --reset --skip-tests`: 0 warnings;
+  `keycloak-dev-users` logs show the partial import `ADDED` each user **with its fixed id**; the three practitioners
+  log in (200 ×3) onto their seeded rows (160 free slots each).
+
+**Proof** (run in an Ubuntu 22.04 VM with Docker; the Windows machine has no Docker):
+- Red first (6f0676d): `AppointmentSchemaTest` (9) and `DevSeedTest` (6) fail on missing tables and on the realm
+  users not existing yet; only the "practitioner.dev unchanged" guard passes.
+- Green: those 15 plus `AppointmentDomainRepositoryTest` (2: the entities read and write the tables, a saved
+  practitioner writes `users` and `practitioners` under one id). `DevSeedTest` reads the dev users file (the realm
+  file before the review): the seeded practitioners have its ids, emails and the expected specialties, slots are weekday office hours in Tunis
+  time, and running the seed again adds nothing; without the `dev` profile there is no seed data.
+- Mutation check: without `UNIQUE (practitioner_id, starts_at)`,
+  `onePractitionerCannotHaveTwoSlotsStartingAtTheSameTime` turns red.
+- `./mvnw -B clean verify`: **222 tests, 0 failures**; `-Dsurefire.runOrder=reversealphabetical`: 222, 0 failures.
+- `scripts/setup-dev.sh --reset --skip-tests`, then `POST /api/auth/login` as each new practitioner: 200 ×3; the
+  dev database holds the three practitioners with 160 free slots each (10 weekdays × 16 slots).
+
+**Decisions** (also in the log below): migration V9, not V8 (the code owner's call on PR #60: the PR merged
+first holds the lower number); practitioners' names stored in `practitioners`, like patients'; the seed is a
+repeatable SQL migration in its own dev-only location; fixed ids for new dev users only.
+
+**Limits:**
+- Seeded slots are computed when the seed runs: after two weeks they are in the past. Run the setup script with
+  `--reset` (`-Reset`) before a demo.
+- The older dev users `staff.dev`, `practitioner.dev` and `patient.dev` are still in the shared realm file, so
+  they still reach deployed environments. Moving them touches `FunctionalTestBase` and the team's tests: raised on
+  PR #87, a separate ticket proposed.
+- In full-stack mode (`docker-compose.yml`, setup `--full-stack`) the three dev practitioners are not created, on
+  purpose; the dev seed still inserts their rows, they just cannot log in there.
+- V13 runs `CREATE EXTENSION IF NOT EXISTS btree_gist`: a trusted extension, so the database owner can create it;
+  a deployed database whose migration role is not the owner needs it created once by an administrator.
+- `docker compose up -d` does not fail when `keycloak-dev-users` fails (it exits after its job): check
+  `docker compose logs keycloak-dev-users` if a dev practitioner cannot log in.
+- `appointments` has no `ON DELETE CASCADE` (an appointment is a medical record): deleting a patient who has
+  appointments (`DELETE /api/users/{id}`) would be refused by the database and answer 500 `INTERNAL_ERROR` (read
+  from the code, not tested: no endpoint creates appointments yet). To settle with account management (MLink-20,
+  sub-sprint 5).
+- The pre-commit hooks could not run: the gitleaks hook calls `protect --source=.`, which gitleaks v8.24.0 no
+  longer accepts, and checkov 3.2.5 does not install on Windows with Python 3.14 (it needs a Rust compiler for
+  `rustworkx` 0.13). Commits were made with `SKIP=gitleaks,checkov`; CI's secrets scan covers the PR. Reported to
+  the code owner (`.pre-commit-config.yaml`).
 
 ## GitHub #48 — AI disclosure is conditional and truthful (2026-10-21, fix/48-ai-disclosure)
 
@@ -574,6 +1666,19 @@ different hash case (PowerShell `Get-FileHash` upper case, `sha256sum` lower cas
 with both scripts the stamps never match, so every switch of script wipes the dev volumes (the realm is
 saved first). One user runs one script, so it only bites when both are used on one machine.
 
+## MLink-115 — audit-log query API
+
+**Built:** staff-only `GET /api/admin/audit-entries`, with inclusive ISO-8601 `from`/`to` timestamps,
+`userId` and `action` filters. Results are sorted newest first (timestamp, then id) and returned as
+`items` plus `page`, `size`, `totalElements` and `totalPages`; page size defaults to 50 and is capped at
+100. Invalid date ranges, page values, page sizes and action names return `400 VALIDATION_FAILED`.
+The query service only reads from the append-only audit repository.
+
+**Proof:** `AuditQueryFunctionalTest` checks all filters together, inclusive date bounds, stable ordering,
+pagination, invalid parameters and actions; `AccessMatrixFunctionalTest` verifies anonymous `401`,
+patient/practitioner `403`, and staff access. `.\mvnw -B "-Dtest=AuditQueryFunctionalTest,AuditFunctionalTest,AccessMatrixFunctionalTest" test`:
+**101 tests, 0 failures**.
+
 ## MLink-59 — audit trail, every refusal recorded (2026-10-17, epic/MLink-6)
 
 **Built:** migration **V7** `audit_entries` (id, timestamp, user_id, action, resource_type, resource_id,
@@ -612,10 +1717,29 @@ failures**, and no audit error in the logs.
 disable the triggers, and today Flyway and the application run as the same database role. Protecting the
 trail from a compromised application role needs separate roles (an owner for migrations, a runtime role
 with only `INSERT` and `SELECT` on `audit_entries`); it touches compose, the environment, the setup
-scripts and Terraform, so it is a separate GitHub issue. Behind a reverse proxy the recorded IP is the proxy's until forwarded headers are configured
+scripts and Terraform, so it is a separate GitHub issue. **Closed 2026-11-17 by GitHub #57 (MLink-165):** the API
+runs as `medlink_app`, which can only append to and read the trail (see the MLink-165 section). Behind a reverse proxy the recorded IP is the proxy's until forwarded headers are configured
 (`server.forward-headers-strategy`, with the proxy trusted). Anonymous refusals are recorded with no
 rate limit, so a flood of forged writes grows the table (per-IP limits: GitHub #51). Reading the trail
 (MLink-33) and account operations (MLink-72) are other tasks; they add their own `AuditAction` values.
+
+## MLink-114 — audit sensitive actions
+
+**Built:** `AuditAction` now includes `LOGIN`, `ACCOUNT_UPDATED` and `DATA_READ`; `AuditOutcome`
+includes `SUCCESS` and `FAILURE`. `UserService` records successful user-list and single-user reads
+(`USER` / `ALL` or the user's UUID). `UserProvisioningService` records a successful account update
+when it synchronizes an existing user's email or username from Keycloak. `LoginService` records
+successful and refused login attempts; where Keycloak refuses credentials before identifying a user,
+the resource id is the fixed value `UNKNOWN`, never the submitted email. No migration or endpoint was
+added.
+
+**Proof:** `SensitiveActionsAuditFunctionalTest` checks read events, successful login events and
+failed attempts without storing the submitted email. `ConsoleUserProvisioningFunctionalTest` checks
+that an email synchronized from Keycloak creates an `ACCOUNT_UPDATED` / `SUCCESS` audit entry.
+`.\mvnw.cmd -B test "-Dsurefire.runOrder=reversealphabetical"`: **546 tests, 0 failures, 0 errors**.
+
+**Scope:** the existing API has no general account-edit endpoint; the update event covers the
+existing account synchronization path. A user deletion is not mislabeled as an account update.
 
 ## MLink-58 — current user and ownership check (2026-10-17, epic/MLink-6)
 
@@ -906,6 +2030,16 @@ The four skin tasks became React pages: MLink-52 login, 64 code screens, 80 veri
 
 | Date | Decision | Why | Rejected |
 |---|---|---|---|
+| 2026-10-21 | Appointment tables take V9, after V8 `rate_limits` | The code owner settled it on PR #60: the PR merged first holds the lower number, or Flyway refuses the older one on databases that already ran the newer (MLink-97) | "Whoever merges second renumbers" |
+| 2026-10-21 | Practitioners' first and last names live in `practitioners`, like patients' in `patients` | The slot search shows them without asking Keycloak; only Ela's code changes (MLink-97) | Names moved to `users` (touches `Patient` and registration); asking Keycloak per result |
+| 2026-10-24 | Slot search input: at most 31 days per search (exactly 31 accepted) and 1–50 slots per page; one 400 lists every broken field; "no result" message only when nothing matches | Bounds the work one request can ask of the database (a multi-year or million-row search is a cheap denial of service); a patient looks a few weeks ahead; React shows each error under its field (MLink-100) | No bound; one error at a time; a message on every empty page |
+| 2026-10-24 | Unreadable search parameters answered by an `@ExceptionHandler` inside `SlotController` | Our error body with the field's name, without changing the shared `GlobalExceptionHandler` for every other endpoint (MLink-100) | A global handler (affects the whole team's endpoints, to be agreed first); Spring's default 400 body |
+| 2026-10-23 | A practitioner's slots never overlap: exclusion constraint on `tstzrange(starts_at, ends_at, '[)')` per practitioner, with `btree_gist` | Code owner's second review on #87: a unique start time lets 09:00–10:00 and 09:30–10:00 coexist; `[)` keeps back-to-back slots valid; the database holds the rule for every writer (MLink-97) | A check in the service only; per-clinic scope (one person cannot be in two clinics at once) |
+| 2026-10-23 | Slot search (`GET /api/slots`): patients only; a past `from` starts at now; earliest first, paged 20 by default; the practitioner shown by id and names only | Patients book, staff and practitioners have their own screens later; a started slot cannot be booked; no personal data beyond what a patient needs (MLink-98) | Staff allowed to search; an error for a past `from` |
+| 2026-10-23 | `from`/`to` of the slot search checked in the controller, after `@PreAuthorize`, not as required parameters | Spring rejects a missing required parameter before method security runs: a practitioner without dates would get 400, hiding the 403 the access matrix expects (MLink-98) | `@RequestParam` required (400 before the role check); a URL rule in the shared `SecurityConfig` |
+| 2026-10-22 | One active appointment per slot is a database rule: partial unique index `appointments(slot_id) WHERE status = 'BOOKED'` in V9 | Code owner's review on #87: the slot status alone does not stop two racing bookings; cancelled appointments must not block the slot (MLink-97) | Leaving it to the booking service (MLink-103) only |
+| 2026-10-22 | Dev practitioners are imported in dev only, by a one-shot `compose.yaml` service (`keycloak-dev-users`, Keycloak partial import), from `keycloak/dev/`; the shared realm file holds none of them | Code owner's review on #87: the shared realm reaches staging and prod, and "delete them by hand" is not a security boundary; one container works the same on Windows and Linux and leaves the setup scripts unchanged (MLink-97) | Importing them from the two setup scripts (two copies of the logic, the Windows one untestable without Docker); keeping them in the realm and deleting them after deployment |
+| 2026-10-21 | Dev data for appointments: a repeatable SQL migration in `db/dev-seed`, enabled by the `dev` profile only, for dev practitioners with fixed Keycloak ids | Tests and prod never see it; the seeded rows and the Keycloak users share the same ids, so the practitioners log in onto them (MLink-97) | A Java seeder that asks Keycloak for the ids (more code, needs Keycloak at startup); practitioners with generated ids (forbidden: a user id comes from Keycloak) |
 | 2026-10-23 | A password change ends every session of the user, this one included; the user logs in again | A change made because a session may be compromised must close it; same ending as the forced change (review on #89) | Keeping the current session only (more calls, more partial failures); keeping all |
 | 2026-10-23 | Old sessions are refused by the API itself (`session_revocations`, set before the password changes), not only by Keycloak's sign-out | Fail closed: a Keycloak failure after the change can no longer leave a stolen session open; the browser only reaches Keycloak through the API (review on #89) | 204 + an error log when Keycloak's sign-out fails (left a window until Keycloak's idle timeout); 503 after a change that did happen (the old password cannot be put back) |
 | 2026-10-23 | Login with a Keycloak required action other than `UPDATE_PASSWORD` alone: 403 `ACCOUNT_SETUP_INCOMPLETE` | The API finishes only the forced change; starting it would leave the account blocked after the change; Keycloak checked the password first, so it reveals nothing | Running the change and leaving the user locked out; 401 (looks like a wrong password) |

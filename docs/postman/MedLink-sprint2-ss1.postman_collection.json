@@ -2,7 +2,7 @@
   "info": {
     "name": "MedLink API · Sprint 2 (registration, email verification, password changes, staff code)",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
-    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases, then folder 6 for endpoints 10–11 (sub-sprint 4) and folder 8 for the staff code, endpoints 8–9 (sub-sprint 3). Practitioners and staff log in with a code: the collection's pre-request script computes it from `{{totpSecret}}` like an authenticator app.\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token; folder 6 reuses the account verified in folder 4). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created, the per-IP limits (429 `TOO_MANY_REQUESTS` with `Retry-After`, GitHub #51: the dev profile raises them to 1000 so this collection can be rerun; `RateLimitFunctionalTest` checks the real values).\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them."
+    "description": "Endpoints 1–4 of docs/sprints/sprint-2/plan.md with their edge cases, then folder 6 for endpoints 10–11 (sub-sprint 4) and folder 8 for the staff code, endpoints 8–9 (sub-sprint 3). Practitioners and staff log in with a code: the collection's pre-request script computes it from `{{totpSecret}}` like an authenticator app.\n\n**Before running:** start the dev stack (`scripts/setup-dev.ps1` or `scripts/setup-dev.sh`): API on 8080, Keycloak on 8180, Mailpit on 8025.\n\n**Run it in order** with the Collection Runner (folder 0 first: it stores the CSRF token; folder 6 reuses the account verified in folder 4). Every run uses new emails, so it can be run again. Folder 5 waits 61 seconds; skip it for a quick run.\n\n**Not covered here** (covered by the JUnit tests): a link older than 24 hours (410), Keycloak or SMTP down (503 / still 201), a database failure after the Keycloak user was created, the per-IP limits (429 `TOO_MANY_REQUESTS` with `Retry-After`, GitHub #51: the dev profile raises them to 1000 so this collection can be rerun; `RateLimitFunctionalTest` checks the real values).\n\nTest accounts stay in the dev database and Keycloak; `-Reset` on the setup script wipes them.\n\nFolder 7 (slot search, MLink-98) logs in as patient.dev and reads the dev seed: run the setup script first."
   },
   "event": [
     {
@@ -1938,6 +1938,28 @@
           ]
         },
         {
+          "name": "200 · GET /me returns the logged-in patient (what React reads after a refresh)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const user = pm.response.json().user;",
+                  "pm.test(\"the login's user\", () => pm.expect(user.id).to.eql(pm.collectionVariables.get(\"targetUserId\")));",
+                  "pm.test(\"role PATIENT only\", () => pm.expect(user.roles).to.eql([\"PATIENT\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "400 · current password missing",
           "request": {
             "method": "POST",
@@ -2529,6 +2551,1193 @@
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
                   "pm.test(\"a full session\", () => pm.expect(pm.response.json()).to.have.key(\"user\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "7 · Slot search (endpoint 25.2, MLink-98)",
+      "description": "GET /api/slots as patient.dev, on the dev seed (three practitioners, free slots over the next two weeks). Starts by ending any session left by the folders before it. Needs the dev stack started by scripts/setup-dev.",
+      "item": [
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// The search window: from now, for the next 14 days (the dev seed's slots)",
+                  "const now = new Date();",
+                  "pm.collectionVariables.set(\"slotFrom\", now.toISOString());",
+                  "pm.collectionVariables.set(\"slotTo\", new Date(now.getTime() + 14 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /logout → no session left from the folders before (204, or 401 when none)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"logged out or already anonymous\", () => pm.expect(pm.response.code).to.be.oneOf([204, 401]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots without a session → 401",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf before logging in → 204",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /login as patient.dev → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient.dev@medlink.local\",\n  \"password\": \"{{devPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"logged in as a patient\", () => pm.expect(pm.response.json().user.roles).to.include(\"PATIENT\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots (next 14 days) → 200, free slots earliest first",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"the dev seed's slots come back\", () => pm.expect(body.items).to.be.an(\"array\").that.is.not.empty);",
+                  "pm.test(\"total counts every match\", () => pm.expect(body.total).to.be.at.least(body.items.length));",
+                  "pm.test(\"each slot: times, clinic, practitioner, specialty\", () => body.items.forEach(s => {",
+                  "    pm.expect(s).to.have.all.keys(\"slotId\", \"startsAt\", \"endsAt\", \"clinic\", \"practitioner\", \"specialty\");",
+                  "    pm.expect(s.clinic).to.have.all.keys(\"id\", \"name\");",
+                  "    pm.expect(s.practitioner).to.have.all.keys(\"id\", \"firstName\", \"lastName\");",
+                  "}));",
+                  "pm.test(\"earliest first, never in the past\", () => {",
+                  "    const starts = body.items.map(s => Date.parse(s.startsAt));",
+                  "    pm.expect(starts).to.eql([...starts].sort((a, b) => a - b));",
+                  "    starts.forEach(t => pm.expect(t).to.be.above(Date.now() - 60000));",
+                  "});",
+                  "pm.test(\"no email or username of the practitioner\", () => pm.expect(pm.response.text()).to.not.include(\"@\"));",
+                  "pm.collectionVariables.set(\"practitionerId\", body.items[0].practitioner.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots?practitionerId=… → only that practitioner",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&practitionerId={{practitionerId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"some slots\", () => pm.expect(body.items).to.not.be.empty);",
+                  "pm.test(\"all of the chosen practitioner\", () => body.items.forEach(s =>",
+                  "    pm.expect(s.practitioner.id).to.eql(pm.collectionVariables.get(\"practitionerId\"))));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots/filters → 200, the lists of the search form (MLink-163)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots/filters"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"the three seeded clinics\", () => pm.expect(body.clinics.map(c => c.name)).to.include.members([\"Clinique MedLink Sfax\", \"Clinique MedLink Sousse\", \"Clinique MedLink Tunis\"]));",
+                  "pm.test(\"the three seeded specialties\", () => pm.expect(body.specialties.map(s => s.name)).to.include.members([\"Cardiologie\", \"Médecine générale\", \"Pédiatrie\"]));",
+                  "const cardiologist = body.practitioners.find(p => p.id === \"d0c70000-0000-4000-8000-000000000002\");",
+                  "pm.test(\"a practitioner with their specialty and clinics\", () => {",
+                  "    pm.expect(cardiologist.specialtyId).to.eql(\"5e000000-0000-4000-8000-000000000002\");",
+                  "    pm.expect(cardiologist.clinicIds).to.have.members([\"c1000000-0000-4000-8000-000000000002\", \"c1000000-0000-4000-8000-000000000003\"]);",
+                  "});",
+                  "pm.test(\"only what the form needs: no email or username\", () => {",
+                  "    pm.expect(Object.keys(cardiologist)).to.have.members([\"id\", \"firstName\", \"lastName\", \"specialtyId\", \"clinicIds\"]);",
+                  "    pm.expect(pm.response.text()).to.not.include(\"@\");",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots without from → 400 VALIDATION_FAILED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?to={{slotTo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the missing field is named\", () => pm.expect(pm.response.json().details).to.have.property(\"from\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots with the end before the start → 400 (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotTo}}&to={{slotFrom}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"to\": \"La date de fin doit être après la date de début.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots over more than 31 days → 400 (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTooFar}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const from = Date.parse(pm.collectionVariables.get(\"slotFrom\"));",
+                  "pm.collectionVariables.set(\"slotTooFar\", new Date(from + 32 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"to\": \"La période ne peut pas dépasser 31 jours.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots?clinicId=abc → 400, the field is named (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&clinicId=abc"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"clinicId\": \"Identifiant invalide.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots?size=51 → 400 (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&size=51"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"code VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"the field and its French message\", () => pm.expect(pm.response.json().details).to.eql({ \"size\": \"La taille de page doit être comprise entre 1 et 50.\" }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots next year (nothing seeded) → 200, a message suggests widening (MLink-100)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotNextYear}}&to={{slotNextYearEnd}}"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const start = Date.now() + 365 * 86400000;",
+                  "pm.collectionVariables.set(\"slotNextYear\", new Date(start).toISOString());",
+                  "pm.collectionVariables.set(\"slotNextYearEnd\", new Date(start + 7 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"no slot\", () => { pm.expect(body.items).to.eql([]); pm.expect(body.total).to.eql(0); });",
+                  "pm.test(\"the message suggests widening the search\", () => pm.expect(body.message).to.eql(\"Aucun créneau disponible. Élargissez la recherche (dates, clinique ou spécialité).\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots → keep the earliest free slot to book (MLink-102)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&size=1"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const first = pm.response.json().items[0];",
+                  "pm.test(\"a free slot to book\", () => pm.expect(first).to.be.an(\"object\"));",
+                  "pm.collectionVariables.set(\"bookSlotId\", first.slotId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN before booking",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments as patient.dev → 403, no patient profile (made outside registration)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slotId\": \"{{bookSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"PATIENT_PROFILE_REQUIRED\", () => pm.expect(pm.response.json().code).to.eql(\"PATIENT_PROFILE_REQUIRED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /logout → patient.dev leaves",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf before logging in as patient.demo → 204",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /login as patient.demo (dev patient with a profile) → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient.demo@medlink.local\",\n  \"password\": \"{{devPassword}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"logged in as a patient\", () => pm.expect(pm.response.json().user.roles).to.include(\"PATIENT\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /appointments/me → note the demo patient's booked times (MLink-167)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/appointments/me?size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "// A patient holds one appointment at a time (MLink-167): the bookings below pick slots that fit this agenda,",
+                  "// so the folder also runs again on a stack that keeps the demo patient's earlier appointments",
+                  "const booked = pm.response.json().items.filter((a) => a.status === \"BOOKED\").map((a) => [a.startsAt, a.endsAt]);",
+                  "pm.collectionVariables.set(\"myBusy\", JSON.stringify(booked));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots → keep the earliest free slot that fits the demo patient's agenda (MLink-167)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const busy = JSON.parse(pm.collectionVariables.get(\"myBusy\") || \"[]\");",
+                  "const fits = (s) => !busy.some(([from, to]) => new Date(s.startsAt) < new Date(to) && new Date(s.endsAt) > new Date(from));",
+                  "const slot = pm.response.json().items.find(fits);",
+                  "pm.test(\"a free slot that fits\", () => pm.expect(slot).to.be.an(\"object\"));",
+                  "pm.collectionVariables.set(\"bookSlotId\", slot.slotId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN before booking",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments → 201, the demo patient books the slot",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slotId\": \"{{bookSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"booked\", () => pm.expect(body.status).to.eql(\"BOOKED\"));",
+                  "pm.collectionVariables.set(\"bookedAppointmentId\", body.id);",
+                  "pm.collectionVariables.set(\"overlapFrom\", body.startsAt);",
+                  "pm.collectionVariables.set(\"overlapTo\", body.endsAt);",
+                  "pm.collectionVariables.set(\"myBusy\", JSON.stringify(JSON.parse(pm.collectionVariables.get(\"myBusy\") || \"[]\").concat([[body.startsAt, body.endsAt]])));",
+                  "pm.test(\"where, with whom and when\", () => pm.expect(body).to.have.all.keys(\"id\", \"status\", \"clinic\", \"practitioner\", \"startsAt\", \"endsAt\"));",
+                  "pm.test(\"no email of the practitioner\", () => pm.expect(pm.response.text()).to.not.include(\"@\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots → the booked slot is no longer offered",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{slotFrom}}&to={{slotTo}}&size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"the booked slot is gone\", () => pm.expect(pm.response.json().items.map(s => s.slotId)).to.not.include(pm.collectionVariables.get(\"bookSlotId\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments, the same slot again → 409 SLOT_TAKEN",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slotId\": \"{{bookSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"SLOT_TAKEN\", () => pm.expect(pm.response.json().code).to.eql(\"SLOT_TAKEN\"));",
+                  "pm.test(\"a French message\", () => pm.expect(pm.response.json().message).to.eql(\"Ce créneau n'est plus disponible. Choisissez-en un autre.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots at the booked time → keep another free slot at that time (MLink-167)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{overlapFrom}}&to={{overlapTo}}&size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "// Another practitioner's slot at the same time, if the seed has one (the next request is skipped otherwise)",
+                  "const other = pm.response.json().items.find((s) => s.slotId !== pm.collectionVariables.get(\"bookSlotId\"));",
+                  "pm.collectionVariables.set(\"overlapSlotId\", other ? other.slotId : \"\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments at the same time elsewhere → 409 PATIENT_BUSY (MLink-167)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slotId\": \"{{overlapSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "if (!pm.collectionVariables.get(\"overlapSlotId\")) {",
+                  "  pm.execution.skipRequest();",
+                  "}"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"PATIENT_BUSY\", () => pm.expect(pm.response.json().code).to.eql(\"PATIENT_BUSY\"));",
+                  "pm.test(\"a French message\", () => pm.expect(pm.response.json().message).to.eql(\"Vous avez déjà un rendez-vous à ce moment-là.\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /appointments/me → 200, the demo patient's appointments, latest first (MLink-108)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/appointments/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"the appointment just booked is there\", () => pm.expect(body.items.map(a => a.id)).to.include(pm.collectionVariables.get(\"bookedAppointmentId\")));",
+                  "pm.test(\"latest first\", () => { const starts = body.items.map(a => a.startsAt); pm.expect(starts).to.eql([...starts].sort().reverse()); });",
+                  "pm.test(\"total counts them all\", () => pm.expect(body.total).to.be.at.least(body.items.length));",
+                  "pm.test(\"no email of the practitioner\", () => pm.expect(pm.response.text()).to.not.include(\"@\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots two days ahead → keep a slot to book then cancel (MLink-106)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{cancelFrom}}&to={{cancelTo}}&size=50"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "// More than 12 hours ahead (the cancel deadline, H-03): from two days on, for a week",
+                  "const from = new Date(Date.now() + 2 * 86400000);",
+                  "pm.collectionVariables.set(\"cancelFrom\", from.toISOString());",
+                  "pm.collectionVariables.set(\"cancelTo\", new Date(from.getTime() + 7 * 86400000).toISOString());"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const busy = JSON.parse(pm.collectionVariables.get(\"myBusy\") || \"[]\");",
+                  "const fits = (s) => !busy.some(([from, to]) => new Date(s.startsAt) < new Date(to) && new Date(s.endsAt) > new Date(from));",
+                  "const first = pm.response.json().items.find(fits);",
+                  "pm.test(\"a free slot two days ahead that fits the agenda (MLink-167)\", () => pm.expect(first).to.be.an(\"object\"));",
+                  "pm.collectionVariables.set(\"cancelSlotId\", first.slotId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN before the cancel",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments → 201, a booking to cancel",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slotId\": \"{{cancelSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"cancelAppointmentId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments/{id}/cancel → 204, the holder cancels",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments/{{cancelAppointmentId}}/cancel"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /appointments/me → the appointment is CANCELLED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/appointments/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const cancelled = pm.response.json().items.find(a => a.id === pm.collectionVariables.get(\"cancelAppointmentId\"));",
+                  "pm.test(\"cancelled, still listed\", () => pm.expect(cancelled.status).to.eql(\"CANCELLED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots two days ahead → the slot is free again",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{cancelFrom}}&to={{cancelTo}}&size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"offered again\", () => pm.expect(pm.response.json().items.map(s => s.slotId)).to.include(pm.collectionVariables.get(\"cancelSlotId\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments/{id}/cancel again → 204, nothing changes",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments/{{cancelAppointmentId}}/cancel"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments/{unknown}/cancel → 403, same answer as someone else's",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments/{{$guid}}/cancel"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"FORBIDDEN\", () => pm.expect(pm.response.json().code).to.eql(\"FORBIDDEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /slots two days ahead → keep two free slots, to book one then move to the other (MLink-107)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/slots?from={{cancelFrom}}&to={{cancelTo}}&size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const busy = JSON.parse(pm.collectionVariables.get(\"myBusy\") || \"[]\");",
+                  "const fits = (s) => !busy.some(([from, to]) => new Date(s.startsAt) < new Date(to) && new Date(s.endsAt) > new Date(from));",
+                  "const items = pm.response.json().items.filter(fits);",
+                  "pm.test(\"two free slots that fit the agenda (MLink-167)\", () => pm.expect(items.length).to.be.at.least(2));",
+                  "pm.collectionVariables.set(\"moveFromSlotId\", items[0].slotId);",
+                  "pm.collectionVariables.set(\"moveToSlotId\", items[1].slotId);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments → 201, a booking to move",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"slotId\": \"{{moveFromSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "pm.collectionVariables.set(\"moveAppointmentId\", pm.response.json().id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments/{id}/reschedule → 200, the new appointment",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments/{{moveAppointmentId}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newSlotId\": \"{{moveToSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a new, booked appointment\", () => { pm.expect(body.status).to.eql(\"BOOKED\"); pm.expect(body.id).to.not.eql(pm.collectionVariables.get(\"moveAppointmentId\")); });",
+                  "pm.collectionVariables.set(\"movedAppointmentId\", body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /appointments/me → the old one CANCELLED, the new one BOOKED",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/appointments/me?size=50"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const items = pm.response.json().items;",
+                  "pm.test(\"the old appointment is cancelled\", () => pm.expect(items.find(a => a.id === pm.collectionVariables.get(\"moveAppointmentId\")).status).to.eql(\"CANCELLED\"));",
+                  "pm.test(\"the new appointment is booked\", () => pm.expect(items.find(a => a.id === pm.collectionVariables.get(\"movedAppointmentId\")).status).to.eql(\"BOOKED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /appointments/{cancelled id}/reschedule → 409 APPOINTMENT_CANCELLED",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/appointments/{{moveAppointmentId}}/reschedule",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"newSlotId\": \"{{moveFromSlotId}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"APPOINTMENT_CANCELLED\", () => pm.expect(pm.response.json().code).to.eql(\"APPOINTMENT_CANCELLED\"));"
                 ]
               }
             }
@@ -3221,6 +4430,26 @@
           ]
         },
         {
+          "name": "200 · GET /me returns the practitioner after the code",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/me"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"role PRACTITIONER only\", () => pm.expect(pm.response.json().user.roles).to.eql([\"PRACTITIONER\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "204 · logout",
           "request": {
             "method": "POST",
@@ -3646,6 +4875,2301 @@
           ]
         }
       ]
+    },
+    {
+      "name": "9 · Practitioner agenda (MLink-26)",
+      "description": "Access rules of the agenda routes. The full flow (three clinics, overlap, close, reopen) needs a practitioner profile, which no endpoint creates yet (SS5): it is proven by AgendaFunctionalTest.",
+      "item": [
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /logout → no session left (204, or 401 if none)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "const from = new Date(Date.now() + 86400000); from.setUTCHours(0, 0, 0, 0);",
+                  "pm.collectionVariables.set(\"agendaFrom\", from.toISOString());",
+                  "pm.collectionVariables.set(\"agendaTo\", new Date(from.getTime() + 7 * 86400000).toISOString());",
+                  "const start = new Date(from.getTime() + 2 * 86400000 + 8 * 3600000);",
+                  "pm.collectionVariables.set(\"agendaSlotStart\", start.toISOString());",
+                  "pm.collectionVariables.set(\"agendaSlotEnd\", new Date(start.getTime() + 1800000).toISOString());",
+                  "pm.collectionVariables.set(\"randomSlotId\", \"00000000-0000-4000-8000-\" + String(Date.now()).padStart(12, \"0\").slice(-12));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"204 or 401\", () => pm.expect(pm.response.code).to.be.oneOf([204, 401]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → a token for the anonymous calls",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · anonymous: agenda",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/agenda?from={{agendaFrom}}&to={{agendaTo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · anonymous: open a slot",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/practitioner/slots",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · anonymous: close a slot",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/practitioner/slots/{{randomSlotId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /login as patient.demo → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient.demo@medlink.local\",\n  \"password\": \"{{devPassword}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"PATIENT\", () => pm.expect(pm.response.json().user.roles).to.eql([\"PATIENT\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN after the login",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: agenda without dates (403, not 400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/agenda"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: open a slot with an empty body (403, not 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/practitioner/slots",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: close a slot",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/practitioner/slots/{{randomSlotId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));",
+                  "// A new practitioner: no code secret yet",
+                  "pm.collectionVariables.unset(\"totpSecret\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Keycloak (dev admin): admin token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{keycloakUrl}}/realms/master/protocol/openid-connect/token",
+            "description": "Dev only: admin / admin from compose.yaml. A fresh token: it lives one minute.",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "admin-cli"
+                },
+                {
+                  "key": "username",
+                  "value": "{{kcAdminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{kcAdminPassword}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.collectionVariables.set(\"kcToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Keycloak: a disposable practitioner (console, group /practitioners)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users",
+            "description": "A new account each run, so its code is never enrolled from an earlier run (the collection could not know that secret).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{practitionerEmail}}\",\n  \"email\": \"{{practitionerEmail}}\",\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Practitioner\",\n  \"enabled\": true,\n  \"emailVerified\": true,\n  \"groups\": [\n    \"/practitioners\"\n  ],\n  \"credentials\": [\n    {\n      \"type\": \"password\",\n      \"value\": \"{{password}}\",\n      \"temporary\": false\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"practitionerEmail\", \"postman-practitioner-\" + Date.now() + \"@example.com\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "const location = pm.response.headers.get(\"Location\");",
+                  "pm.collectionVariables.set(\"practitionerUserId\", location.substring(location.lastIndexOf(\"/\") + 1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Keycloak: the practitioner is in /practitioners only",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{practitionerUserId}}/groups"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test(\"groups = [/practitioners] (the realm adds no default group)\", () => pm.expect(pm.response.json().map(g => g.path)).to.eql([\"/practitioners\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · the password alone asks for the code (mfaSetupRequired true)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{practitionerEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"only the code markers, no user\", () => pm.expect(pm.response.json()).to.eql({ mfaRequired: true, mfaSetupRequired: true }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Mailpit: the code setup link mailed to the practitioner (valid 30 minutes)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{practitionerEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const to = pm.collectionVariables.get(\"practitionerEmail\");",
+                  "const setupMails = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to) && x.Subject === \"Configurez votre code de connexion MedLink\");",
+                  "pm.test(\"one setup mail, to the account's own address\", () => pm.expect(setupMails).to.have.length(1));",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + setupMails[0].ID, (e, res) => {",
+                  "    const link = res.json().Text.match(/configurer-code\\?token=([A-Za-z0-9_-]+)/);",
+                  "    pm.test(\"the mail links to the React setup page\", () => pm.expect(link).to.not.be.null);",
+                  "    pm.collectionVariables.set(\"enrolmentToken\", link[1]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · setup: QR code, otpauth URL and secret",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{enrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a Base32 secret\", () => pm.expect(body.secret).to.match(/^[A-Z2-7]{32}$/));",
+                  "pm.test(\"the otpauth URL holds it\", () => pm.expect(body.otpauthUrl).to.match(/^otpauth:\\/\\/totp\\/MedLink:/).and.include(\"secret=\" + body.secret));",
+                  "pm.test(\"a PNG QR code\", () => pm.expect(body.qrCode).to.match(/^data:image\\/png;base64,/));",
+                  "pm.collectionVariables.set(\"previousTotpSecret\", pm.collectionVariables.get(\"totpSecret\") || \"\");",
+                  "pm.collectionVariables.set(\"totpSecret\", body.secret);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · a second setup before the first code replaces the secret",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{enrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a Base32 secret\", () => pm.expect(body.secret).to.match(/^[A-Z2-7]{32}$/));",
+                  "pm.test(\"the otpauth URL holds it\", () => pm.expect(body.otpauthUrl).to.match(/^otpauth:\\/\\/totp\\/MedLink:/).and.include(\"secret=\" + body.secret));",
+                  "pm.test(\"a PNG QR code\", () => pm.expect(body.qrCode).to.match(/^data:image\\/png;base64,/));",
+                  "pm.collectionVariables.set(\"previousTotpSecret\", pm.collectionVariables.get(\"totpSecret\") || \"\");",
+                  "pm.collectionVariables.set(\"totpSecret\", body.secret);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · the current code opens the session (PRACTITIONER)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/verify",
+            "description": "{{totpCode}} is computed from {{totpSecret}} by the collection's pre-request script, as an authenticator app does.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"PRACTITIONER\", () => pm.expect(pm.response.json().user.roles).to.eql([\"PRACTITIONER\"]));",
+                  "pm.collectionVariables.set(\"usedTotpCode\", pm.collectionVariables.get(\"totpCode\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN after the code step",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · practitioner: agenda without dates, both fields named",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/agenda"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));",
+                  "pm.test(\"from and to named\", () => pm.expect(pm.response.json().details).to.have.keys(\"from\", \"to\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "409 · practitioner without a profile: agenda",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/agenda?from={{agendaFrom}}&to={{agendaTo}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"PRACTITIONER_PROFILE_MISSING\", () => pm.expect(pm.response.json().code).to.eql(\"PRACTITIONER_PROFILE_MISSING\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "409 · practitioner without a profile: open a slot",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/practitioner/slots",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"clinicId\": \"c1000000-0000-4000-8000-000000000001\",\n  \"startsAt\": \"{{agendaSlotStart}}\",\n  \"endsAt\": \"{{agendaSlotEnd}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"PRACTITIONER_PROFILE_MISSING\", () => pm.expect(pm.response.json().code).to.eql(\"PRACTITIONER_PROFILE_MISSING\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: a slot that is not theirs (same as one that does not exist)",
+          "request": {
+            "method": "PATCH",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/practitioner/slots/{{randomSlotId}}",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"status\": \"CLOSED\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "10 · Patient record (MLink-31)",
+      "description": "Access rules of GET /api/patients/{id}/record. The 200 needs a practitioner profile and an appointment, which no endpoint creates yet: it is proven by PatientRecordFunctionalTest.",
+      "item": [
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /logout → no session left (204, or 401 if none)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"randomPatientId\", \"00000000-0000-4000-8000-\" + String(Date.now()).padStart(12, \"0\").slice(-12));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"204 or 401\", () => pm.expect(pm.response.code).to.be.oneOf([204, 401]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · anonymous: a patient record",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/record"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → a token for the login",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /login as patient.demo → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient.demo@medlink.local\",\n  \"password\": \"{{devPassword}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"PATIENT\", () => pm.expect(pm.response.json().user.roles).to.eql([\"PATIENT\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: a patient record",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/record"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: an id that is not a UUID (403, not 400)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/not-a-uuid/record"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));",
+                  "// A new practitioner: no code secret yet",
+                  "pm.collectionVariables.unset(\"totpSecret\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Keycloak (dev admin): admin token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{keycloakUrl}}/realms/master/protocol/openid-connect/token",
+            "description": "Dev only: admin / admin from compose.yaml. A fresh token: it lives one minute.",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "admin-cli"
+                },
+                {
+                  "key": "username",
+                  "value": "{{kcAdminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{kcAdminPassword}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.collectionVariables.set(\"kcToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Keycloak: a disposable practitioner (console, group /practitioners)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users",
+            "description": "A new account each run, so its code is never enrolled from an earlier run (the collection could not know that secret).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{practitionerEmail}}\",\n  \"email\": \"{{practitionerEmail}}\",\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Practitioner\",\n  \"enabled\": true,\n  \"emailVerified\": true,\n  \"groups\": [\n    \"/practitioners\"\n  ],\n  \"credentials\": [\n    {\n      \"type\": \"password\",\n      \"value\": \"{{password}}\",\n      \"temporary\": false\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"practitionerEmail\", \"postman-practitioner-\" + Date.now() + \"@example.com\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "const location = pm.response.headers.get(\"Location\");",
+                  "pm.collectionVariables.set(\"practitionerUserId\", location.substring(location.lastIndexOf(\"/\") + 1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Keycloak: the practitioner is in /practitioners only",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{practitionerUserId}}/groups"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test(\"groups = [/practitioners] (the realm adds no default group)\", () => pm.expect(pm.response.json().map(g => g.path)).to.eql([\"/practitioners\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · the password alone asks for the code (mfaSetupRequired true)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{practitionerEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"only the code markers, no user\", () => pm.expect(pm.response.json()).to.eql({ mfaRequired: true, mfaSetupRequired: true }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Mailpit: the code setup link mailed to the practitioner (valid 30 minutes)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{practitionerEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const to = pm.collectionVariables.get(\"practitionerEmail\");",
+                  "const setupMails = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to) && x.Subject === \"Configurez votre code de connexion MedLink\");",
+                  "pm.test(\"one setup mail, to the account's own address\", () => pm.expect(setupMails).to.have.length(1));",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + setupMails[0].ID, (e, res) => {",
+                  "    const link = res.json().Text.match(/configurer-code\\?token=([A-Za-z0-9_-]+)/);",
+                  "    pm.test(\"the mail links to the React setup page\", () => pm.expect(link).to.not.be.null);",
+                  "    pm.collectionVariables.set(\"enrolmentToken\", link[1]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · setup: QR code, otpauth URL and secret",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{enrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a Base32 secret\", () => pm.expect(body.secret).to.match(/^[A-Z2-7]{32}$/));",
+                  "pm.test(\"the otpauth URL holds it\", () => pm.expect(body.otpauthUrl).to.match(/^otpauth:\\/\\/totp\\/MedLink:/).and.include(\"secret=\" + body.secret));",
+                  "pm.test(\"a PNG QR code\", () => pm.expect(body.qrCode).to.match(/^data:image\\/png;base64,/));",
+                  "pm.collectionVariables.set(\"previousTotpSecret\", pm.collectionVariables.get(\"totpSecret\") || \"\");",
+                  "pm.collectionVariables.set(\"totpSecret\", body.secret);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · a second setup before the first code replaces the secret",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{enrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a Base32 secret\", () => pm.expect(body.secret).to.match(/^[A-Z2-7]{32}$/));",
+                  "pm.test(\"the otpauth URL holds it\", () => pm.expect(body.otpauthUrl).to.match(/^otpauth:\\/\\/totp\\/MedLink:/).and.include(\"secret=\" + body.secret));",
+                  "pm.test(\"a PNG QR code\", () => pm.expect(body.qrCode).to.match(/^data:image\\/png;base64,/));",
+                  "pm.collectionVariables.set(\"previousTotpSecret\", pm.collectionVariables.get(\"totpSecret\") || \"\");",
+                  "pm.collectionVariables.set(\"totpSecret\", body.secret);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · the current code opens the session (PRACTITIONER)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/verify",
+            "description": "{{totpCode}} is computed from {{totpSecret}} by the collection's pre-request script, as an authenticator app does.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"PRACTITIONER\", () => pm.expect(pm.response.json().user.roles).to.eql([\"PRACTITIONER\"]));",
+                  "pm.collectionVariables.set(\"usedTotpCode\", pm.collectionVariables.get(\"totpCode\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: a patient who does not exist",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/record"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.collectionVariables.set(\"recordDeniedCode\", pm.response.json().code);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: an id that is not a UUID, the same answer",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/not-a-uuid/record"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"same 403 as for an unknown id\", () => pm.expect(pm.response.json().code).to.eql(pm.collectionVariables.get(\"recordDeniedCode\")));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "11 · Consultation reports (MLink-32)",
+      "description": "Access rules of GET and POST /api/patients/{id}/reports, after folder 10 (its practitioner is still logged in). The 201 and 200 need an appointment, which no endpoint creates yet: they are proven by ConsultationReportFunctionalTest.",
+      "item": [
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: the reports of a patient who does not exist",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"the record's 403\", () => pm.expect(pm.response.json().code).to.eql(pm.collectionVariables.get(\"recordDeniedCode\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: a report on a patient who does not exist (refused before the text is read)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Compte-rendu\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"the record's 403\", () => pm.expect(pm.response.json().code).to.eql(pm.collectionVariables.get(\"recordDeniedCode\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: an empty body, the same answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"the record's 403\", () => pm.expect(pm.response.json().code).to.eql(pm.collectionVariables.get(\"recordDeniedCode\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: an id that is not a UUID, the same answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/not-a-uuid/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Compte-rendu\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"the record's 403\", () => pm.expect(pm.response.json().code).to.eql(pm.collectionVariables.get(\"recordDeniedCode\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /logout → no session left (204, or 401 if none)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"randomPatientId\", \"00000000-0000-4000-8000-\" + String(Date.now()).padStart(12, \"0\").slice(-12));"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"204 or 401\", () => pm.expect(pm.response.code).to.be.oneOf([204, 401]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · anonymous: the reports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → a token for the login",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /login as patient.demo → 200",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"patient.demo@medlink.local\",\n  \"password\": \"{{devPassword}}\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"PATIENT\", () => pm.expect(pm.response.json().user.roles).to.eql([\"PATIENT\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: the reports",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: a report",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"content\": \"Compte-rendu\"\n}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: a broken body (403, not 400)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{randomPatientId}}/reports",
+            "body": {
+              "mode": "raw",
+              "raw": "{not json"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "12 · Cancellation alerts (MLink-37)",
+      "description": "Access rules of GET /api/practitioner/alerts and POST /api/practitioner/alerts/{id}/read, after folder 11 (patient.demo is still logged in). An alert needs a cancelled appointment, which no endpoint creates yet: the alert, its mail and marking it read are proven by AlertFunctionalTest, AlertCreationTest and AlertMailFunctionalTest.",
+      "item": [
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: the alerts (a practitioner route)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/alerts"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"FORBIDDEN\", () => pm.expect(pm.response.json().code).to.eql(\"FORBIDDEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · patient: mark an alert read",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/practitioner/alerts/{{randomPatientId}}/read"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"FORBIDDEN\", () => pm.expect(pm.response.json().code).to.eql(\"FORBIDDEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · GET /csrf → refresh XSRF-TOKEN",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));",
+                  "// A new practitioner: no code secret yet",
+                  "pm.collectionVariables.unset(\"totpSecret\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Keycloak (dev admin): admin token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{keycloakUrl}}/realms/master/protocol/openid-connect/token",
+            "description": "Dev only: admin / admin from compose.yaml. A fresh token: it lives one minute.",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "admin-cli"
+                },
+                {
+                  "key": "username",
+                  "value": "{{kcAdminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{kcAdminPassword}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.collectionVariables.set(\"kcToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Keycloak: a disposable practitioner (console, group /practitioners)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users",
+            "description": "A new account each run, so its code is never enrolled from an earlier run (the collection could not know that secret).",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{practitionerEmail}}\",\n  \"email\": \"{{practitionerEmail}}\",\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Practitioner\",\n  \"enabled\": true,\n  \"emailVerified\": true,\n  \"groups\": [\n    \"/practitioners\"\n  ],\n  \"credentials\": [\n    {\n      \"type\": \"password\",\n      \"value\": \"{{password}}\",\n      \"temporary\": false\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "prerequest",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.collectionVariables.set(\"practitionerEmail\", \"postman-practitioner-\" + Date.now() + \"@example.com\");"
+                ]
+              }
+            },
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "const location = pm.response.headers.get(\"Location\");",
+                  "pm.collectionVariables.set(\"practitionerUserId\", location.substring(location.lastIndexOf(\"/\") + 1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Keycloak: the practitioner is in /practitioners only",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users/{{practitionerUserId}}/groups"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "pm.test(\"groups = [/practitioners] (the realm adds no default group)\", () => pm.expect(pm.response.json().map(g => g.path)).to.eql([\"/practitioners\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · the password alone asks for the code (mfaSetupRequired true)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{practitionerEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"only the code markers, no user\", () => pm.expect(pm.response.json()).to.eql({ mfaRequired: true, mfaSetupRequired: true }));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · Mailpit: the code setup link mailed to the practitioner (valid 30 minutes)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{practitionerEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "",
+                  "const to = pm.collectionVariables.get(\"practitionerEmail\");",
+                  "const setupMails = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to) && x.Subject === \"Configurez votre code de connexion MedLink\");",
+                  "pm.test(\"one setup mail, to the account's own address\", () => pm.expect(setupMails).to.have.length(1));",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + setupMails[0].ID, (e, res) => {",
+                  "    const link = res.json().Text.match(/configurer-code\\?token=([A-Za-z0-9_-]+)/);",
+                  "    pm.test(\"the mail links to the React setup page\", () => pm.expect(link).to.not.be.null);",
+                  "    pm.collectionVariables.set(\"enrolmentToken\", link[1]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · setup: QR code, otpauth URL and secret",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{enrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a Base32 secret\", () => pm.expect(body.secret).to.match(/^[A-Z2-7]{32}$/));",
+                  "pm.test(\"the otpauth URL holds it\", () => pm.expect(body.otpauthUrl).to.match(/^otpauth:\\/\\/totp\\/MedLink:/).and.include(\"secret=\" + body.secret));",
+                  "pm.test(\"a PNG QR code\", () => pm.expect(body.qrCode).to.match(/^data:image\\/png;base64,/));",
+                  "pm.collectionVariables.set(\"previousTotpSecret\", pm.collectionVariables.get(\"totpSecret\") || \"\");",
+                  "pm.collectionVariables.set(\"totpSecret\", body.secret);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · a second setup before the first code replaces the secret",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{enrolmentToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a Base32 secret\", () => pm.expect(body.secret).to.match(/^[A-Z2-7]{32}$/));",
+                  "pm.test(\"the otpauth URL holds it\", () => pm.expect(body.otpauthUrl).to.match(/^otpauth:\\/\\/totp\\/MedLink:/).and.include(\"secret=\" + body.secret));",
+                  "pm.test(\"a PNG QR code\", () => pm.expect(body.qrCode).to.match(/^data:image\\/png;base64,/));",
+                  "pm.collectionVariables.set(\"previousTotpSecret\", pm.collectionVariables.get(\"totpSecret\") || \"\");",
+                  "pm.collectionVariables.set(\"totpSecret\", body.secret);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "practitioner setup · 200 · the current code opens the session (PRACTITIONER)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/verify",
+            "description": "{{totpCode}} is computed from {{totpSecret}} by the collection's pre-request script, as an authenticator app does.",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"PRACTITIONER\", () => pm.expect(pm.response.json().user.roles).to.eql([\"PRACTITIONER\"]));",
+                  "pm.collectionVariables.set(\"usedTotpCode\", pm.collectionVariables.get(\"totpCode\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN after the code step",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · practitioner: no unread alert yet (the default list)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/alerts"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"an empty list\", () => pm.expect(pm.response.json()).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · practitioner: all alerts (unread=false), none yet",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/alerts?unread=false"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"an empty list\", () => pm.expect(pm.response.json()).to.eql([]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · practitioner: one page at most (size=50 is the largest)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/alerts?size=50&page=0"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"a list\", () => pm.expect(pm.response.json()).to.be.an(\"array\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · practitioner: a page of 51 (the bell's list is bounded)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/alerts?size=51"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"names size\", () => pm.expect(pm.response.json().details).to.have.all.keys(\"size\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: an alert that is not theirs (same as one that does not exist)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/practitioner/alerts/{{randomPatientId}}/read"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"FORBIDDEN\", () => pm.expect(pm.response.json().code).to.eql(\"FORBIDDEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · practitioner: an id that is not a UUID, the same answer",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/practitioner/alerts/not-a-uuid/read"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"FORBIDDEN\", () => pm.expect(pm.response.json().code).to.eql(\"FORBIDDEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "POST /logout → no session left (204, or 401 if none)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"204 or 401\", () => pm.expect(pm.response.code).to.be.oneOf([204, 401]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · anonymous: the alerts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/practitioner/alerts"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
@@ -3788,6 +7312,85 @@
     {
       "key": "usedTotpCode",
       "value": ""
-    }
+    },
+    {
+      "key": "devPassword",
+      "value": "MedLink-Dev-2026!"
+    },
+    {
+      "key": "slotFrom",
+      "value": ""
+    },
+    {
+      "key": "slotTo",
+      "value": ""
+    },
+    {
+      "key": "practitionerId",
+      "value": ""
+    },
+    {
+      "key": "slotTooFar",
+      "value": ""
+    },
+    {
+      "key": "slotNextYear",
+      "value": ""
+    },
+    {
+      "key": "slotNextYearEnd",
+      "value": ""
+    },
+    {
+      "key": "bookSlotId",
+      "value": ""
+    },
+    {
+      "key": "bookedAppointmentId",
+      "value": ""
+    },
+    {
+      "key": "cancelFrom",
+      "value": ""
+    },
+    {
+      "key": "cancelTo",
+      "value": ""
+    },
+    {
+      "key": "cancelSlotId",
+      "value": ""
+    },
+    {
+      "key": "cancelAppointmentId",
+      "value": ""
+    },
+    {
+      "key": "moveFromSlotId",
+      "value": ""
+    },
+    {
+      "key": "moveToSlotId",
+      "value": ""
+    },
+    {
+      "key": "moveAppointmentId",
+      "value": ""
+    },
+    {
+      "key": "movedAppointmentId",
+      "value": ""
+    },
+    { "key": "agendaFrom", "value": "" },
+    { "key": "agendaTo", "value": "" },
+    { "key": "agendaSlotStart", "value": "" },
+    { "key": "agendaSlotEnd", "value": "" },
+    { "key": "randomSlotId", "value": "" },
+    { "key": "randomPatientId", "value": "" },
+    { "key": "recordDeniedCode", "value": "" },
+    { "key": "myBusy", "value": "" },
+    { "key": "overlapFrom", "value": "" },
+    { "key": "overlapTo", "value": "" },
+    { "key": "overlapSlotId", "value": "" }
   ]
 }

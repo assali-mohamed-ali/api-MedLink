@@ -14,7 +14,9 @@
 #      Before any wipe, the current realm is saved to .dev/realm-backups/ (no users, no secrets).
 #   5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
 #   6. Runs ./mvnw verify (unless --skip-tests).
-#   7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login.
+#   7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login
+#      (GET /api/auth/me then answers with the PATIENT role), and a practitioner.dev login that stops at the
+#      staff code step (no session without the code).
 #
 # Usage: ./scripts/setup-dev.sh [--skip-tests] [--full-stack] [--reset] [--keep-data] [--stop]
 #
@@ -133,7 +135,7 @@ stop_containers() {
 read_env() { sed -n "s/^$1=//p" "$REPO/.env" | head -n 1 | tr -d '\r'; }
 
 new_secret() { LC_ALL=C od -An -N24 -tx1 /dev/urandom | tr -d ' \n'; }
-# The staff code key (APP_MFA_ENCRYPTION_KEY): exactly 32 random bytes, in base64
+# The staff code and report keys (APP_MFA_ENCRYPTION_KEY, APP_REPORT_ENCRYPTION_KEY): exactly 32 random bytes, in base64
 new_key() { LC_ALL=C head -c 32 /dev/urandom | base64 | tr -d '\n'; }
 
 file_hash() {
@@ -278,13 +280,16 @@ if [ -f .env ]; then
 else
     tr -d '\r' < .env.example | awk \
         -v pg="$(new_secret)" -v kcdb="$(new_secret)" -v kcadmin="$(new_secret)" \
-        -v bff="$(new_secret)" -v kcapi="$(new_secret)" -v mfa="$(new_key)" -v users="$DEV_USERS_PASSWORD" '
+        -v bff="$(new_secret)" -v kcapi="$(new_secret)" -v mfa="$(new_key)" -v report="$(new_key)" -v users="$DEV_USERS_PASSWORD" \
+        -v app="$(new_secret)" '
         /^POSTGRES_PASSWORD=/       { print "POSTGRES_PASSWORD=" pg; next }
+        /^APP_DB_PASSWORD=/         { print "APP_DB_PASSWORD=" app; next }
         /^KEYCLOAK_DB_PASSWORD=/    { print "KEYCLOAK_DB_PASSWORD=" kcdb; next }
         /^KEYCLOAK_ADMIN_PASSWORD=/ { print "KEYCLOAK_ADMIN_PASSWORD=" kcadmin; next }
         /^KC_BFF_CLIENT_SECRET=/    { print "KC_BFF_CLIENT_SECRET=" bff; next }
         /^KC_ADMIN_CLIENT_SECRET=/  { print "KC_ADMIN_CLIENT_SECRET=" kcapi; next }
         /^APP_MFA_ENCRYPTION_KEY=/  { print "APP_MFA_ENCRYPTION_KEY=" mfa; next }
+        /^APP_REPORT_ENCRYPTION_KEY=/ { print "APP_REPORT_ENCRYPTION_KEY=" report; next }
         /^KC_DEV_USERS_PASSWORD=/   { print "KC_DEV_USERS_PASSWORD=" users; next }
         { print }' > .env
     chmod 600 .env
@@ -295,7 +300,7 @@ ADDED=''
 for key in $(tr -d '\r' < .env.example | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.*/\1/p'); do
     grep -q "^$key=" .env && continue
     case "$key" in
-        APP_MFA_ENCRYPTION_KEY) value="$(new_key)" ;;
+        APP_MFA_ENCRYPTION_KEY | APP_REPORT_ENCRYPTION_KEY) value="$(new_key)" ;;
         *SECRET* | *PASSWORD*) value="$(new_secret)" ;;
         *) value="$(tr -d '\r' < .env.example | sed -n "s/^$key=//p" | head -n 1)" ;;
     esac
@@ -304,7 +309,7 @@ for key in $(tr -d '\r' < .env.example | sed -n 's/^\([A-Za-z_][A-Za-z0-9_]*\)=.
 done
 [ -n "$ADDED" ] && ok "added to .env:$ADDED"
 if [ "$FULL_STACK" -eq 1 ]; then
-    for key in KC_BFF_CLIENT_SECRET KC_ADMIN_CLIENT_SECRET APP_MFA_ENCRYPTION_KEY KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD; do
+    for key in KC_BFF_CLIENT_SECRET KC_ADMIN_CLIENT_SECRET APP_MFA_ENCRYPTION_KEY APP_REPORT_ENCRYPTION_KEY KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD APP_DB_PASSWORD; do
         value="$(read_env "$key")"
         case "$value" in
             '' | change-me*) abort "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." ;;
@@ -357,6 +362,14 @@ for port in $PORTS; do
 done
 [ -n "$BUSY" ] && abort "Free these ports first:$BUSY"
 ok "ports $PORTS are free"
+
+# GitHub #57: the API's runtime role medlink_app. A new volume gets it from the init script; a volume made before
+# #57 (--keep-data) gets it here, from the same script, before the API starts. Safe to run again.
+docker compose -f "$COMPOSE_FILE" up -d --wait postgres >/dev/null || abort "docker compose -f $COMPOSE_FILE up postgres failed."
+# MSYS_NO_PATHCONV: Git Bash on Windows would rewrite the container path into a Windows one (ignored elsewhere)
+MSYS_NO_PATHCONV=1 docker compose -f "$COMPOSE_FILE" exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh ||
+    abort 'could not set up the database role medlink_app (docker/postgres/initdb/10-app-role.sh).'
+ok 'database role medlink_app ready (the API runtime role)'
 
 if [ "$FULL_STACK" -eq 1 ]; then
     KC_ADMIN_USER="$(read_env KEYCLOAK_ADMIN)"
@@ -545,13 +558,37 @@ api_login() { # $1 = password -> HTTP status of POST /api/auth/login as patient.
 STATUS="$(api_login 'Not-The-Password-1!')"
 if [ "$STATUS" = 401 ]; then ok 'login with a wrong password returns 401'; else bad "login with a wrong password returned $STATUS, expected 401"; fi
 STATUS="$(api_login "$USERS_PASSWORD")"
-API_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/users/_health")"
-if [ "$STATUS" = 200 ] && [ "$API_STATUS" = 200 ]; then
-    ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/users/_health 200 with the session'
+ME_ANSWER="$LOG_DIR/me-answer.json"
+API_STATUS="$(curl -s -o "$ME_ANSWER" -w '%{http_code}' --max-time 10 -b "$COOKIES" "$APP_URL/api/auth/me")"
+# The roles array must be exactly ["PATIENT"]: an extra role (a privileged one) or none at all fails.
+ROLES="$(tr -d ' \t\r\n' < "$ME_ANSWER" 2>/dev/null | sed -n 's/.*"roles":\[\([^]]*\)\].*/\1/p')"
+if [ "$STATUS" = 200 ] && [ "$API_STATUS" = 200 ] && [ "$ROLES" = '"PATIENT"' ]; then
+    ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/auth/me 200 with roles exactly ["PATIENT"]'
 else
-    bad "login as patient.dev: POST /api/auth/login returned $STATUS (expected 200), then /api/users/_health $API_STATUS (expected 200)"
+    bad "login as patient.dev: POST /api/auth/login returned $STATUS (expected 200), then /api/auth/me $API_STATUS with roles [$ROLES] (expected 200 with roles exactly [\"PATIENT\"])"
 fi
-rm -f "$COOKIES"
+rm -f "$COOKIES" "$ME_ANSWER"
+
+# Staff code (MLink-65): a practitioner's right password alone opens no session. The login answers 200
+# {"mfaRequired":true} and the code step comes next; until then /api/auth/me answers 401 (no session).
+STAFF_COOKIES="$LOG_DIR/staff-cookies.txt"
+STAFF_ANSWER="$LOG_DIR/staff-login-answer.json"
+rm -f "$STAFF_COOKIES" "$STAFF_ANSWER"
+curl -s -o /dev/null --max-time 10 -c "$STAFF_COOKIES" -b "$STAFF_COOKIES" "$APP_URL/api/auth/csrf"
+STAFF_XSRF="$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$STAFF_COOKIES" | head -n 1)"
+STATUS="$(curl -s -o "$STAFF_ANSWER" -w '%{http_code}' --max-time 30 -c "$STAFF_COOKIES" -b "$STAFF_COOKIES" \
+    -H "X-XSRF-TOKEN: $STAFF_XSRF" -H 'Content-Type: application/json' \
+    -d "{\"email\":\"practitioner.dev@medlink.local\",\"password\":\"$USERS_PASSWORD\"}" \
+    "$APP_URL/api/auth/login")"
+MFA_REQUIRED=false
+grep -q '"mfaRequired" *: *true' "$STAFF_ANSWER" 2>/dev/null && MFA_REQUIRED=true
+API_STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 10 -b "$STAFF_COOKIES" "$APP_URL/api/auth/me")"
+if [ "$STATUS" = 200 ] && [ "$MFA_REQUIRED" = true ] && [ "$API_STATUS" = 401 ]; then
+    ok 'staff code asked: practitioner.dev login 200 with mfaRequired, and no session before the code (/api/auth/me 401)'
+else
+    bad "login as practitioner.dev: POST /api/auth/login returned $STATUS (expected 200 with mfaRequired: $MFA_REQUIRED), then /api/auth/me $API_STATUS (expected 401, no session)"
+fi
+rm -f "$STAFF_COOKIES" "$STAFF_ANSWER"
 
 # Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
 # The smoke account is deleted afterwards (Keycloak user, then our rows).

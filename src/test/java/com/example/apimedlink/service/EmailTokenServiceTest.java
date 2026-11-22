@@ -106,8 +106,10 @@ class EmailTokenServiceTest {
 
         EmailToken row = tokens.findByTokenHash(EmailTokenService.hash(raw)).orElseThrow();
         assertThat(row.getPurpose()).isEqualTo(Purpose.MFA_ENROLMENT);
+        // + 1 µs: PostgreSQL rounds the expiry to the nearest microsecond, possibly up, and on Windows the clock
+        // may not have moved since the token was issued (seen once: 30M0.0000003S)
         assertThat(Duration.between(Instant.now(), row.getExpiresAt()))
-                .isBetween(Duration.ofMinutes(29), Duration.ofMinutes(30));
+                .isBetween(Duration.ofMinutes(29), Duration.ofMinutes(30).plusNanos(1_000));
     }
 
     @Test

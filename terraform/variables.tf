@@ -27,13 +27,25 @@ variable "db_url" {
 }
 
 variable "db_username" {
-  description = "User Postgres"
+  description = "Runtime role the API connects as (GitHub #57): medlink_app, never the schema owner"
   type        = string
   sensitive   = true
 }
 
 variable "db_password" {
-  description = "Password Postgres"
+  description = "Password of the runtime role (db_username)"
+  type        = string
+  sensitive   = true
+}
+
+variable "db_flyway_username" {
+  description = "Schema owner Flyway migrates as (GitHub #57): must differ from db_username"
+  type        = string
+  sensitive   = true
+}
+
+variable "db_flyway_password" {
+  description = "Password of the schema owner (db_flyway_username)"
   type        = string
   sensitive   = true
 }
@@ -80,6 +92,12 @@ variable "keycloak_admin_client_secret" {
 
 variable "mfa_encryption_key" {
   description = "Clé AES-256 des codes du personnel (MLink-62) : 32 octets en base64 (openssl rand -base64 32)"
+  type        = string
+  sensitive   = true
+}
+
+variable "report_encryption_key" {
+  description = "Clé AES-256 des comptes-rendus de consultation (MLink-32), différente de la clé MFA : 32 octets en base64 (openssl rand -base64 32)"
   type        = string
   sensitive   = true
 }

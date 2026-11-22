@@ -3,6 +3,7 @@ package com.example.apimedlink.config;
 import com.example.apimedlink.repository.SessionRevocationStore;
 import com.example.apimedlink.security.JsonAccessDeniedHandler;
 import com.example.apimedlink.security.JsonAuthenticationEntryPoint;
+import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.security.RouteWords;
 import com.example.apimedlink.security.SessionValidityFilter;
 import com.example.apimedlink.service.AuditService;
@@ -75,11 +76,31 @@ public class SecurityConfig {
                                 "/api/auth/register",
                                 "/api/auth/verify-email",
                                 "/api/auth/verify-email/resend",
+                                "/api/auth/account/activate",
+                                "/api/auth/account/activate/resend",
                                 "/api/auth/password",
                                 // Staff code step: the pending step login started is the guard (MLink-62/63)
                                 "/api/auth/mfa/setup",
                                 "/api/auth/mfa/verify")
                         .permitAll()
+                        // Patients only, checked before the body is read: a body Spring cannot parse would otherwise
+                        // give a non-patient the 400 of the parsing, not 403 (review on #87). The method keeps its
+                        // @PreAuthorize as well.
+                        .requestMatchers(HttpMethod.POST, "/api/appointments", "/api/appointments/**")
+                        .hasRole(Roles.PATIENT)
+                        // The role before anything reads the request: Spring converts query dates and the JSON body before
+                        // @PreAuthorize, so without this rule a patient would get 400, not 403 (MLink-26, review on #116)
+                        .requestMatchers("/api/practitioner/**")
+                        .hasRole(Roles.PRACTITIONER)
+                        // The role before Spring reads the request, so a patient never gets a 400 (MLink-31, as #116)
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/record")
+                        .hasRole(Roles.PRACTITIONER)
+                        // The reports too, before the body is read: a patient sending a bad body gets 403 (MLink-32)
+                        .requestMatchers("/api/patients/*/reports")
+                        .hasRole(Roles.PRACTITIONER)
+                        // Staff only, decided before any body is read: a patient sending a bad body gets 403, not 400
+                        .requestMatchers("/api/admin/**")
+                        .hasRole(Roles.ADMINISTRATIVE_STAFF)
                         .anyRequest()
                         .authenticated())
                 // Every logged-in call checks Keycloak still accepts the account (GitHub #28)

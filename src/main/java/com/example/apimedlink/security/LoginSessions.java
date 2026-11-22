@@ -8,6 +8,8 @@ import jakarta.servlet.http.HttpSession;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.ResponseCookie;
@@ -39,6 +41,8 @@ import org.springframework.stereotype.Component;
  */
 @Component
 public class LoginSessions {
+
+    private static final Logger log = LoggerFactory.getLogger(LoginSessions.class);
 
     /** The client registration in application.properties; the session filter renews tokens through it. */
     static final String REGISTRATION = "keycloak";
@@ -118,12 +122,39 @@ public class LoginSessions {
             session.invalidate();
         }
         holder.clearContext();
-        response.addHeader(HttpHeaders.SET_COOKIE, ResponseCookie.from(sessionCookieName, "")
+        response.addHeader(HttpHeaders.SET_COOKIE, expiredSessionCookie());
+        return refreshToken;
+    }
+
+    /**
+     * Cleans up after {@link #open} failed part-way (review of #90): {@code open} saves the security context
+     * before the authorized client, so a failure in between leaves a half-made session. That session is
+     * invalidated, the security context cleared and the cookie dropped, so nobody keeps a session without tokens.
+     * Best effort: it never throws, so the error that made the login fail is the one the caller sees.
+     */
+    public void abandon(HttpServletRequest request, HttpServletResponse response) {
+        try {
+            HttpSession session = request.getSession(false);
+            if (session != null) {
+                session.invalidate();
+            }
+        } catch (RuntimeException invalidationFailed) {
+            log.warn("Could not invalidate the session of a login that failed to open", invalidationFailed);
+        }
+        holder.clearContext();
+        try {
+            response.addHeader(HttpHeaders.SET_COOKIE, expiredSessionCookie());
+        } catch (RuntimeException cookieFailed) {
+            log.warn("Could not drop the session cookie of a login that failed to open", cookieFailed);
+        }
+    }
+
+    private String expiredSessionCookie() {
+        return ResponseCookie.from(sessionCookieName, "")
                 .path("/")
                 .maxAge(0)
                 .httpOnly(true)
                 .build()
-                .toString());
-        return refreshToken;
+                .toString();
     }
 }

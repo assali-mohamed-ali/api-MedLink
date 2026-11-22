@@ -78,7 +78,7 @@ flowchart LR
 | # | Threat | Controls (where) | Status | Open work |
 |---|---|---|---|---|
 | T1 | SQL injection | JPA with bound parameters, Bean Validation on every request DTO (`dto/`) | ✅ | |
-| T2 | Audit trail changed or deleted | triggers refuse `UPDATE`, `DELETE`, `TRUNCATE` (`V7__audit_entries.sql`, `AuditFunctionalTest`) | 🟡 | the table's owner is also the runtime role and can drop the triggers: separate roles, GitHub #57 |
+| T2 | Audit trail changed or deleted | the API connects as `medlink_app`, which may only `INSERT` and `SELECT` on `audit_entries` and owns nothing, so it cannot alter, drop or disable the triggers; Flyway alone migrates as the owner, and staging/prod refuse to start when both are the same user (`V18__app_role_grants.sql`, `docker/postgres/initdb/10-app-role.sh`, `config/DatabaseCredentialsCheck`, `RuntimeRoleGrantsTest`, `DatabaseCredentialsStartupTest`; GitHub #57). Second wall: triggers refuse `UPDATE`, `DELETE`, `TRUNCATE` (`V7__audit_entries.sql`, `AuditFunctionalTest`) | ✅ | Flyway runs inside the API, so code execution in the API process would reach the owner's password: a one-shot migration container would remove it. The dev API on the host still runs as the owner |
 | T3 | Schema changed outside review | Flyway only, `ddl-auto: validate` in every profile | ✅ | |
 | T4 | Realm changed by hand and lost or unreviewed | the realm is code (`keycloak/realm-medlink.json`), reviewed in PRs; the setup script re-imports it in dev | 🟡 | in staging and prod the console stays the source of truth after the first import |
 
@@ -96,10 +96,10 @@ flowchart LR
 | I1 | **The password passes through the API** (password grant) | sent to Keycloak at once and never stored; never logged (`LoginRequest.toString` hides it); TLS on B1 (assumption) | 🟡 accepted | the risk accepted in decision 0001; revisit if passkeys are wanted |
 | I2 | Tokens leak | kept in the server session; `KeycloakTokens.toString` hides them; ID tokens checked: signature (JWKS), issuer, `azp` (`service/KeycloakLoginClient`, `KeycloakLoginClientTest`) | ✅ | |
 | I3 | A user reads another user's data (IDOR) | `security/OwnershipGuard` checks before the lookup, the same 403 whether the id exists or not (`OwnershipFunctionalTest`) | ✅ | practitioner ↔ own patients only: with the appointment domain (MLink-97 onward) |
-| I4 | Metrics and API documentation public in production | actuator limited to `health,info,prometheus`; in staging and prod it is served only on the private management port 9000, which no compose file publishes, and the public port keeps `/livez` and `/readyz` (`{"status":"UP"}` only) (`ManagementPortIntegrationTest`, `ManagementPortConfigTest`, GitHub #49) | 🟡 | Swagger and `/v3/api-docs` still public: GitHub #65 |
+| I4 | Metrics and API documentation public in production | actuator limited to `health,info,prometheus`; in staging and prod it is served only on the private management port 9000, which no compose file publishes, and the public port keeps `/livez` and `/readyz` (`{"status":"UP"}` only) (`ManagementPortIntegrationTest`, `ManagementPortConfigTest`, GitHub #49); the Scalar UI (`/scalar`, `scalar.enabled: false`) and `/v3/api-docs` are off in staging and prod, dev only (`ApiDocsExposureIntegrationTest`, GitHub #65) | ✅ | |
 | I5 | Personal data in logs or the audit trail | no request body, query string, password or token is logged; the audit path keeps only route words and UUIDs (`security/RouteWords`) | ✅ | |
 | I6 | Internal errors leak details | one error shape, `500 INTERNAL_ERROR` without SQL or stack (`exception/GlobalExceptionHandler`, `ErrorBody`) | ✅ | |
-| I7 | Secrets in git or defaults in production | secrets from the environment only; gitleaks before commit and in CI (`secrets-scan.yml`); Keycloak client secrets have no default outside dev | 🟡 | the datasource still falls back to `myuser` / `secret` in staging and prod: GitHub #64 |
+| I7 | Secrets in git or defaults in production | secrets from the environment only; gitleaks before commit and in CI (`secrets-scan.yml`); Keycloak client secrets have no default outside dev; in staging and prod the database credentials have no default, and the dev values and placeholders (`myuser`, `secret`, `change-me...`) stop the start before anything connects (`config/DatabaseCredentialsCheck`, `DatabaseCredentialsStartupTest`); `docker-compose.yml` requires them (`scripts/compose-credentials.test.sh`) (GitHub #64) | ✅ | |
 
 ### Denial of service
 
@@ -125,7 +125,7 @@ flowchart LR
 |---|---|---|---|---|
 | O1 | A vulnerable dependency or image | Dependabot weekly; OWASP Dependency-Check fails on CVSS ≥ 7; Trivy fails on HIGH/CRITICAL; CodeQL (`.github/workflows/`) | ✅ | |
 | O2 | An unreviewed change reaches `master` | code-owner review and CodeQL required on `master` (ruleset); CODEOWNERS on security paths | ✅ | a version bump in compose is not covered by the tests (GitHub #74) |
-| O3 | Data lost | named volumes only | ❌ | backup and tested restore of both databases: GitHub #67 |
+| O3 | Data lost | daily encrypted backup of both databases, checked after writing, all-or-nothing restore, drill recorded (`scripts/db-backup.sh`, `scripts/db-restore.sh`, `docs/operations/backup-restore.md`, GitHub #67) | ✅ | RPO 24 h; the cron job and the off-host copy are set up on each server |
 | O4 | An attack goes unnoticed | Prometheus metrics and 4 alert rules | 🟡 | alerts reach no one (no Alertmanager target); no central log store |
 
 ## 5. Accepted risks
@@ -142,10 +142,9 @@ be triggered by someone else (D2).
 | Priority | Item | Tracked |
 |---|---|---|
 | 1 | MFA for admin identities (E4); the staff and practitioner second factor (S2) is in place (MLink-62/63) | GitHub #68 |
-| 1 | No default database credentials outside dev (I7) | GitHub #64 |
-| 2 | API docs not public in production (I4) | GitHub #65 |
-| 2 | Separate database roles for the audit trail (T2) | GitHub #57 |
 | 2 | Logins and account operations in the audit trail (R2) | MLink-114, MLink-72 |
+
 | 2 | Backups with a tested restore (O3) | GitHub #67 |
+| 3 | Migrations in a one-shot container, so the API holds only the runtime role's password (T2 residual) | to open (after GitHub #57) |
 | 3 | Reverse proxy described: TLS, HSTS, CSP, `TRUSTED_PROXIES` (S3, S7, D1) | Terraform GitHub #53 |
 | 3 | Alert routing and a central log store (O4) | not tracked yet |

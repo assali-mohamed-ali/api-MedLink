@@ -24,17 +24,22 @@ import org.yaml.snakeyaml.Yaml;
  * Every service they share must be the same service: same image, command, container ports, mounts,
  * healthcheck, dependencies and environment. Only the secrets differ: docker-compose.yml requires them
  * ({@code ${X:?...}}), compose.yaml gives the dev value. Any other value is the default of the full stack.
+ * Dev-only services ({@code DEV_ONLY}) are left out of the comparison: they exist in compose.yaml alone.
  */
 class ComposeFilesTest {
 
     private static final Set<String> FULL_STACK_ONLY = Set.of("app", "prometheus");
+
+    // Dev-only services exist in compose.yaml alone, on purpose: they must never reach the full stack or a
+    // deployment (keycloak-dev-users, review on PR #87, checked by RealmImportSeparationTest).
+    private static final Set<String> DEV_ONLY = Set.of("keycloak-dev-users");
 
     // ${NAME:-default}, ${NAME:?message}, ${NAME}; $$ is a literal $ for the container.
     private static final Pattern VARIABLE = Pattern.compile("\\$\\$|\\$\\{(\\w+)(?::([-?])([^}]*))?}");
 
     private static final String REQUIRED = "<required>";
 
-    private final Map<String, Map<String, Object>> dev = services("compose.yaml");
+    private final Map<String, Map<String, Object>> dev = withoutDevOnly(services("compose.yaml"));
     private final Map<String, Map<String, Object>> full = services("docker-compose.yml");
 
     @Test
@@ -79,6 +84,28 @@ class ComposeFilesTest {
         assertThat(topLevelVolumes("docker-compose.yml")).isEqualTo(namedVolumes(full));
     }
 
+    /**
+     * The API container sees only what docker-compose.yml passes it: a variable the configuration reads but
+     * the file does not pass silently takes its fallback, whatever .env says. CORS_ALLOWED_ORIGINS and
+     * TRUSTED_PROXIES were in .env.prod.example but never reached the container: prod would allow only the
+     * placeholder origin and, behind the proxy, every client would share the proxy's IP (one rate-limit bucket).
+     */
+    @Test
+    void theApiContainerReceivesEveryVariableItsConfigurationReads() throws IOException {
+        Set<String> read = new TreeSet<>();
+        Pattern placeholder = Pattern.compile("\\$\\{([A-Z][A-Z0-9_]*)");
+        for (String file : List.of("application.properties", "application-staging.yml", "application-prod.yml")) {
+            Matcher matcher = placeholder.matcher(Files.readString(Path.of("src/main/resources", file)));
+            while (matcher.find()) {
+                read.add(matcher.group(1));
+            }
+        }
+
+        read.removeAll(environment(full.get("app")).keySet());
+
+        assertThat(read).as("variables the API reads that docker-compose.yml does not pass to the app container").isEmpty();
+    }
+
     @Test
     void springBootComposeIntegrationIsPinnedToTheDevFile() throws IOException {
         Properties properties = new Properties();
@@ -101,6 +128,12 @@ class ComposeFilesTest {
     @SuppressWarnings("unchecked")
     private static Map<String, Map<String, Object>> services(String file) {
         return (Map<String, Map<String, Object>>) load(file).get("services");
+    }
+
+    private static Map<String, Map<String, Object>> withoutDevOnly(Map<String, Map<String, Object>> services) {
+        Map<String, Map<String, Object>> shared = new LinkedHashMap<>(services);
+        shared.keySet().removeAll(DEV_ONLY);
+        return shared;
     }
 
     private static Set<String> topLevelVolumes(String file) {

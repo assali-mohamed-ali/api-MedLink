@@ -15,7 +15,9 @@
        Before any wipe, the current realm is saved to .dev\realm-backups\ (no users, no secrets).
     5. Verifies the imported realm through the Keycloak admin API (roles, groups, client, secret, users).
     6. Runs ./mvnw verify (unless -SkipTests).
-    7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login.
+    7. Starts the API and runs smoke tests, including a real login as patient.dev through POST /api/auth/login
+       (GET /api/auth/me then answers with the PATIENT role), and a practitioner.dev login that stops at the
+       staff code step (no session without the code).
 
     Run from PowerShell (5.1 or 7):
         powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1
@@ -139,7 +141,7 @@ function New-Secret {
     return (-join ($bytes | ForEach-Object { $_.ToString('x2') }))
 }
 
-# The staff code key (APP_MFA_ENCRYPTION_KEY): exactly 32 random bytes, in base64
+# The staff code and report keys (APP_MFA_ENCRYPTION_KEY, APP_REPORT_ENCRYPTION_KEY): exactly 32 random bytes, in base64
 function New-Key {
     $bytes = New-Object byte[] 32
     [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
@@ -283,11 +285,13 @@ if (Test-Path '.env') {
     $content = $content -replace "`r`n", "`n"
     $generated = @{
         POSTGRES_PASSWORD       = New-Secret
+        APP_DB_PASSWORD         = New-Secret
         KEYCLOAK_DB_PASSWORD    = New-Secret
         KEYCLOAK_ADMIN_PASSWORD = New-Secret
         KC_BFF_CLIENT_SECRET    = New-Secret
         KC_ADMIN_CLIENT_SECRET  = New-Secret
         APP_MFA_ENCRYPTION_KEY  = New-Key
+        APP_REPORT_ENCRYPTION_KEY = New-Key
         KC_DEV_USERS_PASSWORD   = $DevUsersPassword
     }
     foreach ($key in $generated.Keys) {
@@ -303,14 +307,14 @@ $added = @()
 foreach ($key in (Read-DotEnv '.env.example').Keys) {
     if ($envValues.ContainsKey($key)) { continue }
     $value = (Read-DotEnv '.env.example')[$key]
-    if ($key -eq 'APP_MFA_ENCRYPTION_KEY') { $value = New-Key }
+    if ($key -eq 'APP_MFA_ENCRYPTION_KEY' -or $key -eq 'APP_REPORT_ENCRYPTION_KEY') { $value = New-Key }
     elseif ($key -like '*SECRET*' -or $key -like '*PASSWORD*') { $value = New-Secret }
     [System.IO.File]::AppendAllText((Join-Path $Repo '.env'), "`n$key=$value", (New-Object System.Text.UTF8Encoding($false)))
     $added += $key
 }
 if ($added) { Write-Ok "added to .env: $($added -join ', ')" }
 $envValues = Read-DotEnv '.env'
-foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KC_ADMIN_CLIENT_SECRET', 'APP_MFA_ENCRYPTION_KEY', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD') {
+foreach ($key in 'KC_BFF_CLIENT_SECRET', 'KC_ADMIN_CLIENT_SECRET', 'APP_MFA_ENCRYPTION_KEY', 'APP_REPORT_ENCRYPTION_KEY', 'KEYCLOAK_DB_PASSWORD', 'KEYCLOAK_ADMIN_PASSWORD', 'KC_DEV_USERS_PASSWORD', 'APP_DB_PASSWORD') {
     if (-not $envValues[$key] -or $envValues[$key] -like 'change-me*') {
         if ($FullStack) { Stop-Setup "$key in .env is empty or still 'change-me'. Fill it in, or delete .env to regenerate it." }
     }
@@ -353,6 +357,14 @@ foreach ($port in $ports) {
 }
 if ($busy) { Stop-Setup ("Free these ports first:`n  " + ($busy -join "`n  ")) }
 Write-Ok "ports $($ports -join ', ') are free"
+
+# GitHub #57: the API's runtime role medlink_app. A new volume gets it from the init script; a volume made before
+# #57 (-KeepData) gets it here, from the same script, before the API starts. Safe to run again.
+Invoke-Native docker @('compose', '-f', $composeFile, 'up', '-d', '--wait', 'postgres')
+if (-not (Test-Quiet "docker compose -f $composeFile exec -T postgres bash /docker-entrypoint-initdb.d/10-app-role.sh")) {
+    Stop-Setup 'could not set up the database role medlink_app (docker/postgres/initdb/10-app-role.sh).'
+}
+Write-Ok 'database role medlink_app ready (the API runtime role)'
 
 if ($FullStack) {
     $kcAdminUser = $envValues['KEYCLOAK_ADMIN']; if (-not $kcAdminUser) { $kcAdminUser = 'admin' }
@@ -524,10 +536,29 @@ if ($status -eq 401) { Write-Ok 'login with a wrong password returns 401' } else
 [System.IO.File]::WriteAllText($loginFile, (@{ email = 'patient.dev@medlink.local'; password = $usersPassword } | ConvertTo-Json -Compress), $utf8)
 $status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $cookies -b $cookies -H "X-XSRF-TOKEN: $loginXsrf" `
     -H 'Content-Type: application/json' --data-binary "@$loginFile" "$AppUrl/api/auth/login")
-$apiStatus = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -b $cookies "$AppUrl/api/users/_health")
-if ($status -eq 200 -and $apiStatus -eq 200) { Write-Ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/users/_health 200 with the session' }
-else { Write-Bad "login as patient.dev: POST /api/auth/login returned $status (expected 200), then /api/users/_health $apiStatus (expected 200)" }
-Remove-Item $cookies, $loginFile -Force -ErrorAction SilentlyContinue
+$meAnswer = Join-Path $LogDir 'me-answer.json'
+$apiStatus = [int](& curl.exe -s -o $meAnswer -w '%{http_code}' --max-time 10 -b $cookies "$AppUrl/api/auth/me")
+# The roles array must be exactly ["PATIENT"]: an extra role (a privileged one) or none at all fails.
+$roles = ''
+try { $roles = (@((Get-Content $meAnswer -Raw -ErrorAction Stop | ConvertFrom-Json).user.roles) | ForEach-Object { "`"$_`"" }) -join ',' } catch { }
+if ($status -eq 200 -and $apiStatus -eq 200 -and $roles -ceq '"PATIENT"') { Write-Ok 'end-to-end login as patient.dev works: POST /api/auth/login 200, then /api/auth/me 200 with roles exactly ["PATIENT"]' }
+else { Write-Bad "login as patient.dev: POST /api/auth/login returned $status (expected 200), then /api/auth/me $apiStatus with roles [$roles] (expected 200 with roles exactly [`"PATIENT`"])" }
+
+# Staff code (MLink-65): a practitioner's right password alone opens no session. The login answers 200
+# {"mfaRequired":true} and the code step comes next; until then /api/auth/me answers 401 (no session).
+$staffCookies = Join-Path $LogDir 'staff-cookies.txt'
+$staffAnswer = Join-Path $LogDir 'staff-login-answer.json'
+Remove-Item $staffCookies, $staffAnswer -Force -ErrorAction SilentlyContinue
+& curl.exe -s -o NUL --max-time 10 -c $staffCookies -b $staffCookies "$AppUrl/api/auth/csrf"
+$staffXsrf = Get-Content $staffCookies | Where-Object { $_ -match "`tXSRF-TOKEN`t" } | ForEach-Object { ($_ -split "`t")[6] } | Select-Object -First 1
+[System.IO.File]::WriteAllText($loginFile, (@{ email = 'practitioner.dev@medlink.local'; password = $usersPassword } | ConvertTo-Json -Compress), $utf8)
+$status = [int](& curl.exe -s -o $staffAnswer -w '%{http_code}' --max-time 30 -c $staffCookies -b $staffCookies -H "X-XSRF-TOKEN: $staffXsrf" `
+    -H 'Content-Type: application/json' --data-binary "@$loginFile" "$AppUrl/api/auth/login")
+$mfaRequired = (Test-Path $staffAnswer) -and ((Get-Content $staffAnswer -Raw) -match '"mfaRequired"\s*:\s*true')
+$apiStatus = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -b $staffCookies "$AppUrl/api/auth/me")
+if ($status -eq 200 -and $mfaRequired -and $apiStatus -eq 401) { Write-Ok 'staff code asked: practitioner.dev login 200 with mfaRequired, and no session before the code (/api/auth/me 401)' }
+else { Write-Bad "login as practitioner.dev: POST /api/auth/login returned $status (expected 200 with mfaRequired: $mfaRequired), then /api/auth/me $apiStatus (expected 401, no session)" }
+Remove-Item $cookies, $loginFile, $meAnswer, $staffCookies, $staffAnswer -Force -ErrorAction SilentlyContinue
 
 # Signup end to end: CSRF cookie, register, the mail reaches Mailpit, its link verifies the account.
 # The smoke account is deleted afterwards (Keycloak user, then our rows). JSON bodies go through

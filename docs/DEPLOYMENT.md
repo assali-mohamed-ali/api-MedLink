@@ -30,29 +30,34 @@ below in each environment, so the same workflow reads different hosts and secret
 | `DEPLOY_USER` | variable | SSH user allowed to run Docker Compose |
 | `DEPLOY_PATH` | variable | Absolute directory for `docker-compose.yml`, `.env`, `keycloak/`, `monitoring/` |
 | `DEPLOY_HEALTH_URL` | variable | Full `/readyz` URL on the API's public port, reachable **from the GitHub runner** (e.g. `https://<api-host>/readyz`); `/actuator/health` is on the private management port in staging and prod |
-| `DEPLOY_SSH_KEY` | secret | Private ed25519 key of the deploy user |
-| `DEPLOY_KNOWN_HOSTS` | secret | Pinned host key line(s), preferably hashed |
-| `DEPLOY_ENV_FILE` | secret | Full content of `.env.staging` / `.env.prod` (see below) |
+| `DEPLOY_SSH_KEY` | secret | Private ed25519 key of the deploy user (the dashboard falls back to it only until its Vault path is seeded) |
+| `DEPLOY_KNOWN_HOSTS` | secret | Pinned host key line(s), preferably hashed (same fallback) |
+| `VAULT_ADDR` | variable | Dashboard repository only: optional Vault address; defaults to `https://56.228.74.131.sslip.io` |
 
-Create repository secret `PROMOTION_TOKEN` in **Settings → Secrets and variables → Actions**. Use a fine-grained PAT
-restricted to this repository with:
-- **Contents:** read/write (merge PRs and create release tags)
-- **Pull requests:** read/write (open and merge promotion/release PRs)
-- **Issues:** read/write (Release Please labels and release metadata)
-- **Checks** and **Commit statuses:** read (wait for PR workflow checks)
+The API's non-secret settings are in `deploy/env/staging.env` and `deploy/env/production.env`; the API gets its
+application secrets from Vault (`medlink/<env>/api`). The dashboard's SSH bundle comes from Vault
+(`medlink/<env>/front`) with the environment secrets above as fallback. There is no `DEPLOY_ENV_FILE` any more.
 
-The token is used only by workflow automation. Do not put it in an environment secret: the release and promotion
-workflows need it before selecting a deployment environment.
+Optional repository variables `STAGING_PUBLIC_URL` and `PRODUCTION_PUBLIC_URL` override the smoke-test base URLs
+(defaults: `https://13.51.30.39.sslip.io` and `https://56.228.94.12.sslip.io`).
 
-Create repository variable `ENABLE_AUTO_PROMOTION` under **Settings → Secrets and variables → Actions → Variables**.
-Leave it unset or set it to `false` during the initial migration. Only set it to the string `true` after `staging` and `prod`
-have been deliberately reconciled and the workflows, token, environments, and required checks have been verified. The
-promotion jobs, tag-based production deployment, and Release Please job are disabled unless this flag is `true`.
+Create repository secret `CROSS_REPO_TOKEN` in **Settings → Secrets and variables → Actions**. A fine-grained PAT with
+**Actions: read** on `assali-mohamed-ali/api-MedLink` and `assali-mohamed-ali/medlink-dashboard` lets each gate read the
+other repository's workflow jobs. The repositories are public, so the gate also works without it, but GitHub's
+unauthenticated rate limit is much lower.
 
-For **fully automatic promotion**, do not configure required reviewers on the `production` environment.
-The workflow is gated by successful staging deployment/smoke checks, PR checks on the promotion and release PRs,
-and a production build/security scan from a lowercase `v*` tag. Add a reviewer gate only if you intentionally want
-production to pause for a human approval.
+Create repository variable `AUTO_DEPLOY_PROD` under **Settings → Secrets and variables → Actions → Variables**.
+Leave it unset to deploy the verified staging image to production automatically after both repositories' staging
+deployments and smoke tests pass; set it to `false` to pause automatic production deployment.
+
+`ENABLE_AUTO_PROMOTION` and `PROMOTION_TOKEN` are the legacy release path. They are only needed when
+`AUTO_DEPLOY_PROD=false` and you want the old `staging -> prod` PR, Release Please and tag-based deployment chain.
+The legacy PR path also needs a fine-grained PAT with **Contents**, **Pull requests**, **Issues**, **Checks** and
+**Commit statuses** access.
+
+For **fully automatic promotion**, do not configure required reviewers on the `production` environment. The
+auto-prod job waits for the API and dashboard staging deploy/smoke jobs, verifies the image signature and deploys
+the same digest. Add a reviewer gate only if you intentionally want production to pause for a human approval.
 
 Generate the host-key entry and verify its fingerprint through an independent channel before storing
 it:
@@ -62,15 +67,22 @@ ssh-keyscan -H "$DEPLOY_HOST"
 ssh-keygen -lf <(ssh-keyscan -H "$DEPLOY_HOST" 2>/dev/null)
 ```
 
-## Environment file
+## Environment settings and secrets
 
-`DEPLOY_ENV_FILE` is the **content**, not a path. Start from `.env.staging.example` or
-`.env.prod.example`, fill every `change-me`, and store it as the environment secret. It must contain
-`SPRING_PROFILES_ACTIVE=staging` or `prod`; the workflow rejects a file without it.
+The non-secret settings live in `deploy/env/staging.env` and `deploy/env/production.env`. The workflow renders them
+with the Vault secrets and copies the result to the host as `.env`; do not set `APP_IMAGE` in those files, because the
+workflow appends the immutable digest. `SPRING_PROFILES_ACTIVE` must be `staging` or `prod`.
 
-Do not set `APP_IMAGE`: the workflow appends the immutable image reference for this run. The values
-must match the compose service names (`postgres`, `keycloak`, `keycloak-db`, `mailpit`) and the
-Keycloak realm placeholders. Keep the SMTP and Keycloak secrets only in this secret, never in git.
+The API reads `medlink/<env>/api` from Vault with GitHub OIDC (`api-staging`/`api-production`), then deletes its
+temporary token. The dashboard reads `medlink/<env>/front` (`front-staging`/`front-production`). See
+`docs/operations/vault.md` for seeding and rotation. Never put a secret in `deploy/env/`, git or a compose file.
+
+Database (GitHub #64, #57): `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` (the schema owner, used by Flyway
+only) and `APP_DB_PASSWORD` (the API's runtime role `medlink_app`) are required: `docker compose` stops without one.
+`SPRING_FLYWAY_USER` / `SPRING_FLYWAY_PASSWORD` need no line: `docker-compose.yml` takes them from `POSTGRES_USER` /
+`POSTGRES_PASSWORD`. The deploy action copies `docker/postgres/initdb/10-app-role.sh` to the server and runs it on
+every deploy, after the database is up and before the API starts, so a volume made before #57 gets the role's login
+too (the script is safe to run again). A new volume also gets it from the image's init.
 
 `APP_MFA_ENCRYPTION_KEY` seals the practitioners' and staff members' code secrets (MLink-62). Generate it once
 per environment with `openssl rand -base64 32` (32 bytes, base64) and keep it with the other secrets: the API
@@ -100,24 +112,24 @@ After the rollout health check, a separate runner checks:
 Any failure blocks promotion. The checks run from GitHub-hosted runners, so `DEPLOY_HEALTH_URL` must be reachable from
 the public internet or an equivalent runner network.
 
-### 4. Promote staging to prod
+### 4. Deploy production from the verified staging image
 
-When the staging smoke checks pass, the workflow uses `PROMOTION_TOKEN` to open or update a PR from `staging` to
-`prod`. It waits for that PR's checks to finish successfully and merges it as a merge commit. Merge commits preserve
-the original Conventional Commit history for version calculation.
+After each repository's staging smoke test, its gate waits for the other repository's `deploy-staging` and
+`smoke-staging` jobs at the current staging HEAD. The gate also requires `staging` to contain `master`; a stale staging
+branch cannot deploy to production. Both gates check the individual jobs, not the other workflow's overall conclusion,
+so the two waits cannot deadlock.
 
-### 5. Calculate and publish the release
+When both repositories are green, each auto-prod job verifies the Cosign signature and deploys the **same staging
+digest** to the `production` environment, then runs the production smoke test. `AUTO_DEPLOY_PROD=false` pauses this
+step without changing the staging deployment.
 
-A push to `prod` runs Release Please. It uses Conventional Commits to calculate the next version and opens a release PR
-that updates the Maven version in `pom.xml` and the `CHANGELOG.md`. The workflow waits for the release PR checks, then
-merges it automatically. Once the release PR is merged, Release Please creates a lowercase `vX.Y.Z` tag and GitHub
-Release. The workflow also opens a checked PR syncing release metadata back from `prod` to `staging`, so the next
-staging promotion does not revert the Maven version.
+### 5. Legacy release path
 
-The tag triggers a fresh production build: Maven verification, image scan, SBOM, provenance attestation, Cosign signing,
-signature verification, and deployment by immutable digest. The release image is rebuilt from the versioned release commit
-rather than reusing the staging digest, because the release PR changes `pom.xml` and the changelog. The application code
-must have passed both staging tests and the production tag build/security gate.
+With `AUTO_DEPLOY_PROD=false` and `ENABLE_AUTO_PROMOTION=true`, the old path remains available: `PROMOTION_TOKEN` opens
+or updates a `staging -> prod` PR, waits for its checks and merges it. Release Please then calculates the version from
+Conventional Commits, opens and merges its release PR, and creates a lowercase `vX.Y.Z` tag. The tag triggers a fresh
+production build (verify, scan, SBOM, attest, sign) followed by tag-based deployment. This path is separate from the
+automatic staging-digest deployment.
 
 ### Version rules
 
@@ -134,22 +146,25 @@ branch can contain a feature, a fix, or a refactor, so it is not automatically a
 ## First deployment and one-time migration
 
 1. Create the `staging` and `production` environments and configure all variables/secrets in the table above.
-2. Add the repository secret `PROMOTION_TOKEN` and keep `ENABLE_AUTO_PROMOTION` false until the migration is complete.
+2. Seed both Vault paths (`seed-env.sh` and `seed-front.sh`) or keep the GitHub Environment fallback secrets;
+   set `AUTO_DEPLOY_PROD=false` until the first staging deployment has been reviewed.
 3. Prepare the hosts: Docker Engine, Compose v2, deploy user, `DEPLOY_PATH`, reverse proxy, DNS and persistent volumes.
-4. Confirm the release-pipeline workflows/configuration are present on `staging` and `prod`, not only on `master`.
+4. Confirm the workflows/configuration are present on `staging` and `prod`, not only on `master`.
 5. Configure branch rules for `staging` and `prod`:
    - Require PRs and successful CI/security checks (at minimum `CI / build-test`, `CD / Verify, build and scan exact image`,
      and `PR title / conventional-title` where those checks apply).
    - Permit merge commits, because staging promotions preserve the Conventional Commit history.
-   - With this PAT-based full-automation design, do not require reviewers on `staging` or `prod`, or on the `production` environment. Otherwise the bot cannot merge `staging -> prod` promotion and `prod -> staging` version-sync PRs. Keep PR and required CI/security checks enabled. If mandatory human review must remain, use a dedicated GitHub App with narrowly scoped ruleset bypass for automation PRs.
-6. Reconcile the existing `master`, `staging`, and `prod` branch histories in reviewed PRs before enabling automatic
-   production promotion. They currently diverge; do **not** blindly merge the entire legacy difference into production.
-   The first migration must be deliberately reviewed and tested on staging.
-7. Once the branches are reconciled, merge a feature PR into `staging`. That starts the deployment, smoke gate, staging-to-prod
-   promotion, release PR, version bump, tag, and production deployment sequence.
+   - Keep required checks enabled. For automatic production deployment, do not require reviewers on the `production`
+     environment; add a reviewer gate only if production must pause for a human.
+6. Reconcile the existing `master`, `staging`, and `prod` branch histories in reviewed PRs before relying on
+   automatic production deployment. They currently diverge; do **not** blindly merge the entire legacy difference into
+   production. The first migration must be deliberately reviewed and tested on staging.
+7. Merge a feature PR into `staging` in both repositories. Each workflow deploys and smoke-tests staging, its gate waits
+   for the other repository, and (with `AUTO_DEPLOY_PROD` unset) each deploys the verified digest to production.
 
-The workflows use `PROMOTION_TOKEN` instead of `GITHUB_TOKEN` to create PRs that must trigger other workflows automatically.
-GitHub suppresses most workflow runs caused by `GITHUB_TOKEN` events; using a PAT is required for this chain. See
+On the legacy path, the workflows use `PROMOTION_TOKEN` instead of `GITHUB_TOKEN` to create PRs that must trigger
+other workflows automatically. GitHub suppresses most workflow runs caused by `GITHUB_TOKEN` events; using a PAT is
+required for that chain. See
 [GitHub's workflow-triggering guidance](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/trigger-a-workflow).
 
 ## Rollback
@@ -198,8 +213,10 @@ docker compose --env-file .env -f docker-compose.yml ps
 - The deploy key is dedicated, mode `600`, and only the runner writes it for the job.
 - The environment file is copied with mode `600`; the GHCR token is piped to `docker login --password-stdin`
   and is never printed.
-- Secrets live in GitHub Environments, not in the repository or the compose file.
-- Production deployments are tag-only (`v*`); keep branch protections and required CI/security checks enabled even when the reviewer gate is disabled for full automation.
+- Application secrets live in Vault; the dashboard's SSH bundle uses GitHub Environment secrets only as a fallback.
+  No secret is in the repository or the compose file.
+- Automatic production deployment uses the verified staging digest and requires both repositories' staging gates.
+  Keep branch protections and required CI/security checks enabled even when the reviewer gate is disabled.
 - The GHCR package can stay private; the target logs in per deployment.
 - Staging and prod serve Actuator (metrics, `/actuator/health`) only on the management port **9000**. Never publish it
   (no `9000:` under `ports:`, no proxy route, no firewall opening): Prometheus reaches it as `app:9000` on the

@@ -39,7 +39,8 @@ cd api-MedLink
 | `powershell -ExecutionPolicy Bypass -File .\scripts\setup-dev.ps1` | `./scripts/setup-dev.sh` |
 
 The script creates `.env` with random secrets, starts Postgres, Keycloak and Mailpit, checks the realm, runs
-the tests, starts the API and logs in as `patient.dev` to prove the whole chain works. Add `-SkipTests` /
+the tests, starts the API and logs in as `patient.dev` to prove the whole chain works (`/api/auth/me` answers with the
+roles exactly `["PATIENT"]`); it also checks that `practitioner.dev` is asked for the staff code (no session on the password alone). Add `-SkipTests` /
 `--skip-tests` for a faster run. **Re-run it after every `git pull`**: it keeps your Keycloak in step with the
 team's realm file. All options: [§8](#8-dev-setup-in-detail).
 
@@ -102,6 +103,7 @@ sequenceDiagram
 | `POST /api/auth/login` | anyone | 200 (`user`, or `mfaRequired` for practitioners and staff) · 401 `INVALID_CREDENTIALS` · 403 `EMAIL_NOT_VERIFIED` / `ACCOUNT_DISABLED` |
 | `POST /api/auth/mfa/setup` | at the code step, `{token}` from the mailed link | 200 QR code, otpauth URL, secret · 401 · 409 `MFA_ALREADY_ENROLLED` · 400 `VALIDATION_FAILED` / `INVALID_TOKEN` · 410 `TOKEN_EXPIRED` |
 | `POST /api/auth/mfa/verify` | at the code step | 200 `user` + session · 400 · 401 `INVALID_CODE` · 423 `MFA_LOCKED` |
+| `GET /api/auth/me` | logged in | 200 `user` (the login's user object, from the session) · 401 `UNAUTHENTICATED` |
 | `POST /api/auth/logout` | logged in | 204 |
 | `GET /api/users` | staff | 200 |
 | `GET /api/users/{id}` | the user themself, or staff | 200 · 403 for anyone else, whether the id exists or not |
@@ -190,10 +192,11 @@ Tasks live in YouTrack, project `MLink` (https://medlink.youtrack.cloud).
 5. **Open the product PR against `staging`** (after the release-pipeline migration described in
    [Deployment](docs/DEPLOYMENT.md)). Use a Conventional Commit title such as `feat: add appointment booking`.
    The pipeline tests and scans the PR, deploys merged `staging` commits, then runs post-deployment smoke tests.
-6. **Promotion:** when staging smoke tests pass, automation opens a `staging -> prod` PR, runs its checks, and
-   merges it automatically. Release Please then opens a Maven release PR, bumps `pom.xml` and `CHANGELOG.md`,
-   and merges it after checks pass. The resulting `vX.Y.Z` tag builds/scans/signs the release image and deploys it
-   to production. A failed gate blocks the next step.
+6. **Promotion:** after the API and dashboard staging deploy/smoke jobs both pass, automation deploys the same
+   verified digest to production, unless repository variable `AUTO_DEPLOY_PROD=false`. The gate requires staging
+   to contain `master`, so a stale staging branch cannot reach production. A failed gate blocks the next step.
+   The legacy path (behind `AUTO_DEPLOY_PROD=false` and `ENABLE_AUTO_PROMOTION=true`) keeps the `staging -> prod`
+   PR, Release Please Maven/CHANGELOG release, and `vX.Y.Z` tag deployment.
 7. **AI disclosure and review:** if an AI tool helped, tick *"J'ai utilisé des outils d'IA générative…"* and
    tick *"Je confirme avoir relu…"* yourself only after reviewing the changes. Both must be in the same state.
    Keep code-owner review and CodeQL on the setup/configuration PRs; fully automatic product promotion requires
@@ -226,17 +229,18 @@ them like any PR: compose images are not what the tests use, so a green CI prove
 |---|---|
 | PR to `staging` | CI, PR-title validation, and CD build/image security scan run; nothing is deployed from the PR |
 | Push to `staging` | Verify, build, scan, publish by commit SHA, attest/sign, deploy by immutable digest, smoke-test |
-| Staging smoke-test success | Open `staging -> prod` PR; wait for checks; merge automatically |
-| Push to `prod` | Release Please determines the next SemVer version from Conventional Commits and opens/updates a release PR |
-| Release PR merged | Create `vX.Y.Z` tag and GitHub Release; sync release metadata back to staging |
-| Push of `vX.Y.Z` | Build/test/scan the release, publish SBOM/provenance, sign image digest, deploy production by immutable digest |
+| Staging smoke-test success | Wait for the other repository's `deploy-staging`/`smoke-staging` jobs; deploy the same digest to production unless `AUTO_DEPLOY_PROD=false` |
+| Push to `prod` | Legacy path: Release Please determines the next SemVer version and opens/updates a release PR |
+| Release PR merged | Legacy path: create `vX.Y.Z` tag and GitHub Release; sync release metadata back to staging |
+| Push of `vX.Y.Z` | Legacy path: build/test/scan the release, publish SBOM/provenance, sign, deploy production by immutable digest |
 
-Production secrets live in GitHub Environments, never in git. Configure the `staging` and `production` environments,
-the repository secret `PROMOTION_TOKEN`, and branch/ruleset checks as described in
-[Deployment](docs/DEPLOYMENT.md). Production deploys only from lowercase `v*` tags; the legacy uppercase
-`V1.0.0` / `V1.0.1` tags are historical and are not used for new automated releases.
+Application secrets live in Vault; the dashboard's SSH bundle uses GitHub Environment secrets only as a fallback.
+Configure the `staging` and `production` environments, repository secret `CROSS_REPO_TOKEN` (optional for public
+repositories, needed for reliable rate limits), repository variable `AUTO_DEPLOY_PROD`, and branch/ruleset checks as
+described in [Deployment](docs/DEPLOYMENT.md). `PROMOTION_TOKEN` and `ENABLE_AUTO_PROMOTION` are only for the legacy
+release path.
 
-**One-time migration warning:** the current `master`, `staging`, and `prod` branches have diverged. Keep repository variable `ENABLE_AUTO_PROMOTION` unset/false until the workflow files are carried across and branch baselines are deliberately reconciled in reviewed PRs. This PR adds
+**One-time migration warning:** the current `master`, `staging`, and `prod` branches have diverged. Keep repository variable `AUTO_DEPLOY_PROD=false` until the workflow files are carried across and branch baselines are deliberately reconciled in reviewed PRs. This PR adds
 the workflow/configuration on `master` only. Do not expect automation to run on `staging` or `prod` until these
 files are carried there and the branch baselines are reconciled in reviewed PRs. Do not blindly auto-merge the full
 legacy branch difference into production. See the migration checklist in [Deployment](docs/DEPLOYMENT.md).
@@ -307,6 +311,11 @@ Volumes: `pgdata` (app database) and `keycloak-db-data` (Keycloak).
 
 After checking out a branch with other migrations, re-run with `-Reset` if Flyway refuses to start.
 
+Database roles (GitHub #57): Flyway migrates as the owner (`myuser` / `POSTGRES_USER`), the API connects as
+`medlink_app` (`APP_DB_PASSWORD`, added to `.env` by the script). A volume made before #57 gets the role from the
+script on the next run, so no `-Reset` is needed. In setup A the API on the host still connects as the owner (Spring
+Boot's compose integration); setup B, the tests and the servers use `medlink_app`.
+
 </details>
 
 <details>
@@ -336,6 +345,7 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 | `app.mfa.encryption-key must be base64` or `must be 32 bytes` at startup | `APP_MFA_ENCRYPTION_KEY` still holds the `.env.example` placeholder: replace it with `openssl rand -base64 32` (32 random bytes in base64), or run the setup script |
 | roles look wrong, or `staff.dev` cannot log in | your Keycloak holds an old realm: re-run the setup script, or `-Reset` |
 | 401 with the right password | 5 wrong passwords lock the account for 15 minutes, answered like a wrong password: wait, or unlock it in the console |
+| does the lockout work? | `scripts/check-lockout.sh` on the running dev stack: 5 wrong passwords, then the right one must be refused; prints `PASS`/`FAIL` and unlocks `patient.dev` at the end, failing (exit 1, never `PASS`) if Keycloak refuses the unlock (full stack: pass `KC_ADMIN_PASS` and `USERS_PASSWORD` from `.env`). Refuses any non-local `APP_URL`/`KEYCLOAK_URL` (exit 2) unless `ALLOW_REMOTE_DEV_STACK=yes-this-is-a-dev-stack`; guard and unlock tested offline by `scripts/check-lockout.test.sh` (CI) |
 | `INVALID_CODE` with the code from the authenticator app | the phone's clock is off (a code lives 30 s, one step of tolerance): set the phone to automatic date and time. Also check you scanned the QR code of the last setup (a new setup replaces the secret) |
 | `MFA_LOCKED` | 5 wrong codes lock the code step for 15 minutes, even after a new login: wait |
 | a file shows fully modified after pull | line endings, normalized by `.gitattributes`; a `chore: normalize` commit is fine |
@@ -347,7 +357,7 @@ After checking out a branch with other migrations, re-run with `-Reset` if Flywa
 **Report a vulnerability privately**, never in a public issue: see [SECURITY.md](SECURITY.md)
 (`security@medlink.example.com`, or a DM to @assali-mohamed-ali starting with `[SECURITY]`).
 
-Known open item: Scalar and `/v3/api-docs` are public in production (GitHub #65). In staging and prod the
+Scalar and `/v3/api-docs` exist in dev only: staging and prod answer 404 (GitHub #65). In staging and prod the
 actuator (metrics, `/actuator/health`) is only on the private management port 9000, never published; the public
 port keeps `/livez` and `/readyz` (GitHub #49). The
 actuator exposes only `health,info,prometheus`: don't open more without a security review.

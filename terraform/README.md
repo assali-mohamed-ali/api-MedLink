@@ -16,17 +16,33 @@ profile in CI.
 | Variable | Secret | Notes |
 |---|---|---|
 | `app_image` | no | Immutable reference: digest or `sha-<commit>`, never `latest` |
-| `db_url`, `db_username`, `db_password` | password yes | JDBC URL reachable from the container |
+| `db_url`, `db_username`, `db_password` | password yes | JDBC URL reachable from the container; `db_username` is the runtime role `medlink_app` (GitHub #57) |
+| `db_flyway_username`, `db_flyway_password` | yes | The schema owner Flyway migrates as; must differ from `db_username` or the API refuses to start |
 | `keycloak_public_url` | no | URL the browser reaches |
 | `keycloak_internal_url` | no | URL the container reaches (e.g. `http://keycloak:8080`) |
 | `keycloak_client_secret` | yes | `medlink-bff` client secret |
 | `keycloak_admin_client_secret` | yes | `medlink-admin` service account secret |
 | `mfa_encryption_key` | yes | Staff code key, 32 bytes in base64 (`openssl rand -base64 32`); a new key means every staff member enrols again |
+| `report_encryption_key` | yes | Consultation report key (MLink-32), 32 bytes in base64 (`openssl rand -base64 32`), **distinct from** `mfa_encryption_key`; the reports are readable only with it, so keep it backed up: a lost key means the reports cannot be read |
 | `mail_host`, `mail_port`, `mail_username`, `mail_password`, `mail_from` | username/password yes | Real SMTP, TLS on 587 |
 | `app_frontend_url`, `cors_allowed_origins` | no | React origin |
 
 The examples (`terraform.tfvars.*.example`) show every value. Never commit a
 real `terraform.tfvars`; it is git-ignored.
+
+## Database roles (GitHub #57)
+
+The API connects as `medlink_app`, which can use the tables but not change them;
+Flyway, inside the API, migrates as the schema owner. This stack does not create
+PostgreSQL, so create the role once on the server, as its admin, with the init
+script the compose files use (the password comes from `APP_DB_PASSWORD`, never
+from the command line):
+
+```sh
+docker exec -i -e APP_DB_PASSWORD <postgres-container> bash < docker/postgres/initdb/10-app-role.sh
+```
+
+The grants come with the migrations (`V18__app_role_grants.sql`).
 
 ## Secrets and state
 
