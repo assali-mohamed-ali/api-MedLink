@@ -34,6 +34,8 @@
         <tomcat.version>11.0.27</tomcat.version>
         <jackson-bom.version>3.1.7</jackson-bom.version>
         <jackson-2-bom.version>2.21.7</jackson-2-bom.version>
+        <!-- okhttp 5 (MinIO client 9) runs on kotlin-stdlib; 2.4.20+ is past CVE-2026-53914 (Dependency-Check). -->
+        <kotlin.version>2.4.21</kotlin.version>
     </properties>
     <dependencies>
         <dependency>
@@ -75,7 +77,13 @@
         <dependency>
             <groupId>io.minio</groupId>
             <artifactId>minio</artifactId>
-            <version>8.5.17</version>
+            <version>9.0.4</version>
+        </dependency>
+        <!-- okhttp 5 publishes its classes in okhttp-jvm; Maven does not read the Gradle metadata that points there -->
+        <dependency>
+            <groupId>com.squareup.okhttp3</groupId>
+            <artifactId>okhttp-jvm</artifactId>
+            <version>5.5.1</version>
         </dependency>
 
         <dependency>
