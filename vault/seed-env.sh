@@ -43,10 +43,13 @@ done
 for key in KEYCLOAK_ADMIN_PASSWORD KC_DEV_USERS_PASSWORD; do
     has "$key" || add "$key" "$(password)"
 done
-# 32 bytes in base64, as MfaSecretCipher and the report cipher require
-for key in APP_MFA_ENCRYPTION_KEY APP_REPORT_ENCRYPTION_KEY; do
+# 32 bytes in base64, as MfaSecretCipher, the report cipher and the documents cipher (MLink-9) require
+for key in APP_MFA_ENCRYPTION_KEY APP_REPORT_ENCRYPTION_KEY APP_DOCUMENTS_ENCRYPTION_KEY; do
     has "$key" || add "$key" "$(rand_b64 32)"
 done
+# The host's MinIO (MLink-9): MinIO refuses a root user outside 3..20 characters or a password outside 8..40
+has MINIO_ROOT_USER || add MINIO_ROOT_USER "medlink-$(rand_b64 12 | tr -d '+/=' | cut -c1-12)"
+has MINIO_ROOT_PASSWORD || add MINIO_ROOT_PASSWORD "$(rand_b64 33 | tr -d '+/=' | cut -c1-40)"
 # Backups (GitHub #67): at least 20 characters
 has BACKUP_PASSPHRASE || add BACKUP_PASSPHRASE "$(rand_b64 33)"
 

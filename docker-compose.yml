@@ -59,7 +59,8 @@ services:
       APP_DOCUMENTS_STORAGE_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?MINIO_ROOT_PASSWORD must be set}
       APP_DOCUMENTS_STORAGE_BUCKET: ${APP_DOCUMENTS_STORAGE_BUCKET:-medlink-documents}
       APP_DOCUMENTS_STORAGE_CREATE_BUCKET: ${APP_DOCUMENTS_STORAGE_CREATE_BUCKET:-true}
-      # Local MinIO speaks plain HTTP; staging/prod set this to true with an https:// endpoint.
+      # Local MinIO speaks plain HTTP. The CD servers keep it on the compose network (deploy/env/*.env: false);
+      # an external object store sets true with an https:// endpoint.
       APP_DOCUMENTS_STORAGE_REQUIRE_TLS: ${APP_DOCUMENTS_STORAGE_REQUIRE_TLS:-false}
       # Dev and local runs: Mailpit below. Staging/prod: the real SMTP server.
       MAIL_HOST: ${MAIL_HOST:-mailpit}
