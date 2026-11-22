@@ -58,6 +58,7 @@ say "jwt-github/ trusts $GITHUB_ISSUER"
 # The environment alone is not enough: any workflow of the repository that enters it would get the same subject. So the
 # token must also come from the deploy workflow (workflow_ref), on one of the refs (ref, globs), by a push or a manual
 # run (event_name): a pull_request job, another workflow or a feature branch is refused even inside the environment.
+# GitHub's immutable subject claims add the repository ids (repo:owner@id/repo@id:environment:env); accept both forms.
 role() {
     local name="$1" repo="$2" env="$3" policy="$4" workflow="$5"; shift 5
     local refs="" wrefs="" r
@@ -72,7 +73,7 @@ role() {
   "bound_audiences": ["$AUDIENCE"],
   "bound_claims_type": "glob",
   "bound_claims": {
-    "sub": "repo:$OWNER/$repo:environment:$env",
+    "sub": ["repo:$OWNER/$repo:environment:$env", "repo:$OWNER@*/$repo@*:environment:$env"],
     "workflow_ref": [$wrefs],
     "ref": [$refs],
     "event_name": ["push", "workflow_dispatch"]
@@ -84,7 +85,7 @@ role() {
   "token_type": "service"
 }
 EOF
-    say "role $name: repo:$OWNER/$repo:environment:$env, $workflow on $* -> $policy (read-only, 10 min)"
+    say "role $name: repo:$OWNER/$repo:environment:$env (old or immutable sub), $workflow on $* -> $policy (read-only, 10 min)"
 }
 role api-staging      api-MedLink       staging    medlink-staging-api   cd.yml refs/heads/staging refs/heads/master refs/heads/main
 role api-production   api-MedLink       production medlink-prod-api      cd.yml refs/heads/staging 'refs/tags/v*'
