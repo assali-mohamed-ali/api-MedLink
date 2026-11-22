@@ -12,6 +12,8 @@ import sys
 REQUIRED = (
     "POSTGRES_PASSWORD", "APP_DB_PASSWORD", "KEYCLOAK_DB_PASSWORD", "KC_BFF_CLIENT_SECRET", "KC_ADMIN_CLIENT_SECRET",
     "KEYCLOAK_ADMIN_PASSWORD", "KC_DEV_USERS_PASSWORD", "APP_MFA_ENCRYPTION_KEY", "APP_REPORT_ENCRYPTION_KEY",
+    # Patient documents (MLink-9): their AES-256-GCM key and the host MinIO's root credentials
+    "APP_DOCUMENTS_ENCRYPTION_KEY", "MINIO_ROOT_USER", "MINIO_ROOT_PASSWORD",
 )
 BACKUP_KEY = "BACKUP_PASSPHRASE"
 OPTIONAL = ("MAIL_PASSWORD",)  # typed by a person (seed-env.sh): the API starts without it, mail does not leave

@@ -257,8 +257,8 @@ starts.
 | `app.documents.storage.access-key` | `APP_DOCUMENTS_STORAGE_ACCESS_KEY` | required by the deployment; MinIO/S3 access key |
 | `app.documents.storage.secret-key` | `APP_DOCUMENTS_STORAGE_SECRET_KEY` | required by the deployment; MinIO/S3 secret key |
 | `app.documents.storage.bucket` | `APP_DOCUMENTS_STORAGE_BUCKET` | required; non-blank |
-| `app.documents.storage.create-bucket` | `APP_DOCUMENTS_STORAGE_CREATE_BUCKET` | `true` in dev; `false` in staging/prod |
-| `app.documents.storage.require-tls` | `APP_DOCUMENTS_STORAGE_REQUIRE_TLS` | `false` in dev; `true` in staging/prod |
+| `app.documents.storage.create-bucket` | `APP_DOCUMENTS_STORAGE_CREATE_BUCKET` | `true` in dev; `false` in staging/prod unless set (the CD servers set `true`) |
+| `app.documents.storage.require-tls` | `APP_DOCUMENTS_STORAGE_REQUIRE_TLS` | `false` in dev; `true` in staging/prod unless set (the CD servers set `false`: host MinIO on the compose network, `docs/DEPLOYMENT.md`) |
 | `app.documents.encryption.active-version` | `APP_DOCUMENTS_ENCRYPTION_ACTIVE_VERSION` | `1`; must be `1..255` and have a key |
 | `app.documents.encryption.keys.<version>` | `APP_DOCUMENTS_ENCRYPTION_KEY` for version 1 | base64 of exactly 32 bytes; every configured version must be valid |
 | `spring.servlet.multipart.max-file-size` | — | `10MB` |

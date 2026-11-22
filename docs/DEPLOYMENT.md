@@ -92,11 +92,19 @@ new key makes every enrolled code unreadable, so each practitioner and staff mem
 
 ### Patient document storage
 
-Patient documents need an S3-compatible object store. The compose stack contains a local MinIO for a
-self-hosted deployment; staging and prod should point the API at an **external MinIO/S3 endpoint over HTTPS**.
-Terraform does **not** create MinIO or its bucket: provisioning owns them.
+Patient documents need an S3-compatible object store. Terraform does **not** create MinIO or its bucket:
+provisioning owns them.
 
-The environment file (or the GitHub Environment secret) must provide:
+**The CD servers (decision of 2026-11-22, option b):** each API host runs the compose stack's own MinIO container.
+It is reached by the API on the compose network only (`http://minio:9100`, no published port,
+`deploy/docker-compose.server.yml`), so `deploy/env/*.env` set `APP_DOCUMENTS_STORAGE_REQUIRE_TLS=false` and
+`APP_DOCUMENTS_STORAGE_CREATE_BUCKET=true`. Plain HTTP never leaves the host, and the API seals every document with
+AES-256-GCM before it reaches MinIO. `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` and `APP_DOCUMENTS_ENCRYPTION_KEY` are
+generated in Vault by `vault/seed-env.sh`; the deploy stops if one is missing. Without these settings the staging and
+prod profiles stay strict (TLS required, bucket provisioned outside).
+
+Any other deployment points the API at an **external MinIO/S3 endpoint over HTTPS**. Its environment file (or the
+GitHub Environment secret) must provide:
 
 | Variable | Staging/prod expectation |
 |---|---|
