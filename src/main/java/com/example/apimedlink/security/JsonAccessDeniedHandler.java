@@ -3,6 +3,7 @@ package com.example.apimedlink.security;
 import com.example.apimedlink.exception.ErrorBody;
 import com.example.apimedlink.model.AuditAction;
 import com.example.apimedlink.model.AuditOutcome;
+import com.example.apimedlink.model.AuditResourceType;
 import com.example.apimedlink.service.AuditService;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -46,7 +47,7 @@ public class JsonAccessDeniedHandler implements AccessDeniedHandler {
             throws IOException {
         try {
             // Method and redacted path only: no query string, no body, so no token or value lands in the trail
-            audit.record(AuditAction.ACCESS_DENIED, "REQUEST",
+            audit.record(AuditAction.ACCESS_DENIED, AuditResourceType.REQUEST.name(),
                     resource(request.getMethod(), request.getRequestURI()), AuditOutcome.DENIED);
         } catch (RuntimeException e) {
             // The refusal stands even if it cannot be written down
