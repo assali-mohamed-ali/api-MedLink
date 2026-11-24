@@ -173,9 +173,12 @@ class AlertFunctionalTest extends FunctionalTestBase {
 
     // ---- Review on #125: the alert comes from the real cancellation paths of US-15 ----
 
-    /** A move cancels the old appointment: the practitioner of the old slot gets its alert and its mail. */
+    /**
+     * A move is not a cancellation: the practitioner of the old slot gets "Rendez-vous reporté", from the old date to the
+     * new one, and a mail that says "reporté", never "annulé".
+     */
     @Test
-    void movingAnAppointmentWarnsThePractitionerOfTheOldSlotWithAMail() throws Exception {
+    void movingAnAppointmentTellsThePractitionerItWasMovedAndWhenToWithAMail() throws Exception {
         Pro pro = practitioner();
         Patient patient = patient();
         String old = book(patient, freeSlot(pro.id()));
@@ -185,9 +188,13 @@ class AlertFunctionalTest extends FunctionalTestBase {
                 "{\"newSlotId\":\"" + newSlot + "\"}");
 
         assertThat(moved.statusCode()).as(moved.body()).isEqualTo(200);
-        assertThat(jdbc.queryForList("select appointment_id from alerts where practitioner_id = ?", UUID.class, pro.id()))
-                .containsExactly(UUID.fromString(old));
-        assertThat(new Mailbox().to(pro.email(), "Un rendez-vous a été annulé")).hasSize(1);
+        List<Map<String, Object>> rows = jdbc.queryForList("select type, appointment_id, message from alerts where practitioner_id = ?", pro.id());
+        assertThat(rows).hasSize(1);
+        assertThat(rows.get(0).get("type")).isEqualTo("APPOINTMENT_MOVED");
+        assertThat(rows.get(0).get("appointment_id")).isEqualTo(UUID.fromString(old));
+        assertThat((String) rows.get(0).get("message")).startsWith("Rendez-vous reporté : Amel Ben Salah, du ").contains(") au ");
+        assertThat(new Mailbox().to(pro.email(), "Un rendez-vous a été reporté")).hasSize(1);
+        assertThat(new Mailbox().to(pro.email(), "Un rendez-vous a été annulé")).isEmpty();
     }
 
     /** A cancel the API refuses (less than 12 hours before) changes nothing, so no alert and no mail. */

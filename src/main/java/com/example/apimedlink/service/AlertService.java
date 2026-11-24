@@ -71,9 +71,7 @@ public class AlertService {
             return;
         }
         Slot slot = appointment.getSlot();
-        String patient = patients.findById(appointment.getPatientId())
-                .map(found -> found.getFirstName() + " " + found.getLastName())
-                .orElse("un patient");
+        String patient = patientName(appointment.getPatientId());
         String when = WHEN.format(slot.getStartsAt());
         String clinic = slot.getClinic().getName();
         UUID practitionerId = slot.getPractitioner().getId();
@@ -82,32 +80,71 @@ public class AlertService {
         // 37.4: the mail leaves once the cancellation and its alert are committed, never for a rolled-back one
         String firstName = slot.getPractitioner().getFirstName();
         String to = users.findById(practitionerId).map(user -> user.getEmail()).orElse(null);
-        Runnable send = () -> mailQuietly(alert.getId(), to, firstName, patient, when, clinic);
+        afterCommit(() -> mailQuietly(alert.getId(), to,
+                () -> mail.sendAppointmentCancelled(to, firstName, patient, when, clinic)));
+    }
+
+    /**
+     * A move (MLink-107) is not a cancellation: the practitioner of the old slot gets APPOINTMENT_MOVED, "reporté" from
+     * the old date (and its clinic, their slot that is free again) to the new date, and a mail that says so. Only the new
+     * date: never the practitioner or the clinic the patient chose. Called by the move, in its transaction; a move
+     * processed twice changes nothing.
+     */
+    @Transactional
+    public void onAppointmentMoved(Appointment cancelled, Appointment booked) {
+        // Read again here, as for a cancellation: the slots are loaded lazily
+        Appointment old = appointments.findById(cancelled.getId()).orElse(null);
+        Appointment moved = appointments.findById(booked.getId()).orElse(null);
+        if (old == null || moved == null || old.getStatus() != AppointmentStatus.CANCELLED
+                || alerts.existsByTypeAndAppointmentId(AlertType.APPOINTMENT_MOVED, old.getId())) {
+            return;
+        }
+        Slot from = old.getSlot();
+        String patient = patientName(old.getPatientId());
+        String fromWhen = WHEN.format(from.getStartsAt());
+        String fromClinic = from.getClinic().getName();
+        String toWhen = WHEN.format(moved.getSlot().getStartsAt());
+        UUID practitionerId = from.getPractitioner().getId();
+        Alert alert = alerts.save(new Alert(practitionerId, AlertType.APPOINTMENT_MOVED, old.getId(),
+                "Rendez-vous reporté : " + patient + ", du " + fromWhen + " (" + fromClinic + ") au " + toWhen + "."));
+        String firstName = from.getPractitioner().getFirstName();
+        String to = users.findById(practitionerId).map(user -> user.getEmail()).orElse(null);
+        afterCommit(() -> mailQuietly(alert.getId(), to,
+                () -> mail.sendAppointmentMoved(to, firstName, patient, fromWhen, fromClinic, toWhen)));
+    }
+
+    /** "Amel Ben Salah", or "un patient" for a profile that is gone. */
+    private String patientName(UUID patientId) {
+        return patients.findById(patientId).map(found -> found.getFirstName() + " " + found.getLastName()).orElse("un patient");
+    }
+
+    /** Runs once the caller's transaction is committed, never for a rolled-back one; at once without a transaction. */
+    private static void afterCommit(Runnable action) {
         if (TransactionSynchronizationManager.isSynchronizationActive()) {
             TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
                 @Override
                 public void afterCommit() {
-                    send.run();
+                    action.run();
                 }
             });
         } else {
-            send.run();
+            action.run();
         }
     }
 
     /**
-     * A mail that cannot be sent never blocks the cancellation (37.4): the alert is kept and shows in the bell, the
-     * failure is logged by the alert's id only (no address, no name).
+     * A mail that cannot be sent never blocks the cancellation or the move (37.4): the alert is kept and shows in the
+     * bell, the failure is logged by the alert's id only (no address, no name).
      */
-    private void mailQuietly(UUID alertId, String to, String firstName, String patient, String when, String clinic) {
+    private void mailQuietly(UUID alertId, String to, Runnable send) {
         if (to == null || to.isBlank()) {
-            log.warn("Cancellation mail not sent for alert {}: the practitioner has no e-mail", alertId);
+            log.warn("Alert mail not sent for alert {}: the practitioner has no e-mail", alertId);
             return;
         }
         try {
-            mail.sendAppointmentCancelled(to, firstName, patient, when, clinic);
+            send.run();
         } catch (RuntimeException failed) {
-            log.warn("Cancellation mail not sent for alert {}: {}", alertId, failed.getClass().getSimpleName());
+            log.warn("Alert mail not sent for alert {}: {}", alertId, failed.getClass().getSimpleName());
         }
     }
 

@@ -165,6 +165,31 @@ public class MailService {
     }
 
     /**
+     * MLink-37: a patient moved one of the practitioner's appointments to another date. Who, the old date (Tunis time) and
+     * clinic, the new date, with a link to the agenda: never medical content. Throws like {@link #sendEmailVerification}.
+     */
+    public void sendAppointmentMoved(String to, String firstName, String patient, String fromWhen, String fromClinic,
+            String toWhen) {
+        String agenda = UriComponentsBuilder.fromUriString(frontendUrl).path("/praticien/agenda").build().toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        String text = hello + "\n\n"
+                + "Un rendez-vous de votre agenda vient d'être reporté par le patient :\n\n"
+                + "Patient : " + patient + "\n"
+                + "Ancienne date : " + fromWhen + " (heure de Tunis), " + fromClinic + "\n"
+                + "Nouvelle date : " + toWhen + " (heure de Tunis)\n\n"
+                + "L'ancien créneau est de nouveau libre. Votre agenda : " + agenda + "\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Un rendez-vous de votre agenda vient d'être reporté par le patient :</p>"
+                + "<ul><li>Patient : " + HtmlUtils.htmlEscape(patient) + "</li>"
+                + "<li>Ancienne date : " + HtmlUtils.htmlEscape(fromWhen) + " (heure de Tunis), " + HtmlUtils.htmlEscape(fromClinic) + "</li>"
+                + "<li>Nouvelle date : " + HtmlUtils.htmlEscape(toWhen) + " (heure de Tunis)</li></ul>"
+                + "<p>L'ancien créneau est de nouveau libre. <a href=\"" + HtmlUtils.htmlEscape(agenda) + "\">Ouvrir mon agenda</a></p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Un rendez-vous a été reporté", text, html);
+    }
+
+    /**
      * MLink-110: the reminder before an appointment. Where, with whom and when only: never a medical detail. The date
      * and time are Tunisia's, where the clinics are. Throws like {@link #sendEmailVerification}.
      * MLink-111 (review on #120): the Message-ID is the appointment's, the same at every try, so a reminder sent again
