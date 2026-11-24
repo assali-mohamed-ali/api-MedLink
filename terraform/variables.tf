@@ -1,11 +1,11 @@
 variable "network_name" {
-  description = "Nom du réseau Docker"
+  description = "Nom du réseau Docker partagé avec Postgres et Keycloak"
   type        = string
   default     = "medlink"
 }
 
 variable "app_image" {
-  description = "Image Docker de l'API (ex: ghcr.io/assali-mohamed-ali/api-medlink:sha)"
+  description = "Image Docker immuable de l'API (ex: ghcr.io/assali-mohamed-ali/api-medlink@sha256:...)"
   type        = string
 }
 
@@ -22,24 +22,120 @@ variable "app_external_port" {
 }
 
 variable "db_url" {
-  description = "JDBC URL Postgres"
+  description = "JDBC URL Postgres joignable depuis le conteneur"
   type        = string
 }
 
 variable "db_username" {
-  description = "User Postgres"
+  description = "Runtime role the API connects as (GitHub #57): medlink_app, never the schema owner"
   type        = string
   sensitive   = true
 }
 
 variable "db_password" {
-  description = "Password Postgres"
+  description = "Password of the runtime role (db_username)"
   type        = string
   sensitive   = true
 }
 
-variable "jwt_secret" {
-  description = "Secret JWT (min 32 chars)"
+variable "db_flyway_username" {
+  description = "Schema owner Flyway migrates as (GitHub #57): must differ from db_username"
   type        = string
   sensitive   = true
+}
+
+variable "db_flyway_password" {
+  description = "Password of the schema owner (db_flyway_username)"
+  type        = string
+  sensitive   = true
+}
+
+variable "keycloak_public_url" {
+  description = "URL de Keycloak vue par le navigateur (ex: https://auth.example.com)"
+  type        = string
+}
+
+variable "keycloak_internal_url" {
+  description = "URL de Keycloak vue par le conteneur API (ex: http://keycloak:8080)"
+  type        = string
+}
+
+variable "keycloak_realm" {
+  description = "Realm Keycloak"
+  type        = string
+  default     = "medlink"
+}
+
+variable "keycloak_client_id" {
+  description = "Client confidentiel utilisé pour le login (password grant)"
+  type        = string
+  default     = "medlink-bff"
+}
+
+variable "keycloak_client_secret" {
+  description = "Secret du client medlink-bff"
+  type        = string
+  sensitive   = true
+}
+
+variable "keycloak_admin_client_id" {
+  description = "Client de service utilisé pour les appels admin Keycloak"
+  type        = string
+  default     = "medlink-admin"
+}
+
+variable "keycloak_admin_client_secret" {
+  description = "Secret du client de service medlink-admin"
+  type        = string
+  sensitive   = true
+}
+
+variable "mfa_encryption_key" {
+  description = "Clé AES-256 des codes du personnel (MLink-62) : 32 octets en base64 (openssl rand -base64 32)"
+  type        = string
+  sensitive   = true
+}
+
+variable "report_encryption_key" {
+  description = "Clé AES-256 des comptes-rendus de consultation (MLink-32), différente de la clé MFA : 32 octets en base64 (openssl rand -base64 32)"
+  type        = string
+  sensitive   = true
+}
+
+variable "mail_host" {
+  description = "Serveur SMTP de production"
+  type        = string
+}
+
+variable "mail_port" {
+  description = "Port SMTP de production (TLS)"
+  type        = number
+  default     = 587
+}
+
+variable "mail_username" {
+  description = "Utilisateur SMTP"
+  type        = string
+  sensitive   = true
+}
+
+variable "mail_password" {
+  description = "Mot de passe SMTP"
+  type        = string
+  sensitive   = true
+}
+
+variable "mail_from" {
+  description = "Expéditeur des mails MedLink"
+  type        = string
+}
+
+variable "app_frontend_url" {
+  description = "URL du frontend React (liens dans les mails)"
+  type        = string
+}
+
+variable "cors_allowed_origins" {
+  description = "Origines autorisées par CORS, séparées par des virgules"
+  type        = string
 }

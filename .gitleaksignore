@@ -1,0 +1,3 @@
+# Reviewed gitleaks false positives (one fingerprint per line: commit:file:rule:line).
+# compose.yaml line 36 is the Keycloak JDBC URL (host, port, database name): no secret.
+109d9e1892deb4c7af8ebc52d8747ec140403bd0:compose.yaml:generic-api-key:36

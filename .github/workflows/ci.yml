@@ -7,7 +7,7 @@ on:
     branches: [main, master, staging, prod, develop]
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
@@ -17,8 +17,63 @@ permissions:
 jobs:
   build-test:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
+
+      # GitHub #53: the Terraform container must match the production profile.
+      - name: Check the production container configuration
+        run: bash scripts/ci/check-prod-config.sh
+
+      # MLink-68: the lockout script refuses non-local targets (offline, no stack needed).
+      - name: Test the lockout script's target guard
+        run: bash scripts/check-lockout.test.sh
+
+      # MLink-168: Vault roles read only their own repository's and environment's secrets (throwaway Vault in Docker).
+      - name: Test the Vault configuration
+        run: bash vault/test/vault.test.sh
+
+      # MLink-171: the host preparation (deploy user, SSH, updates, backups) on throwaway Ubuntu 26.04 containers.
+      - name: Test the host preparation script
+        run: bash deploy/test/prepare-host.test.sh
+
+      # MLink-169: the server .env comes from Vault, and only the API publishes a port on a server.
+      - name: Test the server deploy files
+        run: bash deploy/test/render-env.test.sh
+
+      # MLink-169: when Vault is unavailable, an image-only deploy keeps the server's .env and updates APP_IMAGE.
+      - name: Test the Vault-unavailable deploy fallback
+        run: bash deploy/test/update-app-image.test.sh
+
+      # MLink-168: the cross-repository gate waits for the matching staging jobs without deadlocking.
+      - name: Test the cross-repository staging gate
+        run: bash .github/scripts/test/wait-for-staging.test.sh
+
+      # MLink-169: the promotion/release gate ignores the current run's own check and waits for the rest.
+      - name: Test the pull request check gate
+        run: bash .github/scripts/test/wait-for-pull-request-checks.test.sh
+
+      - name: Test the CD image attestation configuration
+        run: bash .github/scripts/test/cd-attestations.test.sh
+
+      # GitHub #67: backup and restore refuse unsafe use, encrypt, never leak the passphrase (offline, real gpg).
+      - name: Test the database backup and restore scripts
+        run: bash scripts/db-backup.test.sh
+
+      # GitHub #64: docker-compose.yml refuses to run without the database credentials (offline, compose config only).
+      - name: Test that the full-stack compose file requires the database credentials
+        run: bash scripts/compose-credentials.test.sh
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: 1.9.x
+
+      - name: Validate Terraform
+        run: |
+          cd terraform
+          terraform init -backend=false -input=false
+          terraform fmt -check
+          terraform validate
 
       - name: Validate Maven wrapper
         run: |
@@ -33,7 +88,18 @@ jobs:
           distribution: 'temurin'
           cache: maven
 
-      # BLOCKING GATE: any test failure fails the job and blocks the PR.
+      - name: Set up Python for pre-commit
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Install pre-commit
+        run: python -m pip install --disable-pip-version-check pre-commit==4.7.0
+
+      - name: Run repository pre-commit hooks
+        run: pre-commit run --all-files --show-diff-on-failure --verbose
+
+      # Blocking gate: test/build failures fail the job.
       - name: Build + tests
         run: ./mvnw --no-transfer-progress --fail-fast verify
 
@@ -46,20 +112,21 @@ jobs:
           reporter: java-junit
           fail-on-error: false
 
+      # Reports are diagnostic artifacts, not a second failure gate.
       - name: Upload surefire reports
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: surefire-reports
           path: target/surefire-reports/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7
 
       - name: Upload coverage
         if: always()
-        uses: actions/upload-artifact@v6
+        uses: actions/upload-artifact@v7
         with:
           name: jacoco-report
           path: target/site/jacoco/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 7

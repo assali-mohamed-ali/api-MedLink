@@ -1,0 +1,136 @@
+name: Release Please
+
+on:
+  push:
+    branches: [prod]
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: release-please-prod
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: vars.ENABLE_AUTO_PROMOTION == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    permissions:
+      contents: write
+      pull-requests: write
+      issues: write
+    env:
+      GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
+    steps:
+      - name: Validate release automation token
+        run: |
+          test -n "$GH_TOKEN" || {
+            echo "::error::Add repository secret PROMOTION_TOKEN with Contents, Pull requests, and Issues read/write permissions."
+            exit 1
+          }
+
+      - name: Open/update semantic release PR or publish the merged release
+        id: release
+        uses: googleapis/release-please-action@v4
+        with:
+          token: ${{ secrets.PROMOTION_TOKEN }}
+          target-branch: prod
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      - name: Add the required disclosure to the generated release PR
+        if: steps.release.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          set -euo pipefail
+          PR_NUMBER="$(jq -r '.number // empty' <<< "$PR_JSON")"
+          test -n "$PR_NUMBER" || { echo "::error::Release Please returned a PR payload without a number"; exit 1; }
+          BODY="$(gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" --jq '.body')"
+          if ! grep -Fq "Cette PR n'utilise pas d'outils d'IA générative." <<< "$BODY"; then
+            DISCLOSURE="$(printf '%s\n' \
+              "## Utilisation de l'IA" \
+              "" \
+              "- [x] Cette PR n'utilise pas d'outils d'IA générative." \
+              "- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR." \
+              "- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.")"
+            BODY="$(printf '%s\n\n%s' "$BODY" "$DISCLOSURE")"
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" \
+              -f body="$BODY" >/dev/null
+          fi
+
+      - name: Check out the release commit for the check gate
+        if: steps.release.outputs.pr != ''
+        uses: actions/checkout@v7
+
+      - name: Wait for release PR checks and merge automatically
+        if: steps.release.outputs.pr != ''
+        env:
+          GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          set -euo pipefail
+          PR_NUMBER="$(jq -r '.number // empty' <<< "$PR_JSON")"
+          if [ -z "$PR_NUMBER" ]; then
+            echo "Release Please returned no pull request number; nothing to merge."
+            exit 0
+          fi
+          bash ./.github/scripts/wait-for-pull-request-checks.sh \
+            --pr "$PR_NUMBER" --self "release"
+          # The repository ruleset requires a code-owner review on prod. The
+          # release token is the repository owner/admin, so automated release PRs
+          # use the existing bypass; human PRs still need the review.
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
+            -f merge_method=merge >/dev/null
+
+      # The release PR changes the Maven version and changelog on prod. Sync
+      # those release metadata changes back to staging so future promotions
+      # do not roll the version backwards.
+      - name: Check out the released branch
+        if: steps.release.outputs.releases_created == 'true'
+        uses: actions/checkout@v7
+        with:
+          ref: prod
+          fetch-depth: 0
+
+      - name: Sync released version back to staging
+        if: steps.release.outputs.releases_created == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.PROMOTION_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch origin prod staging
+          AHEAD="$(git rev-list --count origin/staging..origin/prod)"
+          if [ "$AHEAD" -eq 0 ]; then
+            echo "Staging already contains the released commit."
+            exit 0
+          fi
+
+          PR_NUMBER="$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&base=staging&head=$GITHUB_REPOSITORY_OWNER:prod" --jq '.[0].number // empty')"
+          if [ -z "$PR_NUMBER" ]; then
+            SYNC_BODY="$(printf '%s\n' \
+              "Automated sync of the released Maven version and changelog from prod back to staging." \
+              "" \
+              "## Utilisation de l'IA" \
+              "" \
+              "- [x] Cette PR n'utilise pas d'outils d'IA générative." \
+              "- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR." \
+              "- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.")"
+            PR_NUMBER="$(gh api --method POST "repos/$GITHUB_REPOSITORY/pulls" \
+              -f title="chore: sync released version to staging" \
+              -f head="prod" \
+              -f base="staging" \
+              -f body="$SYNC_BODY" \
+              --jq '.number')"
+          fi
+          test -n "$PR_NUMBER" || { echo "::error::Unable to find/create the prod -> staging sync PR"; exit 1; }
+          bash ./.github/scripts/wait-for-pull-request-checks.sh \
+            --pr "$PR_NUMBER" --self "release"
+          # Same owner/admin bypass as the release PR: this is an automated
+          # version-sync PR back to staging, not a human contribution.
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
+            -f merge_method=merge >/dev/null

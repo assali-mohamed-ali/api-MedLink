@@ -1,8 +1,10 @@
 spring:
   datasource:
     url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/mydatabase}
-    username: ${SPRING_DATASOURCE_USERNAME:myuser}
-    password: ${SPRING_DATASOURCE_PASSWORD:secret}
+    # The runtime role (GitHub #57). No default (GitHub #64): DatabaseCredentialsCheck stops the start when one is
+    # missing or a known placeholder
+    username: ${SPRING_DATASOURCE_USERNAME}
+    password: ${SPRING_DATASOURCE_PASSWORD}
     hikari:
       maximum-pool-size: 10
   jpa:
@@ -10,21 +12,56 @@ spring:
       ddl-auto: validate
     show-sql: false
     open-in-view: false
+  mail:
+    # Real SMTP server: authenticated, TLS required (host and credentials from MAIL_* env)
+    properties:
+      mail.smtp.auth: true
+      mail.smtp.starttls.enable: true
+      mail.smtp.starttls.required: true
   flyway:
+    # GitHub #57: Flyway migrates as the schema owner; the datasource above is the runtime role (medlink_app),
+    # which cannot change the schema. No default, checked like the datasource (DatabaseCredentialsCheck).
+    user: ${SPRING_FLYWAY_USER}
+    password: ${SPRING_FLYWAY_PASSWORD}
     enabled: true
     locations: classpath:db/migration
     baseline-on-migrate: true
     validate-on-migrate: true
 
+server:
+  servlet:
+    session:
+      cookie:
+        # HTTPS only (MLink-84), also when TLS ends at the proxy; the XSRF-TOKEN cookie follows (SecurityConfig)
+        secure: true
+
 keycloak:
   # Client secret of the medlink-bff client (keycloak/realm-medlink.json)
   client-secret: ${KEYCLOAK_CLIENT_SECRET}
+  admin:
+    # Service account medlink-admin: no default outside dev
+    client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET}
 
 app:
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://staging.medlink.example.com}
 
+springdoc:
+  # No API reference UI and no OpenAPI description outside dev: they would tell anyone every route and schema
+  # of a health-data API (GitHub #65). Dev keeps both, for the developers and for DAST.
+  api-docs:
+    enabled: false
+  swagger-ui:
+    enabled: false
+# Scalar's UI at /scalar (since #100), switched off on its own: it must not depend on api-docs being off
+scalar:
+  enabled: false
+
 management:
+  # Actuator (metrics included) only on this port, never published outside Docker: Prometheus scrapes it over
+  # the private network. The public port keeps /livez and /readyz (GitHub #49).
+  server:
+    port: 9000
   endpoints:
     web:
       exposure:

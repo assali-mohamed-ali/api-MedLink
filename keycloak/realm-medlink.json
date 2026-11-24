@@ -11,27 +11,31 @@
   "rememberMe": false,
   "bruteForceProtected": true,
   "failureFactor": 5,
-  "waitIncrementSeconds": 60,
+  "permanentLockout": false,
+  "waitIncrementSeconds": 900,
   "maxFailureWaitSeconds": 900,
-  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and notEmail",
+  "eventsEnabled": true,
+  "eventsExpiration": 2592000,
+  "eventsListeners": ["jboss-logging"],
+  "enabledEventTypes": [
+    "LOGIN", "LOGIN_ERROR", "LOGOUT", "USER_DISABLED_BY_TEMPORARY_LOCKOUT",
+    "UPDATE_PASSWORD", "UPDATE_TOTP", "VERIFY_EMAIL"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": true,
+  "passwordPolicy": "length(12) and upperCase(1) and lowerCase(1) and digits(1) and specialChars(1) and notUsername and notEmail and passwordHistory(3)",
   "accessTokenLifespan": 300,
-  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionIdleTimeout": 900,
   "ssoSessionMaxLifespan": 36000,
   "roles": {
     "realm": [
       {
-        "name": "ADMIN",
-        "description": "MedLink administrator: manages users and their roles in this realm",
-        "composite": true,
-        "composites": {
-          "client": {
-            "realm-management": ["view-users", "manage-users", "query-users", "query-groups", "view-realm"]
-          }
-        }
+        "name": "ADMINISTRATIVE_STAFF",
+        "description": "MedLink administrative staff: manages accounts through the API only (no Keycloak admin rights, GitHub #80)"
       },
       {
-        "name": "DOCTOR",
-        "description": "Doctor"
+        "name": "PRACTITIONER",
+        "description": "Practitioner"
       },
       {
         "name": "PATIENT",
@@ -40,24 +44,23 @@
     ]
   },
   "groups": [
-    { "name": "admins", "path": "/admins", "realmRoles": ["ADMIN"] },
-    { "name": "doctors", "path": "/doctors", "realmRoles": ["DOCTOR"] },
+    { "name": "administrative-staff", "path": "/administrative-staff", "realmRoles": ["ADMINISTRATIVE_STAFF"] },
+    { "name": "practitioners", "path": "/practitioners", "realmRoles": ["PRACTITIONER"] },
     { "name": "patients", "path": "/patients", "realmRoles": ["PATIENT"] }
   ],
-  "defaultGroups": ["/patients"],
   "clients": [
     {
       "clientId": "medlink-bff",
       "name": "MedLink BFF",
-      "description": "Spring Boot backend (auth BFF). Confidential client, authorization code + PKCE.",
+      "description": "Spring Boot backend (auth BFF). Confidential client: only the password grant, called server to server by the API's login endpoint. No redirect login.",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,
       "clientAuthenticatorType": "client-secret",
       "secret": "${KC_BFF_CLIENT_SECRET}",
-      "standardFlowEnabled": true,
+      "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "frontchannelLogout": true,
       "rootUrl": "${KC_BFF_BASE_URL}",
@@ -85,27 +88,49 @@
           }
         }
       ]
+    },
+    {
+      "clientId": "medlink-admin",
+      "name": "MedLink admin calls",
+      "description": "Service account the API uses for Keycloak admin calls (create users, passwords, email verified). No login flow.",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "clientAuthenticatorType": "client-secret",
+      "secret": "${KC_ADMIN_CLIENT_SECRET}",
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
     }
   ],
   "users": [
     {
-      "username": "admin.dev",
-      "email": "admin.dev@medlink.local",
-      "firstName": "Admin",
+      "username": "service-account-medlink-admin",
+      "enabled": true,
+      "serviceAccountClientId": "medlink-admin",
+      "clientRoles": {
+        "realm-management": ["manage-users", "view-users", "query-users", "query-groups"]
+      }
+    },
+    {
+      "username": "staff.dev",
+      "email": "staff.dev@medlink.local",
+      "firstName": "Staff",
       "lastName": "Dev",
       "enabled": true,
       "emailVerified": true,
-      "groups": ["/admins"],
+      "groups": ["/administrative-staff"],
       "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
     },
     {
-      "username": "doctor.dev",
-      "email": "doctor.dev@medlink.local",
-      "firstName": "Doctor",
+      "username": "practitioner.dev",
+      "email": "practitioner.dev@medlink.local",
+      "firstName": "Practitioner",
       "lastName": "Dev",
       "enabled": true,
       "emailVerified": true,
-      "groups": ["/doctors"],
+      "groups": ["/practitioners"],
       "credentials": [{ "type": "password", "value": "${KC_DEV_USERS_PASSWORD}", "temporary": false }]
     },
     {

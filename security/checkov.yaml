@@ -3,7 +3,7 @@ compact: true
 quiet: true
 framework:
   - dockerfile
-  - docker_compose
+  - yaml
   - terraform
   - github_actions
 skip-check:

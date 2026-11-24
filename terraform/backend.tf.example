@@ -1,0 +1,17 @@
+# Shared Terraform state for staging/prod.
+#
+# Copy this file to backend.tf (git-ignored) and fill the bucket/table names,
+# or pass the same values with -backend-config. Credentials come from the
+# standard AWS environment variables, never from a committed file.
+#
+# Local `terraform init` without this file keeps the state in terraform.tfstate
+# on your machine, which is fine for a single admin but not for a team or CI.
+terraform {
+  backend "s3" {
+    bucket         = "medlink-terraform-state"
+    key            = "api-medlink/prod/terraform.tfstate"
+    region         = "eu-west-1"
+    encrypt        = true
+    dynamodb_table = "medlink-terraform-locks"
+  }
+}

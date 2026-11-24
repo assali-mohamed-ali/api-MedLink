@@ -16,6 +16,7 @@ permissions:
 jobs:
   analyze:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -23,8 +24,6 @@ jobs:
         uses: github/codeql-action/init@v4
         with:
           languages: java
-          # BLOCKING: extended security queries. New alerts fail the gate
-          # via required code-scanning check (configure in branch protection).
           queries: security-extended,security-and-quality
 
       - name: Set up JDK 17
@@ -39,9 +38,26 @@ jobs:
           if [ -f mvnw ]; then ./mvnw -B -DskipTests package;
           else mvn -B -DskipTests package; fi
 
-      # BLOCKING: analysis errors fail the job; findings surface as
-      # code-scanning alerts (SARIF) and block PRs when required.
+      # Code scanning (the Security tab) needs a public repo or GitHub Advanced
+      # Security. Set the repo variable CODE_SCANNING_ENABLED=true once it is on;
+      # until then the SARIF stays a run artifact and the gate below decides.
       - name: Perform CodeQL Analysis
         uses: github/codeql-action/analyze@v4
         with:
           category: "/language:java"
+          output: codeql-results
+          upload: ${{ vars.CODE_SCANNING_ENABLED == 'true' && 'always' || 'never' }}
+
+      - name: Upload SARIF artifact
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: codeql-sarif
+          path: codeql-results/
+          if-no-files-found: warn
+          retention-days: 14
+
+      # BLOCKING GATE: fails on any security finding of severity >= 7.0
+      # (high/critical), the same bar as Trivy and Dependency-Check.
+      - name: Fail on high/critical findings
+        run: scripts/ci/sarif-gate.sh 7.0 codeql-results/*.sarif

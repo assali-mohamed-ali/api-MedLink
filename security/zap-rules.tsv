@@ -7,3 +7,10 @@
 10035	INFO	.*
 # Ignorer le faux positif swagger local si besoin
 # 10024	IGNORE	http://localhost:8080/v3/api-docs.*
+# XSRF-TOKEN must stay readable by the SPA (Spring Security csrf.spa(), see CLAUDE.md);
+# JSESSIONID is HttpOnly, checked by SecurityCookiesIntegrationTest.
+10010	INFO	.*
+# API responses are Cache-Control: no-store on purpose (Spring Security default).
+10049	INFO	.*
+# Informational only: ZAP notes the JSESSIONID session cookie exists.
+10112	INFO	.*
