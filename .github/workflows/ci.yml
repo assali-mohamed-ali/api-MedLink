@@ -49,6 +49,10 @@ jobs:
       - name: Test the cross-repository staging gate
         run: bash .github/scripts/test/wait-for-staging.test.sh
 
+      # MLink-169: the promotion/release gate ignores the current run's own check and waits for the rest.
+      - name: Test the pull request check gate
+        run: bash .github/scripts/test/wait-for-pull-request-checks.test.sh
+
       - name: Test the CD image attestation configuration
         run: bash .github/scripts/test/cd-attestations.test.sh
 
