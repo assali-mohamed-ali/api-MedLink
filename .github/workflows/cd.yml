@@ -323,27 +323,34 @@ jobs:
             TITLE='chore: promote staging to prod'
           fi
 
+          BODY="$(printf '%s\n' \
+            "Automated promotion after the runner-based container stack and smoke tests passed. The promotion job waits for this PR's CI and security checks before merging." \
+            "" \
+            "## Utilisation de l'IA" \
+            "" \
+            "- [x] Cette PR n'utilise pas d'outils d'IA générative." \
+            "- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR." \
+            "- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA." \
+            "" \
+            "This is an automated release promotion. AI-assisted changes are disclosed in the pull requests that introduced them.")"
           PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base prod --head staging --state open --json number --jq '.[0].number // empty')"
           if [ -z "$PR_NUMBER" ]; then
             gh pr create --repo "$GITHUB_REPOSITORY" --base prod --head staging \
               --title "$TITLE" \
-              --body "$(printf '%s\n' \
-                "Automated promotion after the runner-based container stack and smoke tests passed. The promotion job waits for this PR's CI and security checks before merging." \
-                "" \
-                "## Utilisation de l'IA" \
-                "" \
-                "- [x] Cette PR n'utilise pas d'outils d'IA générative." \
-                "- [ ] J'ai utilisé des outils d'IA générative pour contribuer à cette PR." \
-                "- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA.")"
+              --body "$BODY"
             PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base prod --head staging --state open --json number --jq '.[0].number // empty')"
           else
-            gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$TITLE"
+            gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
           fi
           test -n "$PR_NUMBER" || { echo "::error::Unable to find/create the staging -> prod PR"; exit 1; }
 
           # PROMOTION_TOKEN ensures the PR workflows start automatically.
-          gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --watch --fail-fast
-          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge
+          bash ./.github/scripts/wait-for-pull-request-checks.sh \
+            --pr "$PR_NUMBER" --self "Promote staging to prod"
+          # The repository ruleset requires a code-owner review on prod. The
+          # promotion token is the repository owner/admin, so this one automated
+          # release PR uses the existing bypass; human PRs still need the review.
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge --admin
 
   deploy-staging:
     needs: publish-and-attest

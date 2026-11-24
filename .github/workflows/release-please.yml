@@ -62,6 +62,10 @@ jobs:
             gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --body "$BODY"
           fi
 
+      - name: Check out the release commit for the check gate
+        if: steps.release.outputs.pr != ''
+        uses: actions/checkout@v7
+
       - name: Wait for release PR checks and merge automatically
         if: steps.release.outputs.pr != ''
         env:
@@ -74,8 +78,12 @@ jobs:
             echo "Release Please returned no pull request number; nothing to merge."
             exit 0
           fi
-          gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --watch --fail-fast
-          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge
+          bash ./.github/scripts/wait-for-pull-request-checks.sh \
+            --pr "$PR_NUMBER" --self "release"
+          # The repository ruleset requires a code-owner review on prod. The
+          # release token is the repository owner/admin, so automated release PRs
+          # use the existing bypass; human PRs still need the review.
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge --admin
 
       # The release PR changes the Maven version and changelog on prod. Sync
       # those release metadata changes back to staging so future promotions
@@ -115,5 +123,8 @@ jobs:
             PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base staging --head prod --state open --json number --jq '.[0].number // empty')"
           fi
           test -n "$PR_NUMBER" || { echo "::error::Unable to find/create the prod -> staging sync PR"; exit 1; }
-          gh pr checks "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --watch --fail-fast
-          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge
+          bash ./.github/scripts/wait-for-pull-request-checks.sh \
+            --pr "$PR_NUMBER" --self "release"
+          # Same owner/admin bypass as the release PR: this is an automated
+          # version-sync PR back to staging, not a human contribution.
+          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge --admin
