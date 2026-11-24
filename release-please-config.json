@@ -3,6 +3,7 @@
   "release-type": "maven",
   "include-v-in-tag": true,
   "include-v-in-release-name": true,
+  "include-component-in-tag": false,
   "bootstrap-sha": "48754eac5c4fcb1d2740941a4f9fbc8016844335",
   "packages": {
     ".": {
