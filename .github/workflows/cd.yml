@@ -333,14 +333,19 @@ jobs:
             "- [ ] Je confirme avoir relu, compris et validé les modifications proposées par l'IA." \
             "" \
             "This is an automated release promotion. AI-assisted changes are disclosed in the pull requests that introduced them.")"
-          PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base prod --head staging --state open --json number --jq '.[0].number // empty')"
+          # Use the REST API: the promotion token has repo/workflow scopes, and
+          # gh's GraphQL PR commands require read:org on this repository.
+          PR_NUMBER="$(gh api "repos/$GITHUB_REPOSITORY/pulls?state=open&base=prod&head=$GITHUB_REPOSITORY_OWNER:staging" --jq '.[0].number // empty')"
           if [ -z "$PR_NUMBER" ]; then
-            gh pr create --repo "$GITHUB_REPOSITORY" --base prod --head staging \
-              --title "$TITLE" \
-              --body "$BODY"
-            PR_NUMBER="$(gh pr list --repo "$GITHUB_REPOSITORY" --base prod --head staging --state open --json number --jq '.[0].number // empty')"
+            PR_NUMBER="$(gh api --method POST "repos/$GITHUB_REPOSITORY/pulls" \
+              -f title="$TITLE" \
+              -f head="staging" \
+              -f base="prod" \
+              -f body="$BODY" \
+              --jq '.number')"
           else
-            gh pr edit "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --title "$TITLE" --body "$BODY"
+            gh api --method PATCH "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER" \
+              -f title="$TITLE" -f body="$BODY" >/dev/null
           fi
           test -n "$PR_NUMBER" || { echo "::error::Unable to find/create the staging -> prod PR"; exit 1; }
 
@@ -349,8 +354,9 @@ jobs:
             --pr "$PR_NUMBER" --self "Promote staging to prod"
           # The repository ruleset requires a code-owner review on prod. The
           # promotion token is the repository owner/admin, so this one automated
-          # release PR uses the existing bypass; human PRs still need the review.
-          gh pr merge "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --merge --admin
+          # release PR uses the existing REST bypass; human PRs still need the review.
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/merge" \
+            -f merge_method=merge >/dev/null
 
   deploy-staging:
     needs: publish-and-attest
