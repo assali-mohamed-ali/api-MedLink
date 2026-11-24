@@ -8,6 +8,7 @@
     ".": {
       "release-type": "maven",
       "package-name": "com.example:api-MedLink",
+      "component": "api-MedLink",
       "changelog-path": "CHANGELOG.md"
     }
   }
