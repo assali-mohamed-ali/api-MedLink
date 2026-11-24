@@ -150,7 +150,7 @@ src/main/resources/
 ├── application-dev.yml        local
 ├── application-staging.yml    pre-prod
 ├── application-prod.yml       prod
-└── db/migration/              Flyway V*__*.sql (V14 = patient_documents)
+└── db/migration/              Flyway V*__*.sql (V22 = patient_documents)
 
 src/test/java/.../functional/  real API + Keycloak + Postgres + Mailpit (+ MinIO for document tests),
                                driven over HTTP like a browser

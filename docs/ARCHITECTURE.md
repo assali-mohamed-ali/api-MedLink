@@ -223,7 +223,7 @@ owner, and names the security-sensitive ones explicitly: the `config/` and `secu
 | `service/` | Business logic on entities, never a DTO. `KeycloakLoginClient` (password grant, logout) and `KeycloakAdminService` are the only Keycloak callers | Adding behaviour |
 | `repository/`, `model/` | Spring Data JPA and entities (`User`, `Patient extends User`, `AuditEntry`...) | Adding a table |
 | `dto/` | Records for API input/output; never a password hash or a token | Changing what the API exposes |
-| `document/` | Patient documents: controller, DTOs/mapper, AES-256-GCM cipher, MinIO storage, `V14` metadata entity | Changing document storage, encryption or limits |
+| `document/` | Patient documents: controller, DTOs/mapper, AES-256-GCM cipher, MinIO storage, `V22` metadata entity | Changing document storage, encryption or limits |
 | `config/` | `SecurityConfig` (rules, CSRF, 401/403 handlers), CORS, OpenAPI, Keycloak clients, rate limits | Changing who can call what (code owner review) |
 | `security/` | `Roles`, `CurrentUser`, `OwnershipGuard`, `LoginSessions`, `SessionValidityFilter`, `RateLimitFilter`, JSON 401/403 handlers, `RouteWords` | Changing sessions or access checks |
 | `exception/` | `GlobalExceptionHandler`, `ErrorBody` (the one error shape) | Adding an error type |
