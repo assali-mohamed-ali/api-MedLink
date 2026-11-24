@@ -41,6 +41,10 @@ jobs:
       - name: Test the server deploy files
         run: bash deploy/test/render-env.test.sh
 
+      # MLink-169: when Vault is unavailable, an image-only deploy keeps the server's .env and updates APP_IMAGE.
+      - name: Test the Vault-unavailable deploy fallback
+        run: bash deploy/test/update-app-image.test.sh
+
       # MLink-168: the cross-repository gate waits for the matching staging jobs without deadlocking.
       - name: Test the cross-repository staging gate
         run: bash .github/scripts/test/wait-for-staging.test.sh

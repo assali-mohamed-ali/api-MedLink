@@ -39,6 +39,14 @@ approval.
 
 After a change to these roles, run `setup.sh` again on the vault host (step 2 of "First set-up", with a fresh setup token).
 
+## When the API cannot read Vault
+
+The API deploy action tries the OIDC login and read first. If Vault refuses or is unreachable, it logs a warning and keeps
+the target's existing `.env` and `.backup.env`, updating only `APP_IMAGE` (`deploy/update-app-image.sh`). An image-only
+deploy can therefore go through during a Vault outage; secret rotations are not applied. Restore Vault, run `setup.sh`
+with a fresh setup token, and apply any secret that changed before the next deploy. The dashboard deploy already falls
+back to the GitHub Environment secrets.
+
 ## First set-up (once)
 
 1. **Repo owner** (holds the root token): load the setup policy and create a short-lived token for whoever runs the

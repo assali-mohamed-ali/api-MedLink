@@ -68,26 +68,48 @@ runs:
         test -f "$DEPLOY_SETTINGS_FILE"
 
     - name: Read the secrets from Vault
+      id: secrets
       shell: bash
       env:
         VAULT_ADDR: ${{ inputs.vault_addr }}
         VAULT_ROLE: ${{ inputs.vault_role }}
         VAULT_SECRET_PATH: ${{ inputs.vault_path }}
         DEPLOY_SETTINGS_FILE: ${{ inputs.settings_file }}
+        DEPLOY_PATH: ${{ inputs.path }}
         DEPLOY_IMAGE: ${{ inputs.image }}
       run: |
-        set -euo pipefail
+        set -uo pipefail
         umask 077
-        # GitHub's OIDC token for this job, valid only for this repository and GitHub environment
-        jwt="$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
-          "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=medlink-vault" | jq -r .value)"
-        echo "::add-mask::$jwt"
-        token="$(jq -n --arg jwt "$jwt" --arg role "$VAULT_ROLE" '{jwt: $jwt, role: $role}' |
-          curl -fsS -X POST --data @- "$VAULT_ADDR/v1/auth/jwt-github/login" | jq -r .auth.client_token)"
-        echo "::add-mask::$token"
-        curl -fsS -H "X-Vault-Token: $token" "$VAULT_ADDR/v1/medlink/data/$VAULT_SECRET_PATH" |
-          jq .data.data > "$RUNNER_TEMP/secrets.json"
-        curl -fsS -X POST -H "X-Vault-Token: $token" "$VAULT_ADDR/v1/auth/token/revoke-self" > /dev/null
+        rm -f "$RUNNER_TEMP/secrets.json" "$RUNNER_TEMP/deploy.env" "$RUNNER_TEMP/backup.env"
+        vault_read() {
+          local jwt token read_ok=1
+          # GitHub's OIDC token for this job, valid only for this repository and GitHub environment
+          jwt="$(curl -fsS -H "Authorization: bearer $ACTIONS_ID_TOKEN_REQUEST_TOKEN" \
+            "$ACTIONS_ID_TOKEN_REQUEST_URL&audience=medlink-vault" | jq -r '.value // empty')" || return 1
+          [ -n "$jwt" ] || return 1
+          echo "::add-mask::$jwt"
+          token="$(jq -n --arg jwt "$jwt" --arg role "$VAULT_ROLE" '{jwt: $jwt, role: $role}' |
+            curl -fsS -X POST --data @- "$VAULT_ADDR/v1/auth/jwt-github/login" |
+            jq -r '.auth.client_token // empty')" || return 1
+          [ -n "$token" ] || return 1
+          echo "::add-mask::$token"
+          if ! curl -fsS -H "X-Vault-Token: $token" "$VAULT_ADDR/v1/medlink/data/$VAULT_SECRET_PATH" |
+            jq .data.data > "$RUNNER_TEMP/secrets.json"; then
+            read_ok=0
+          fi
+          curl -fsS -X POST -H "X-Vault-Token: $token" "$VAULT_ADDR/v1/auth/token/revoke-self" > /dev/null || true
+          [ "$read_ok" -eq 1 ] && [ -s "$RUNNER_TEMP/secrets.json" ]
+        }
+        secrets_source=server
+        if vault_read; then
+          secrets_source=vault
+        else
+          rm -f "$RUNNER_TEMP/secrets.json"
+          echo "::warning::Vault refused or could not return the deployment secrets for $VAULT_ROLE; keeping the existing .env and .backup.env on $DEPLOY_PATH and updating APP_IMAGE only. Restore Vault and rotate secrets if they changed."
+        fi
+        echo "source=$secrets_source" >> "$GITHUB_OUTPUT"
+        [ "$secrets_source" = vault ] || exit 0
+        set -e
         jq -r '.[]' "$RUNNER_TEMP/secrets.json" | while IFS= read -r value; do echo "::add-mask::$value"; done
         python3 deploy/render-env.py env "$DEPLOY_SETTINGS_FILE" < "$RUNNER_TEMP/secrets.json" > "$RUNNER_TEMP/deploy.env"
         python3 deploy/render-env.py backup < "$RUNNER_TEMP/secrets.json" > "$RUNNER_TEMP/backup.env"
@@ -112,6 +134,8 @@ runs:
         DEPLOY_HOST: ${{ inputs.host }}
         DEPLOY_USER: ${{ inputs.user }}
         DEPLOY_PATH: ${{ inputs.path }}
+        DEPLOY_IMAGE: ${{ inputs.image }}
+        SECRETS_SOURCE: ${{ steps.secrets.outputs.source }}
       run: |
         set -euo pipefail
         SSH_OPTS=(-o BatchMode=yes -o StrictHostKeyChecking=yes -o IdentitiesOnly=yes -i "$HOME/.ssh/deploy_key")
@@ -125,10 +149,23 @@ runs:
         scp -q "${SSH_OPTS[@]}" keycloak/realm-medlink.json "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/keycloak/realm-medlink.json"
         scp -q "${SSH_OPTS[@]}" monitoring/prometheus/prometheus.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/prometheus/prometheus.yml"
         scp -q "${SSH_OPTS[@]}" monitoring/alerts/alert-rules.yml "$DEPLOY_USER@$DEPLOY_HOST:$DEPLOY_PATH/monitoring/alerts/alert-rules.yml"
-        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "umask 077; cat > '$DEPLOY_PATH/.env'" < "$RUNNER_TEMP/deploy.env"
-        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "umask 077; cat > '$DEPLOY_PATH/.backup.env'" < "$RUNNER_TEMP/backup.env"
-        ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "chmod 600 '$DEPLOY_PATH/.env' '$DEPLOY_PATH/.backup.env'"
-        rm -f "$RUNNER_TEMP/deploy.env" "$RUNNER_TEMP/backup.env"
+
+        if [ "$SECRETS_SOURCE" = vault ]; then
+          ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "umask 077; cat > '$DEPLOY_PATH/.env'" < "$RUNNER_TEMP/deploy.env"
+          ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "umask 077; cat > '$DEPLOY_PATH/.backup.env'" < "$RUNNER_TEMP/backup.env"
+          ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "chmod 600 '$DEPLOY_PATH/.env' '$DEPLOY_PATH/.backup.env'"
+          rm -f "$RUNNER_TEMP/deploy.env" "$RUNNER_TEMP/backup.env"
+        elif [ "$SECRETS_SOURCE" = server ]; then
+          ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" \
+            "test -s '$DEPLOY_PATH/.env' && test -s '$DEPLOY_PATH/.backup.env'" || {
+              echo "::error::Vault is unavailable and $DEPLOY_PATH/.env or .backup.env is missing; seed the server first."
+              exit 1
+            }
+          ssh "${SSH_OPTS[@]}" "$DEPLOY_USER@$DEPLOY_HOST" "sh -s -- '$DEPLOY_PATH' '$DEPLOY_IMAGE'" < deploy/update-app-image.sh
+        else
+          echo "::error::unknown secrets source '$SECRETS_SOURCE'"
+          exit 1
+        fi
 
     - name: Log in to GHCR on the target
       shell: bash
