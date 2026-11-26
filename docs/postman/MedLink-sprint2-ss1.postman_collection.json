@@ -1884,14 +1884,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/password",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"currentPassword\": \"{{password}}\",\n  \"newPassword\": \"Nouveau-Pass-2026!\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -1912,14 +1922,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/login",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -1964,14 +1984,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/password",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"newPassword\": \"Nouveau-Pass-2026!\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -1994,14 +2024,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/password",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"currentPassword\": \"Wrong-Pass-2026!\",\n  \"newPassword\": \"Nouveau-Pass-2026!\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -2022,14 +2062,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/password",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"currentPassword\": \"{{password}}\",\n  \"newPassword\": \"Aa1!short\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -2050,14 +2100,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/password",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"currentPassword\": \"{{password}}\",\n  \"newPassword\": \"Postman-Pass-2026!\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -2098,14 +2158,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/login",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{password}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -2126,14 +2196,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/login",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{changedPassword}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -2426,7 +2506,10 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/admin/users/{{targetUserId}}/force-password-reset"
           },
@@ -2444,18 +2527,95 @@
           ]
         },
         {
+          "name": "200 · staff get the clinics and specialties of a practitioner's profile (MLink-69)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/profile-choices",
+            "description": "The back-office's 'Nouveau compte' and role change read these lists; the patients' /api/slots/filters refuses staff."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"only clinics and specialties\", () => pm.expect(body).to.have.all.keys(\"clinics\", \"specialties\"));",
+                  "pm.test(\"the reference specialties (MLink-174)\", () => pm.expect(body.specialties.map((s) => s.name)).to.include(\"Cardiologie\"));",
+                  "pm.test(\"a clinic has its id, name and city\", () => pm.expect(body.clinics[0]).to.have.all.keys(\"id\", \"name\", \"city\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff list the practitioners to supervise (MLink-35)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/practitioners"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json();",
+                  "pm.test(\"names, specialty and clinics only\", () => list.forEach((p) => pm.expect(p).to.have.all.keys(\"id\", \"firstName\", \"lastName\", \"specialty\", \"clinics\")));",
+                  "pm.test(\"no email\", () => pm.expect(pm.response.text()).to.not.include(\"@\"));",
+                  "if (list.length) pm.collectionVariables.set(\"supervisedPractitionerId\", list[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff read a practitioner's agenda, read only (MLink-35)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/agenda?practitionerId={{supervisedPractitionerId}}&from=2026-12-01T00:00:00Z&to=2026-12-08T00:00:00Z"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"the clinics and the items\", () => pm.expect(pm.response.json()).to.have.all.keys(\"clinics\", \"items\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "200 · next patient login asks for a password change",
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/login",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{changedPassword}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -2478,14 +2638,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/password",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"newPassword\": \"Postman-Forced-2026!\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -2506,14 +2676,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/password",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"newPassword\": \"Another-Pass-2026!\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -2533,14 +2713,24 @@
           "request": {
             "method": "POST",
             "header": [
-              { "key": "Content-Type", "value": "application/json" },
-              { "key": "X-XSRF-TOKEN", "value": "{{xsrf}}" }
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
             ],
             "url": "{{baseUrl}}/api/auth/login",
             "body": {
               "mode": "raw",
               "raw": "{\n  \"email\": \"{{email}}\",\n  \"password\": \"{{forcedPassword}}\"\n}",
-              "options": { "raw": { "language": "json" } }
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
             }
           },
           "event": [
@@ -7170,6 +7360,979 @@
           ]
         }
       ]
+    },
+    {
+      "name": "13 · Patient documents (MLink-123/125)",
+      "description": "Self-contained: it creates a patient and a disposable staff member, enrols the staff code, then uploads, lists and downloads a PDF. It closes any session left by an earlier folder, so it can run after folder 8 or alone. The multipart request reads docs/postman/fixtures/patient-document.pdf; in the Postman app, reselect the file if the path is not resolved. The practitioner refusal and the 10 MiB boundary are covered by the JUnit tests.",
+      "item": [
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN and new emails",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "const xsrf = pm.cookies.get(\"XSRF-TOKEN\");",
+                  "pm.test(\"XSRF-TOKEN cookie present\", () => pm.expect(xsrf).to.be.a(\"string\").and.not.empty);",
+                  "pm.collectionVariables.set(\"xsrf\", xsrf);",
+                  "const run = Date.now();",
+                  "pm.collectionVariables.set(\"docPatientEmail\", \"postman.doc.patient.\" + run + \"@example.com\");",
+                  "pm.collectionVariables.set(\"docStaffEmail\", \"postman.doc.staff.\" + run + \"@example.com\");",
+                  "pm.collectionVariables.unset(\"totpSecret\");"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "204 or 401 · close any session left by an earlier folder",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/logout"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"204 if a session was closed, 401 when there was none\", () => pm.expect([204, 401]).to.include(pm.response.code));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · upload without a session",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Titre",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "docs/postman/fixtures/patient-document.pdf"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"UNAUTHENTICATED\", () => pm.expect(pm.response.json().code).to.eql(\"UNAUTHENTICATED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · list without a session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"UNAUTHENTICATED\", () => pm.expect(pm.response.json().code).to.eql(\"UNAUTHENTICATED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "401 · download without a session",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents/{{$guid}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 401\", () => pm.response.to.have.status(401));",
+                  "pm.test(\"UNAUTHENTICATED\", () => pm.expect(pm.response.json().code).to.eql(\"UNAUTHENTICATED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "201 · register the document patient",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/register",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{docPatientEmail}}\",\n  \"password\": \"{{password}}\",\n  \"firstName\": \"Doc\",\n  \"lastName\": \"Patient\",\n  \"birthDate\": \"1990-04-12\",\n  \"phone\": \"+216 22 123 456\",\n  \"address\": \"12 rue de Carthage, Sousse\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mailpit: the verification link for the document patient",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{docPatientEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const to = pm.collectionVariables.get(\"docPatientEmail\");",
+                  "const mails = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to) && x.Subject === \"Confirmez votre adresse e-mail MedLink\");",
+                  "pm.test(\"one verification mail\", () => pm.expect(mails).to.have.length(1));",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + mails[0].ID, (e, res) => {",
+                  "    const match = res.json().Text.match(/verifier-email\\?token=([A-Za-z0-9_-]+)/);",
+                  "    pm.test(\"the mail links to the React verification page\", () => pm.expect(match).to.not.be.null);",
+                  "    pm.collectionVariables.set(\"docVerifyToken\", match[1]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "204 · verify the document patient's email",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/verify-email",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{docVerifyToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Keycloak (dev admin): admin token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/x-www-form-urlencoded"
+              }
+            ],
+            "url": "{{keycloakUrl}}/realms/master/protocol/openid-connect/token",
+            "body": {
+              "mode": "urlencoded",
+              "urlencoded": [
+                {
+                  "key": "grant_type",
+                  "value": "password"
+                },
+                {
+                  "key": "client_id",
+                  "value": "admin-cli"
+                },
+                {
+                  "key": "username",
+                  "value": "{{kcAdminUser}}"
+                },
+                {
+                  "key": "password",
+                  "value": "{{kcAdminPassword}}"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.collectionVariables.set(\"kcToken\", pm.response.json().access_token);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Keycloak: find the document patient by email",
+          "request": {
+            "method": "GET",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users?email={{docPatientEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const to = pm.collectionVariables.get(\"docPatientEmail\");",
+                  "const found = pm.response.json().filter(u => u.email === to);",
+                  "pm.test(\"one Keycloak user with the document patient's email\", () => pm.expect(found).to.have.length(1));",
+                  "pm.collectionVariables.set(\"docPatientId\", found[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Keycloak: a disposable staff member (console, group /administrative-staff)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Authorization",
+                "value": "Bearer {{kcToken}}"
+              },
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "url": "{{keycloakUrl}}/admin/realms/medlink/users",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"username\": \"{{docStaffEmail}}\",\n  \"email\": \"{{docStaffEmail}}\",\n  \"firstName\": \"Postman\",\n  \"lastName\": \"Document staff\",\n  \"enabled\": true,\n  \"emailVerified\": true,\n  \"groups\": [\n    \"/administrative-staff\"\n  ],\n  \"credentials\": [\n    {\n      \"type\": \"password\",\n      \"value\": \"{{password}}\",\n      \"temporary\": false\n    }\n  ]\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "const location = pm.response.headers.get(\"Location\");",
+                  "pm.collectionVariables.set(\"docStaffUserId\", location.substring(location.lastIndexOf(\"/\") + 1));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the staff password alone asks for the code (mfaSetupRequired true)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{docStaffEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"code required\", () => pm.expect(body.mfaRequired).to.eql(true));",
+                  "pm.test(\"first login: setup required\", () => pm.expect(body.mfaSetupRequired).to.eql(true));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Mailpit: the code setup link mailed to the staff member",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{mailpitUrl}}/api/v1/search?query=to:{{docStaffEmail}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const to = pm.collectionVariables.get(\"docStaffEmail\");",
+                  "const mails = pm.response.json().messages.filter(x => x.To.some(t => t.Address === to) && x.Subject === \"Configurez votre code de connexion MedLink\");",
+                  "pm.test(\"one setup mail\", () => pm.expect(mails).to.have.length(1));",
+                  "pm.sendRequest(pm.collectionVariables.get(\"mailpitUrl\") + \"/api/v1/message/\" + mails[0].ID, (e, res) => {",
+                  "    const match = res.json().Text.match(/configurer-code\\?token=([A-Za-z0-9_-]+)/);",
+                  "    pm.test(\"the mail links to the React setup page\", () => pm.expect(match).to.not.be.null);",
+                  "    pm.collectionVariables.set(\"docStaffSetupToken\", match[1]);",
+                  "});"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff code setup (first login of this staff member)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/setup",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"token\": \"{{docStaffSetupToken}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"a Base32 secret\", () => pm.expect(body.secret).to.match(/^[A-Z2-7]{32}$/));",
+                  "pm.collectionVariables.set(\"docStaffSecret\", body.secret);",
+                  "pm.collectionVariables.set(\"totpSecret\", body.secret);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the current code opens the staff session (ADMINISTRATIVE_STAFF)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/mfa/verify",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"code\": \"{{totpCode}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"ADMINISTRATIVE_STAFF\", () => pm.expect(pm.response.json().user.roles).to.eql([\"ADMINISTRATIVE_STAFF\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · list with size=51 is refused",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents?size=51"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 · staff list for an unknown patient",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"NOT_FOUND\", () => pm.expect(pm.response.json().code).to.eql(\"NOT_FOUND\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 · staff upload for an unknown patient",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Titre",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "docs/postman/fixtures/patient-document.pdf"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"NOT_FOUND\", () => pm.expect(pm.response.json().code).to.eql(\"NOT_FOUND\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "400 · upload without a title is refused",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "docs/postman/fixtures/patient-document.pdf"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));",
+                  "pm.test(\"VALIDATION_FAILED\", () => pm.expect(pm.response.json().code).to.eql(\"VALIDATION_FAILED\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "201 · staff uploads a PDF (title + file)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Compte rendu",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "docs/postman/fixtures/patient-document.pdf"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 201\", () => pm.response.to.have.status(201));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"patientId\", () => pm.expect(body.patientId).to.eql(pm.collectionVariables.get(\"docPatientId\")));",
+                  "pm.test(\"uploadedBy is the staff member\", () => pm.expect(body.uploadedBy).to.eql(pm.collectionVariables.get(\"docStaffUserId\")));",
+                  "pm.test(\"title\", () => pm.expect(body.title).to.eql(\"Compte rendu\"));",
+                  "pm.test(\"original filename\", () => pm.expect(body.originalFilename).to.eql(\"patient-document.pdf\"));",
+                  "pm.test(\"canonical content type\", () => pm.expect(body.contentType).to.eql(\"application/pdf\"));",
+                  "pm.test(\"plaintext size\", () => pm.expect(body.sizeBytes).to.be.above(0));",
+                  "pm.test(\"Location\", () => pm.expect(pm.response.headers.get(\"Location\")).to.include(\"/api/patients/\" + body.patientId + \"/documents/\" + body.id));",
+                  "pm.collectionVariables.set(\"docId\", body.id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff lists the patient's documents (newest first)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "pm.test(\"one document\", () => pm.expect(page.total).to.eql(1));",
+                  "pm.test(\"the uploaded id\", () => pm.expect(page.items[0].id).to.eql(pm.collectionVariables.get(\"docId\")));",
+                  "pm.test(\"default page and size\", () => pm.expect(page.page).to.eql(0) && pm.expect(page.size).to.eql(20));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff downloads the exact PDF with attachment headers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents/{{docId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"canonical content type\", () => pm.expect(pm.response.headers.get(\"Content-Type\")).to.eql(\"application/pdf\"));",
+                  "pm.test(\"no-store\", () => pm.expect(pm.response.headers.get(\"Cache-Control\")).to.include(\"no-store\"));",
+                  "pm.test(\"nosniff\", () => pm.expect(pm.response.headers.get(\"X-Content-Type-Options\")).to.eql(\"nosniff\"));",
+                  "pm.test(\"attachment filename\", () => pm.expect(pm.response.headers.get(\"Content-Disposition\")).to.include(\"attachment\").and.include(\"patient-document.pdf\"));",
+                  "pm.test(\"the PDF bytes\", () => pm.expect(pm.response.text()).to.include(\"%PDF-1.4\").and.include(\"MedLink patient document\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 · staff downloads an unknown document of this patient",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents/{{$guid}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"NOT_FOUND\", () => pm.expect(pm.response.json().code).to.eql(\"NOT_FOUND\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "415 · staff uploads a non-multipart body",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents",
+            "body": {
+              "mode": "raw",
+              "raw": "{}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 415\", () => pm.response.to.have.status(415));",
+                  "pm.test(\"UNSUPPORTED_MEDIA_TYPE\", () => pm.expect(pm.response.json().code).to.eql(\"UNSUPPORTED_MEDIA_TYPE\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "409 · deleting the patient with documents is refused (DOCUMENTS_PRESENT)",
+          "request": {
+            "method": "DELETE",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/users/{{docPatientId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 409\", () => pm.response.to.have.status(409));",
+                  "pm.test(\"DOCUMENTS_PRESENT\", () => pm.expect(pm.response.json().code).to.eql(\"DOCUMENTS_PRESENT\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "GET /csrf → refresh XSRF-TOKEN before the patient login",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "const xsrf = pm.cookies.get(\"XSRF-TOKEN\");",
+                  "pm.test(\"XSRF-TOKEN cookie present\", () => pm.expect(xsrf).to.be.a(\"string\").and.not.empty);",
+                  "pm.collectionVariables.set(\"xsrf\", xsrf);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the patient logs in",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/login",
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"{{docPatientEmail}}\",\n  \"password\": \"{{password}}\"\n}",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              }
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"the document patient\", () => pm.expect(body.user.id).to.eql(pm.collectionVariables.get(\"docPatientId\")));",
+                  "pm.test(\"PATIENT\", () => pm.expect(body.user.roles).to.eql([\"PATIENT\"]));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · the patient cannot upload",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents",
+            "body": {
+              "mode": "formdata",
+              "formdata": [
+                {
+                  "key": "title",
+                  "value": "Titre",
+                  "type": "text"
+                },
+                {
+                  "key": "file",
+                  "type": "file",
+                  "src": "docs/postman/fixtures/patient-document.pdf"
+                }
+              ]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"FORBIDDEN\", () => pm.expect(pm.response.json().code).to.eql(\"FORBIDDEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the patient lists their own documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "pm.test(\"one document\", () => pm.expect(page.total).to.eql(1));",
+                  "pm.test(\"the uploaded id\", () => pm.expect(page.items[0].id).to.eql(pm.collectionVariables.get(\"docId\")));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · the patient downloads their own document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{docPatientId}}/documents/{{docId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"the PDF bytes\", () => pm.expect(pm.response.text()).to.include(\"%PDF-1.4\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "403 · the patient lists another patient's documents",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 403\", () => pm.response.to.have.status(403));",
+                  "pm.test(\"FORBIDDEN\", () => pm.expect(pm.response.json().code).to.eql(\"FORBIDDEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "404 · the patient downloads another patient's document",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/patients/{{$guid}}/documents/{{docId}}"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 404\", () => pm.response.to.have.status(404));",
+                  "pm.test(\"NOT_FOUND, never 403: the response cannot confirm the document exists\", () => pm.expect(pm.response.json().code).to.eql(\"NOT_FOUND\"));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
@@ -7381,16 +8544,49 @@
       "key": "movedAppointmentId",
       "value": ""
     },
-    { "key": "agendaFrom", "value": "" },
-    { "key": "agendaTo", "value": "" },
-    { "key": "agendaSlotStart", "value": "" },
-    { "key": "agendaSlotEnd", "value": "" },
-    { "key": "randomSlotId", "value": "" },
-    { "key": "randomPatientId", "value": "" },
-    { "key": "recordDeniedCode", "value": "" },
-    { "key": "myBusy", "value": "" },
-    { "key": "overlapFrom", "value": "" },
-    { "key": "overlapTo", "value": "" },
-    { "key": "overlapSlotId", "value": "" }
+    {
+      "key": "agendaFrom",
+      "value": ""
+    },
+    {
+      "key": "agendaTo",
+      "value": ""
+    },
+    {
+      "key": "agendaSlotStart",
+      "value": ""
+    },
+    {
+      "key": "agendaSlotEnd",
+      "value": ""
+    },
+    {
+      "key": "randomSlotId",
+      "value": ""
+    },
+    {
+      "key": "randomPatientId",
+      "value": ""
+    },
+    {
+      "key": "recordDeniedCode",
+      "value": ""
+    },
+    {
+      "key": "myBusy",
+      "value": ""
+    },
+    {
+      "key": "overlapFrom",
+      "value": ""
+    },
+    {
+      "key": "overlapTo",
+      "value": ""
+    },
+    {
+      "key": "overlapSlotId",
+      "value": ""
+    }
   ]
 }

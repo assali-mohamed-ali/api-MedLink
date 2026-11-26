@@ -17,11 +17,18 @@ services:
         condition: service_healthy
       keycloak:
         condition: service_healthy
+      minio:
+        condition: service_healthy
 
   keycloak-db:
     restart: unless-stopped
 
   keycloak:
+    restart: unless-stopped
+    ports: !reset []
+
+  # Patient documents (MLink-9): reached by the API on the compose network only, never published
+  minio:
     restart: unless-stopped
     ports: !reset []
 

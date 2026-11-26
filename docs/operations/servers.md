@@ -4,10 +4,12 @@ MLink-171. Four EC2 instances in eu-north-1, Ubuntu 26.04, created by the repo o
 
 | Host | Role | Elastic IP (2026-11-19) | Private IP | Edge |
 |---|---|---|---|---|
-| staging-server | `staging`: API, Keycloak, both databases and the front | 13.51.30.39 | 172.31.36.231 | Caddy `https://13.51.30.39.sslip.io`: `/api/*`, `/livez`, `/readyz` → 127.0.0.1:8080, the rest → 127.0.0.1:8081 |
+| staging-server | `staging`: API, Keycloak, both databases and the front | 13.51.30.39 | 172.31.36.231 | Caddy `https://staging.med-l.ink` (and the old `https://13.51.30.39.sslip.io`): `/api/*`, `/livez`, `/readyz` → 127.0.0.1:8080, the rest → 127.0.0.1:8081 |
 | api-medlink | `api`: production API, Keycloak, both databases | 13.50.114.144 | 172.31.33.183 | none; port 8080 open only to the front host's private IP |
-| frontend-medlink | `front`: production front and TLS edge | 56.228.94.12 | 172.31.40.60 | Caddy `https://56.228.94.12.sslip.io`: `/api/*` → 172.31.33.183:8080, the rest → 127.0.0.1:8081 |
+| frontend-medlink | `front`: production front and TLS edge | 56.228.94.12 | 172.31.40.60 | Caddy `https://med-l.ink` (`www.` redirects to it; the old `https://56.228.94.12.sslip.io` still served): `/api/*` → 172.31.33.183:8080, the rest → 127.0.0.1:8081 |
 | vault | secrets (see [vault.md](vault.md)) | 56.228.74.131 | 172.31.44.172 | Caddy → Vault |
+
+Domain `med-l.ink` (Namecheap, since 2026-11-26): A records `@` and `www` → 56.228.94.12, `staging` → 13.51.30.39, on Elastic IPs. Caddy gets and renews the Let's Encrypt certificates; its previous configuration is kept as `/etc/caddy/Caddyfile.before-domain` on both hosts. The old `sslip.io` names go once every link and workflow variable uses the domain.
 
 Host keys seen at the first admin login (2026-11-18, ED25519). They stay the same when the IP changes; check them
 before trusting a host or filling `DEPLOY_KNOWN_HOSTS`:

@@ -24,6 +24,8 @@ profile in CI.
 | `keycloak_admin_client_secret` | yes | `medlink-admin` service account secret |
 | `mfa_encryption_key` | yes | Staff code key, 32 bytes in base64 (`openssl rand -base64 32`); a new key means every staff member enrols again |
 | `report_encryption_key` | yes | Consultation report key (MLink-32), 32 bytes in base64 (`openssl rand -base64 32`), **distinct from** `mfa_encryption_key`; the reports are readable only with it, so keep it backed up: a lost key means the reports cannot be read |
+| `documents_storage_endpoint`, `documents_storage_access_key`, `documents_storage_secret_key`, `documents_storage_bucket` | access/secret yes | External S3-compatible store over HTTPS (MLink-9); the bucket is managed outside Terraform (`documents_storage_create_bucket` defaults to false) |
+| `documents_encryption_key` | yes | Patient document key (MLink-9), 32 bytes in base64 (`openssl rand -base64 32`), **distinct from** the other keys |
 | `mail_host`, `mail_port`, `mail_username`, `mail_password`, `mail_from` | username/password yes | Real SMTP, TLS on 587 |
 | `app_frontend_url`, `cors_allowed_origins` | no | React origin |
 

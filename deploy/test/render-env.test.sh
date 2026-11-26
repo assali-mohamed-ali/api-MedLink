@@ -21,7 +21,7 @@ done
 [ "$FAILED" -eq 0 ] || { echo "server deploy files: $FAILED check(s) failed"; exit 1; }
 
 render() { docker run --rm -i -v "$(host_path "$DEPLOY"):/deploy:ro" python:3.13-alpine python3 /deploy/render-env.py "$@"; }
-FULL='{"POSTGRES_PASSWORD":"pg-value","APP_DB_PASSWORD":"app-value","KEYCLOAK_DB_PASSWORD":"kc-db-value","KC_BFF_CLIENT_SECRET":"bff-value","KC_ADMIN_CLIENT_SECRET":"adm-value","KEYCLOAK_ADMIN_PASSWORD":"kc-adm-value","KC_DEV_USERS_PASSWORD":"dev-value","APP_MFA_ENCRYPTION_KEY":"mfa+/=","APP_REPORT_ENCRYPTION_KEY":"rep+/=","BACKUP_PASSPHRASE":"backup-value","MAIL_PASSWORD":"mail-value"}'
+FULL='{"POSTGRES_PASSWORD":"pg-value","APP_DB_PASSWORD":"app-value","KEYCLOAK_DB_PASSWORD":"kc-db-value","KC_BFF_CLIENT_SECRET":"bff-value","KC_ADMIN_CLIENT_SECRET":"adm-value","KEYCLOAK_ADMIN_PASSWORD":"kc-adm-value","KC_DEV_USERS_PASSWORD":"dev-value","APP_MFA_ENCRYPTION_KEY":"mfa+/=","APP_REPORT_ENCRYPTION_KEY":"rep+/=","APP_DOCUMENTS_ENCRYPTION_KEY":"doc+/=","MINIO_ROOT_USER":"minio-user","MINIO_ROOT_PASSWORD":"minio-value","BACKUP_PASSPHRASE":"backup-value","MAIL_PASSWORD":"mail-value"}'
 
 printf '%s' "$FULL" | render env /deploy/env/staging.env > "$WORK/out.env" 2> "$WORK/out.err" && pass "renders a complete .env" || fail "render failed: $(cat "$WORK/out.err")"
 grep -q "^POSTGRES_PASSWORD='pg-value'$" "$WORK/out.env" && pass "secrets are single-quoted" || fail "secret line wrong"
@@ -30,6 +30,14 @@ grep -q '^SPRING_PROFILES_ACTIVE=staging$' "$WORK/out.env" && pass "settings are
 grep -q 'backup-value' "$WORK/out.env" && fail "the backup passphrase reached .env" || pass "the backup passphrase stays out of .env"
 printf '%s' "$FULL" | render backup > "$WORK/backup.env" 2> /dev/null
 [ "$(cat "$WORK/backup.env")" = "BACKUP_PASSPHRASE='backup-value'" ] && pass "backup mode writes only the passphrase" || fail "backup output wrong"
+
+# Patient documents (MLink-9): the documents key and the host MinIO's credentials come from Vault too
+grep -q "^APP_DOCUMENTS_ENCRYPTION_KEY='doc+/='$" "$WORK/out.env" && grep -q "^MINIO_ROOT_USER='minio-user'$" "$WORK/out.env" &&
+    grep -q "^MINIO_ROOT_PASSWORD='minio-value'$" "$WORK/out.env" && pass "the documents key and MinIO credentials are rendered" ||
+    fail "documents key or MinIO credentials missing from .env"
+nominio="${FULL/\"MINIO_ROOT_PASSWORD\":\"minio-value\",/}"
+if printf '%s' "$nominio" | render env /deploy/env/staging.env > /dev/null 2> "$WORK/nm.err"; then fail "a missing MinIO password was accepted"; else pass "a missing MinIO password stops the deploy"; fi
+grep -q 'MINIO_ROOT_PASSWORD' "$WORK/nm.err" && pass "the error names MINIO_ROOT_PASSWORD" || fail "error does not name MINIO_ROOT_PASSWORD"
 
 missing='{"POSTGRES_PASSWORD":"pg-value"}'
 if printf '%s' "$missing" | render env /deploy/env/staging.env > "$WORK/m.out" 2> "$WORK/m.err"; then fail "a missing secret was accepted"; else pass "a missing secret stops the deploy"; fi
@@ -50,11 +58,26 @@ for e in staging production; do
     grep -qE 'PASSWORD=|SECRET=|ENCRYPTION_KEY=|PASSPHRASE=' "$f" && fail "$e.env holds a secret key" || pass "$e.env holds no secret"
     grep -q '^KEYCLOAK_START_MODE=start$' "$f" && pass "$e: Keycloak in production mode" || fail "$e: Keycloak start mode"
     grep -qE "^APP_FRONTEND_URL=https://" "$f" && pass "$e: the front is on HTTPS" || fail "$e: front URL"
+    # Option b (2026-11-22): the host's own MinIO, reached only on the compose network, so plain HTTP inside the host;
+    # the API seals every document with AES-256-GCM before it leaves. TLS stays required for any other endpoint.
+    grep -q '^APP_DOCUMENTS_STORAGE_ENDPOINT=http://minio:9100$' "$f" && grep -q '^APP_DOCUMENTS_STORAGE_REQUIRE_TLS=false$' "$f" &&
+        pass "$e: documents go to the host MinIO on the compose network" || fail "$e: documents endpoint / require-tls"
+    grep -q '^APP_DOCUMENTS_STORAGE_CREATE_BUCKET=true$' "$f" && pass "$e: the API creates its bucket" || fail "$e: create-bucket"
     # The team mail account (MLink-172); a typo here makes Gmail refuse every app password with 535
     grep -q '^MAIL_USERNAME=medlinq2026@gmail\.com$' "$f" && grep -q "^MAIL_FROM='MedLink <medlinq2026@gmail\.com>'$" "$f" &&
         pass "$e: mail goes through the team account" || fail "$e: MAIL_USERNAME/MAIL_FROM is not medlinq2026@gmail.com"
 done
 grep -q '^SPRING_PROFILES_ACTIVE=prod$' "$DEPLOY/env/production.env" && pass "production uses the prod profile" || fail "production profile"
+# The domain med-l.ink (2026-11-26): mail links and the public URL use it; CORS keeps the old sslip.io name until
+# Caddy stops serving it
+domain() { # $1 env file, $2 domain, $3 old sslip.io name
+    grep -q "^APP_FRONTEND_URL=https://$2$" "$1" && grep -q "^APP_PUBLIC_URL=https://$2$" "$1" &&
+        grep -q "^CORS_ALLOWED_ORIGINS=https://$2,https://$3$" "$1"
+}
+domain "$DEPLOY/env/production.env" 'med-l\.ink' '56\.228\.94\.12\.sslip\.io' &&
+    pass "production: links and CORS on med-l.ink" || fail "production: APP_FRONTEND_URL/APP_PUBLIC_URL/CORS not on med-l.ink"
+domain "$DEPLOY/env/staging.env" 'staging\.med-l\.ink' '13\.51\.30\.39\.sslip\.io' &&
+    pass "staging: links and CORS on staging.med-l.ink" || fail "staging: APP_FRONTEND_URL/APP_PUBLIC_URL/CORS not on staging.med-l.ink"
 grep -q '^API_BIND_ADDRESS=127\.0\.0\.1$' "$DEPLOY/env/staging.env" && pass "staging API on loopback" || fail "staging bind address"
 grep -q '^API_BIND_ADDRESS=172\.31\.33\.183$' "$DEPLOY/env/production.env" && pass "production API on the private address" || fail "production bind address"
 
@@ -64,7 +87,11 @@ echo 'APP_IMAGE=example/api@sha256:0000' >> "$WORK/compose.env"
     pass "the overlay is valid" || fail "compose config: $(cat "$WORK/config.err")"
 [ "$(grep -c 'published:' "$WORK/config.yml")" = 1 ] && pass "only the API publishes a port" || fail "published ports: $(grep -c 'published:' "$WORK/config.yml")"
 grep -q 'host_ip: 127.0.0.1' "$WORK/config.yml" && pass "the API port is bound to the configured address" || fail "API port not bound"
-[ "$(grep -c 'restart: unless-stopped' "$WORK/config.yml")" = 4 ] && pass "the four services come back after a reboot" || fail "restart policies: $(grep -c 'restart: unless-stopped' "$WORK/config.yml")"
+[ "$(grep -c 'restart: unless-stopped' "$WORK/config.yml")" = 5 ] && pass "the five services come back after a reboot" || fail "restart policies: $(grep -c 'restart: unless-stopped' "$WORK/config.yml")"
+service() { awk -v s="  $1:" '$0 == s { f = 1; print; next } f && /^  [a-z-]+:$/ { exit } f' "$WORK/config.yml"; }
+service minio | grep -q 'published:' && fail "MinIO publishes a port" || pass "MinIO publishes no port"
+service app | awk '/depends_on:/ { f = 1; next } f && /^    [a-z_]+:$/ { exit } f' | grep -q '^      minio:' &&
+    pass "the API waits for MinIO" || fail "the API does not wait for MinIO"
 grep -qE '^  (mailpit|prometheus):' "$WORK/config.yml" && fail "a local-only service would start on a server" || pass "mailpit and prometheus stay off the servers"
 
 # The deploy action and the CD jobs read Vault with GitHub's OIDC token, never a stored .env
