@@ -55,6 +55,16 @@ for e in staging production; do
         pass "$e: mail goes through the team account" || fail "$e: MAIL_USERNAME/MAIL_FROM is not medlinq2026@gmail.com"
 done
 grep -q '^SPRING_PROFILES_ACTIVE=prod$' "$DEPLOY/env/production.env" && pass "production uses the prod profile" || fail "production profile"
+# The domain med-l.ink (2026-11-26): mail links and the public URL use it; CORS keeps the old sslip.io name until
+# Caddy stops serving it
+domain() { # $1 env file, $2 domain, $3 old sslip.io name
+    grep -q "^APP_FRONTEND_URL=https://$2$" "$1" && grep -q "^APP_PUBLIC_URL=https://$2$" "$1" &&
+        grep -q "^CORS_ALLOWED_ORIGINS=https://$2,https://$3$" "$1"
+}
+domain "$DEPLOY/env/production.env" 'med-l\.ink' '56\.228\.94\.12\.sslip\.io' &&
+    pass "production: links and CORS on med-l.ink" || fail "production: APP_FRONTEND_URL/APP_PUBLIC_URL/CORS not on med-l.ink"
+domain "$DEPLOY/env/staging.env" 'staging\.med-l\.ink' '13\.51\.30\.39\.sslip\.io' &&
+    pass "staging: links and CORS on staging.med-l.ink" || fail "staging: APP_FRONTEND_URL/APP_PUBLIC_URL/CORS not on staging.med-l.ink"
 grep -q '^API_BIND_ADDRESS=127\.0\.0\.1$' "$DEPLOY/env/staging.env" && pass "staging API on loopback" || fail "staging bind address"
 grep -q '^API_BIND_ADDRESS=172\.31\.33\.183$' "$DEPLOY/env/production.env" && pass "production API on the private address" || fail "production bind address"
 
