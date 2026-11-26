@@ -129,6 +129,8 @@ from `X-Forwarded-For`, believed only from `TRUSTED_PROXIES` (loopback by defaul
 | 15 | `PUT /api/admin/users/{id}/role` | staff | 5 | MLink-69 |
 | 16 | `PATCH /api/admin/users/{id}/status` | staff | 5 | MLink-70 |
 | 16b | `GET /api/admin/profile-choices` | staff | 5 | MLink-69 |
+| 16c | `GET /api/admin/practitioners` | staff | 5 | MLink-35 |
+| 16d | `GET /api/admin/agenda?practitionerId=&from=&to=` | staff | 5 | MLink-35 |
 
 ### 1 · `GET /api/auth/csrf`
 → **204**, sets the `XSRF-TOKEN` cookie (readable by JavaScript). React calls it once before
@@ -268,6 +270,16 @@ profile is chosen from in "Nouveau compte" (13) and the role change (15). Added 
 lists from `GET /api/slots/filters`, the patients' slot search, which refuses staff (403), so no practitioner could be
 created from the back-office. Patient and practitioner **403**, no session **401**.
 
+
+### 16c · `GET /api/admin/practitioners` (staff)
+→ **200** `[{id, firstName, lastName, specialty: {id, name}, clinics: [{id, name}]}]`, by last then first name in French
+order: whom staff can supervise (MLink-35). Never an email or a username.
+
+### 16d · `GET /api/admin/agenda?practitionerId=&from=&to=` (staff)
+→ **200** the same body as `GET /api/practitioner/agenda` for that practitioner: their clinics and the slots starting in
+`[from, to)`, with the patient's names on a booked slot (MLink-35, supervision). Read only: nothing medical, no action.
+**400** `VALIDATION_FAILED` without `practitionerId`, `from` or `to`, an end not after the start or more than 31 days;
+**404** `PRACTITIONER_NOT_FOUND`. Patient and practitioner **403**, no session **401**.
 ### React pages the mails and flows rely on (Ahlem)
 `/inscription`, `/verifier-email?token=`, `/connexion`, `/double-authentification`,
 `/mot-de-passe`, `/activer-compte?token=`, `/admin/comptes`. Base URL: property `app.frontend-url`.
