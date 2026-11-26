@@ -1,5 +1,21 @@
 # Changelog
 
+## [1.2.0](https://github.com/assali-mohamed-ali/api-MedLink/compare/v1.1.0...v1.2.0) (2026-11-26)
+
+
+### Features
+
+* MLink-35 staff supervise the clinics' activity, read only ([d4d5e67](https://github.com/assali-mohamed-ali/api-MedLink/commit/d4d5e6700583669646f40a739ee70140627610d1))
+* **MLink-35:** staff supervise the clinics' activity, read only ([09d2c10](https://github.com/assali-mohamed-ali/api-MedLink/commit/09d2c100b0a583f443625e46503ff66fcd6ce0e8))
+* promote master to staging ([5d771e1](https://github.com/assali-mohamed-ali/api-MedLink/commit/5d771e10501ca9c19094c53669f40baa55743d4c))
+* promote staging to prod ([d905fcd](https://github.com/assali-mohamed-ali/api-MedLink/commit/d905fcd461051ea9a2fc3f83f4a2fb513649e2d3))
+
+
+### Bug Fixes
+
+* MLink-69 staff get the lists of a practitioner's profile ([6abbc99](https://github.com/assali-mohamed-ali/api-MedLink/commit/6abbc9967bd7ad97ccaff8b899e461a268fb82da))
+* **MLink-69:** staff get the lists of a practitioner's profile ([de8dd95](https://github.com/assali-mohamed-ali/api-MedLink/commit/de8dd956d26f8a7d07cddfc60c17c00eb324bb32))
+
 ## [1.1.0](https://github.com/assali-mohamed-ali/api-MedLink/compare/v1.0.1...v1.1.0) (2026-11-25)
 
 
