@@ -2551,6 +2551,49 @@
           ]
         },
         {
+          "name": "200 · staff list the practitioners to supervise (MLink-35)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/practitioners"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const list = pm.response.json();",
+                  "pm.test(\"names, specialty and clinics only\", () => list.forEach((p) => pm.expect(p).to.have.all.keys(\"id\", \"firstName\", \"lastName\", \"specialty\", \"clinics\")));",
+                  "pm.test(\"no email\", () => pm.expect(pm.response.text()).to.not.include(\"@\"));",
+                  "if (list.length) pm.collectionVariables.set(\"supervisedPractitionerId\", list[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff read a practitioner's agenda, read only (MLink-35)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/agenda?practitionerId={{supervisedPractitionerId}}&from=2026-12-01T00:00:00Z&to=2026-12-08T00:00:00Z"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"the clinics and the items\", () => pm.expect(pm.response.json()).to.have.all.keys(\"clinics\", \"items\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "200 · next patient login asks for a password change",
           "request": {
             "method": "POST",
