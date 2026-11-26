@@ -68,6 +68,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/slots/filters",            L, O, F, F), // MLink-163: the search form's lists
             new Rule("POST",   "/api/appointments",             L, O, F, F), // MLink-102: patients book a slot
             new Rule("GET",    "/api/appointments/me",          L, O, F, F), // MLink-108: a patient's own appointments
+            new Rule("GET",    "/api/reports/me",               L, O, F, F), // MLink-32 follow-up: a patient's own reports
             // MLink-106: only the holder; {id} is someone else's (a random one), so even a patient gets 403
             new Rule("POST",   "/api/appointments/{id}/cancel", L, F, F, F),
             // MLink-107: a patient's empty body is refused first (400, it tells nothing about {id}); others get 403

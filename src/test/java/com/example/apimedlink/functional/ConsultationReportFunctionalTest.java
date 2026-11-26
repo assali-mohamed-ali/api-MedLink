@@ -32,7 +32,8 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
 
     static final String PASSWORD = "Consultation-Report-2026!";
 
-    static final Instant DAY = Instant.now().truncatedTo(ChronoUnit.DAYS).plus(4, ChronoUnit.DAYS).plus(9, ChronoUnit.HOURS);
+    /** Two days ago: the consultations of these tests have started, so a report may be written (MLink-32 follow-up). */
+    static final Instant DAY = Instant.now().truncatedTo(ChronoUnit.DAYS).minus(2, ChronoUnit.DAYS).plus(9, ChronoUnit.HOURS);
 
     static final String TEXT = "Douleur thoracique atypique, ECG normal. Contrôle dans un mois.";
 
@@ -118,6 +119,30 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
         List<Object> list = list(first.browser().call(reports(patient)));
         assertThat(list.stream().map(item -> map(item).get("content")).toList())
                 .containsExactly("Deuxième compte-rendu.", "Premier compte-rendu.");
+    }
+
+    /**
+     * MLink-32 follow-up: before the consultation has started (an upcoming appointment only), the record can be read
+     * but no report written: 409 CONSULTATION_NOT_STARTED, nothing saved, nothing traced as a write.
+     */
+    @Test
+    void beforeTheConsultationHasStartedAReportIsRefusedAndNothingIsSaved() throws Exception {
+        Pro pro = practitioner();
+        UUID patient = insertPatient();
+        appointment(pro.id(), patient, "BOOKED", Instant.now().plus(3, ChronoUnit.DAYS));
+
+        HttpResponse<String> refused = pro.browser().postJson(reports(patient), json(TEXT));
+
+        assertThat(refused.statusCode()).as(refused.body()).isEqualTo(409);
+        assertThat(Browser.json(refused).get("code")).isEqualTo("CONSULTATION_NOT_STARTED");
+        assertThat(Browser.json(refused).get("message"))
+                .isEqualTo("Vous pourrez écrire le compte-rendu une fois la consultation commencée.");
+        assertThat(jdbc.queryForObject("select count(*) from consultation_reports where patient_id = ?", Integer.class, patient))
+                .isZero();
+        assertThat(jdbc.queryForObject("select count(*) from audit_entries where action = 'REPORT_CREATED' and user_id = ?",
+                Integer.class, pro.id())).isZero();
+        // Reading stays possible: the practitioner prepares the consultation
+        assertThat(pro.browser().call(reports(patient)).statusCode()).isEqualTo(200);
     }
 
     @Test
@@ -357,11 +382,14 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
 
     /** One clinic of the practitioner's, one slot, one appointment of the patient on it. */
     private void appointment(UUID practitioner, UUID patient, String status) {
+        appointment(practitioner, patient, status, DAY.plus((long) (Math.random() * 1000), ChronoUnit.MINUTES));
+    }
+
+    private void appointment(UUID practitioner, UUID patient, String status, Instant start) {
         UUID clinic = UUID.randomUUID();
         jdbc.update("insert into clinics (id, name, city) values (?, ?, 'Sousse')", clinic, "Clinique " + clinic);
         jdbc.update("insert into practitioner_clinics (practitioner_id, clinic_id) values (?, ?)", practitioner, clinic);
         UUID slot = UUID.randomUUID();
-        Instant start = DAY.plus((long) (Math.random() * 1000), ChronoUnit.MINUTES);
         jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) values (?, ?, ?, ?, ?, ?)",
                 slot, practitioner, clinic, Timestamp.from(start), Timestamp.from(start.plus(30, ChronoUnit.MINUTES)),
                 "BOOKED".equals(status) ? "BOOKED" : "FREE");

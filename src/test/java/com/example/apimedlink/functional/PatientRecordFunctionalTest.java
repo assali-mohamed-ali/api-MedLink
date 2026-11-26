@@ -48,6 +48,8 @@ class PatientRecordFunctionalTest extends FunctionalTestBase {
         assertThat(body.get("patient")).isEqualTo(Map.of("id", patient.toString(), "firstName", "Amel",
                 "lastName", "Ben Salah", "birthDate", "1990-04-12", "phone", "+21620000000"));
         assertThat(body.get("reports")).isEqualTo(List.of()); // MLink-32 fills it
+        // MLink-32 follow-up: the consultation is upcoming, so no report can be written yet
+        assertThat(body.get("canWriteReport")).isEqualTo(false);
         // Nothing the consultation does not need: no address, no email
         assertThat(response.body()).doesNotContain("rue du Test").doesNotContain("@");
         assertThat(response.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
@@ -59,7 +61,11 @@ class PatientRecordFunctionalTest extends FunctionalTestBase {
         UUID patient = insertPatient("Youssef", "Trabelsi");
         appointment(pro.id(), patient, Instant.now().minus(7, ChronoUnit.DAYS), "BOOKED");
 
-        assertThat(pro.browser().call(record(patient)).statusCode()).isEqualTo(200);
+        HttpResponse<String> response = pro.browser().call(record(patient));
+
+        assertThat(response.statusCode()).isEqualTo(200);
+        // MLink-32 follow-up: the consultation took place, so a report can be written
+        assertThat(Browser.json(response).get("canWriteReport")).isEqualTo(true);
     }
 
     @Test
