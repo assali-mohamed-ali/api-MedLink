@@ -118,6 +118,8 @@ Then redeploy. Some values are also stored elsewhere and must be changed there i
 | `KC_BFF_CLIENT_SECRET`, `KC_ADMIN_CLIENT_SECRET`, `KEYCLOAK_ADMIN_PASSWORD` | the client secret or admin password in Keycloak: the realm file is imported only once |
 | `APP_MFA_ENCRYPTION_KEY` | do not change casually: every enrolled staff code becomes unreadable (`docs/DEPLOYMENT.md`) |
 | `APP_REPORT_ENCRYPTION_KEY` | do not change: sealed reports would no longer open |
+| `APP_DOCUMENTS_ENCRYPTION_KEY` | do not replace: stored documents would no longer open. Rotate by adding a new key version (`docs/features/patient-documents.md`) |
+| `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` | the API and MinIO both read this pair from `.env`: redeploy so both restart together, after checking the MinIO image's notes on root credential rotation |
 | `BACKUP_PASSPHRASE` | keep the old one until the last backup made with it has expired (28 days) |
 
 The dashboard's `ssh_private_key_b64` and `known_hosts_b64` are changed the same way, with `vault kv patch

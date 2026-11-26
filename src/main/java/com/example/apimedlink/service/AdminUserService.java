@@ -2,11 +2,14 @@ package com.example.apimedlink.service;
 
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.EmailTakenException;
+import com.example.apimedlink.model.AuditAction;
+import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Clinic;
 import com.example.apimedlink.model.EmailToken.Purpose;
 import com.example.apimedlink.model.Practitioner;
 import com.example.apimedlink.model.Specialty;
 import com.example.apimedlink.model.User;
+import com.example.apimedlink.repository.AccountOperation;
 import com.example.apimedlink.repository.ClinicRepository;
 import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.repository.PractitionerRepository;
@@ -15,6 +18,8 @@ import com.example.apimedlink.repository.SpecialtyRepository;
 import com.example.apimedlink.repository.UserRepository;
 import com.example.apimedlink.security.Roles;
 import jakarta.persistence.EntityNotFoundException;
+import java.text.Collator;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -26,23 +31,44 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.mail.MailException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
- * Account management by staff (MLink-69, MLink-70, MLink-71): list, create a practitioner or staff account,
- * change a role, enable or disable an account. A practitioner is a user with a profile (specialty and clinics,
- * V13): it is created with the account, and a role change adds or removes it, so no practitioner account exists
- * without its profile. The Keycloak user and our rows are created in the same request, then the activation mail
- * goes out; when our rows fail, the Keycloak user is deleted, so no account is left half made. Patients are never
- * created here: they register.
+ * Account management by staff (MLink-69, MLink-70, MLink-71, MLink-72): list, create a practitioner or staff
+ * account, change a role, enable or disable an account. A practitioner is a user with a profile (specialty and
+ * clinics, V13): it is created with the account, and a role change adds or removes it, so no practitioner account
+ * exists without its profile. The Keycloak user and our rows are created in the same request, then the activation
+ * mail goes out; when our rows fail, the Keycloak user is deleted, so no account is left half made. Patients are
+ * never created here: they register.
+ *
+ * <p>No change is made without its audit entry (MLink-72, reviews of #121 and #122). A new account is saved with
+ * its entry in one transaction: both or neither. A role change or a status change reaches Keycloak, which no
+ * transaction covers, so it is a durable operation ({@link AccountOperationRunner}): its record and its ATTEMPTED
+ * entry are written together before anything is touched (when they cannot be written, nothing is done and the
+ * answer is 503); it is then carried out; and its record is closed together with its SUCCESS or FAILURE entry,
+ * which carries the same operation id. When the request fails on an outage, or the process stops, the operation
+ * stays pending and the worker ({@link AccountOperationWorker}) carries it out again until it is closed: every
+ * step is idempotent, and asking again for the same change reuses the pending operation instead of starting a new
+ * one. A refusal changes nothing; its FAILURE entry is written, and if even that fails the original error is kept
+ * and the gap is logged.
  */
 @Service
 public class AdminUserService {
 
     private static final Logger log = LoggerFactory.getLogger(AdminUserService.class);
 
+    /** The resource type of every account entry in the audit trail. */
+    private static final String RESOURCE = "USER";
+
+    /** The resource id of an audit entry for an account that was never created. */
+    private static final String NEW_ACCOUNT = "NEW_ACCOUNT";
+
     /** What a practitioner needs besides their account: a specialty and at least one clinic. */
     private record Profile(Specialty specialty, Set<Clinic> clinics) {}
+
+    /** A role change that passed every check: what is left to do, in which order. */
+    private record RoleChange(String groupPath, Runnable profileChange, boolean demotion) {}
 
     private final KeycloakAdminService keycloak;
     private final UserRepository users;
@@ -54,12 +80,16 @@ public class AdminUserService {
     private final SessionRevocationStore revocations;
     private final EmailTokenService tokens;
     private final MailService mail;
+    private final AuditService audit;
+    private final AccountOperationRunner operations;
     private final TransactionTemplate tx;
 
-    public AdminUserService(KeycloakAdminService keycloak, UserRepository users, PatientRepository patients,                            PractitionerRepository practitioners, SpecialtyRepository specialties,
+    public AdminUserService(KeycloakAdminService keycloak, UserRepository users, PatientRepository patients,
+                            PractitionerRepository practitioners, SpecialtyRepository specialties,
                             ClinicRepository clinics, PractitionerProfiles profiles,
                             SessionRevocationStore revocations, EmailTokenService tokens,
-                            MailService mail, TransactionTemplate tx) {
+                            MailService mail, AuditService audit, AccountOperationRunner operations,
+                            TransactionTemplate tx) {
         this.keycloak = keycloak;
         this.users = users;
         this.patients = patients;
@@ -70,7 +100,21 @@ public class AdminUserService {
         this.revocations = revocations;
         this.tokens = tokens;
         this.mail = mail;
+        this.audit = audit;
+        this.operations = operations;
         this.tx = tx;
+    }
+
+    /**
+     * The lists a practitioner's profile is chosen from (MLink-69), in French order by name ("Pédiatrie" before
+     * "Pneumologie"). A few dozen rows: sorted here, not in SQL, whose collation depends on the database.
+     */
+    @Transactional(readOnly = true)
+    public ProfileChoices profileChoices() {
+        Collator french = Collator.getInstance(Locale.FRENCH);
+        return new ProfileChoices(
+                clinics.findAll().stream().sorted(Comparator.comparing(Clinic::getName, french)).toList(),
+                specialties.findAll().stream().sorted(Comparator.comparing(Specialty::getName, french)).toList());
     }
 
     public KeycloakUserPage list(String search, int page, int size) {
@@ -83,6 +127,16 @@ public class AdminUserService {
      */
     public KeycloakUserPage.Entry create(String email, String firstName, String lastName, String role,
                                          UUID specialtyId, Set<UUID> clinicIds) {
+        try {
+            return createAccount(email, firstName, lastName, role, specialtyId, clinicIds);
+        } catch (RuntimeException failed) {
+            recordFailure(AuditAction.ACCOUNT_CREATED, NEW_ACCOUNT, failed);
+            throw failed;
+        }
+    }
+
+    private KeycloakUserPage.Entry createAccount(String email, String firstName, String lastName, String role,
+                                                 UUID specialtyId, Set<UUID> clinicIds) {
         String groupPath = staffGroupOf(role);
         // Everything we can refuse is refused before Keycloak is touched
         Profile profile = Roles.PRACTITIONER.equals(role) ? resolveProfile(specialtyId, clinicIds) : null;
@@ -99,10 +153,12 @@ public class AdminUserService {
         }
         String token;
         try {
-            // The account and its activation token are saved together: both or neither
+            // The account, its activation token and its audit entry are saved together: all or nothing
             token = tx.execute(status -> {
                 saveAccount(id, normalized, firstName, lastName, profile);
-                return tokens.issue(id, Purpose.ACTIVATE_ACCOUNT);
+                String issued = tokens.issue(id, Purpose.ACTIVATE_ACCOUNT);
+                audit.recordWithin(AuditAction.ACCOUNT_CREATED, RESOURCE, id.toString(), AuditOutcome.SUCCESS);
+                return issued;
             });
         } catch (RuntimeException e) {
             deleteKeycloakUser(id);
@@ -114,21 +170,34 @@ public class AdminUserService {
     }
 
     /**
-     * Changes the role. Everything that can be refused is refused first, then the user's sessions are refused by
-     * the API (session_revocations) before anything is changed, so a failure half-way never leaves an admin
-     * session valid: the user logs in again, the safe outcome. A promotion adds the practitioner profile, then
-     * moves the user to the new Keycloak group. A demotion moves the group first and deletes the profile only
-     * after Keycloak succeeded, so a Keycloak failure never leaves a PRACTITIONER without their profile. Keycloak
-     * then signs the user out: a session keeps the roles it was opened with. Every step is idempotent: after an
-     * error staff send the change again.
+     * Changes the role. Everything that can be refused is refused first. Then the change is a durable operation:
+     * registered with its audit entry, carried out, closed with its closing entry (see the class comment). Carrying
+     * it out refuses the user's sessions in the API (session_revocations) before anything is changed, so a failure
+     * half-way never leaves an admin session valid: the user logs in again, the safe outcome. A promotion adds the
+     * practitioner profile, then moves the user to the new Keycloak group. A demotion moves the group first and
+     * deletes the profile only after Keycloak succeeded, so a Keycloak failure never leaves a PRACTITIONER without
+     * their profile. Keycloak then signs the user out: a session keeps the roles it was opened with. Every step is
+     * idempotent, and the checks are made again each time the operation runs, so a retry works from the current state.
      *
      * @throws jakarta.persistence.EntityNotFoundException when the user does not exist (404)
      * @throws ApiException 409 {@code PATIENT_ROLE_CHANGE_UNSUPPORTED} for a patient (a person holds one role; the
      *     history of a patient is not migrated), 409 {@code PRACTITIONER_HAS_SLOTS} when a practitioner who holds
      *     slots would lose their profile, 400 {@code VALIDATION_FAILED} when a new practitioner has no valid
-     *     specialty or clinics
+     *     specialty or clinics, 409 {@code OPERATION_PENDING} when another change of this account is pending,
+     *     503 {@code AUDIT_UNAVAILABLE} when the audit entry cannot be written
      */
     public void changeRole(UUID id, String role, UUID specialtyId, Set<UUID> clinicIds) {
+        try {
+            checkRoleChange(id, role, specialtyId, clinicIds);
+        } catch (RuntimeException refused) {
+            recordFailure(AuditAction.ROLE_CHANGED, id.toString(), refused);
+            throw refused;
+        }
+        operations.submit(AccountOperation.roleChange(id, role, specialtyId, clinicIds), this::execute);
+    }
+
+    /** Every check of a role change: it throws before anything is touched. */
+    private RoleChange checkRoleChange(UUID id, String role, UUID specialtyId, Set<UUID> clinicIds) {
         String groupPath = staffGroupOf(role);
         if (patients.existsById(id)) {
             throw new ApiException(HttpStatus.CONFLICT, "PATIENT_ROLE_CHANGE_UNSUPPORTED",
@@ -163,13 +232,17 @@ public class AdminUserService {
             profileChange = () -> { };
             demotion = false;
         }
+        return new RoleChange(groupPath, profileChange, demotion);
+    }
+
+    private void applyRoleChange(UUID id, RoleChange change) {
         revocations.revoke(id);
-        if (demotion) {
-            keycloak.moveToGroup(id, groupPath);
-            tx.executeWithoutResult(status -> profileChange.run());
+        if (change.demotion()) {
+            keycloak.moveToGroup(id, change.groupPath());
+            tx.executeWithoutResult(status -> change.profileChange().run());
         } else {
-            tx.executeWithoutResult(status -> profileChange.run());
-            keycloak.moveToGroup(id, groupPath);
+            tx.executeWithoutResult(status -> change.profileChange().run());
+            keycloak.moveToGroup(id, change.groupPath());
         }
         keycloak.endSessions(id);
     }
@@ -177,22 +250,59 @@ public class AdminUserService {
     /**
      * Enables or disables an account. A disable writes the local revocation (session_revocations) first, as
      * changeRole does: the API validates already-issued tokens locally, so if that write fails nothing has changed
-     * in Keycloak and staff send the request again, while a failure after it only leaves the account enabled with
-     * its sessions refused (the user logs in again). Keycloak then disables the account and ends its sessions.
+     * in Keycloak and the operation is carried out again, while a failure after it only leaves the account enabled
+     * with its sessions refused (the user logs in again). Keycloak then disables the account and ends its sessions.
+     * The change is a durable operation, like a role change (see the class comment).
      *
-     * @throws ApiException 409 {@code CANNOT_DISABLE_SELF} when staff disable their own account
+     * @throws ApiException 409 {@code CANNOT_DISABLE_SELF} when staff disable their own account, 409
+     *     {@code OPERATION_PENDING} when another change of this account is pending, 503
+     *     {@code AUDIT_UNAVAILABLE} when the audit entry cannot be written
      */
     public void setEnabled(UUID id, boolean enabled, UUID actingUser) {
+        AuditAction action = enabled ? AuditAction.ACCOUNT_ENABLED : AuditAction.ACCOUNT_DISABLED;
         if (!enabled && id.equals(actingUser)) {
-            throw new ApiException(HttpStatus.CONFLICT, "CANNOT_DISABLE_SELF",
+            ApiException refused = new ApiException(HttpStatus.CONFLICT, "CANNOT_DISABLE_SELF",
                     "Vous ne pouvez pas désactiver votre propre compte.");
+            recordFailure(action, id.toString(), refused);
+            throw refused;
         }
+        operations.submit(AccountOperation.statusChange(id, enabled), this::execute);
+    }
+
+    /**
+     * Carries out one registered operation: what the request does, and what the worker does again after a crash or
+     * an outage. Idempotent, and the checks of a role change are made again here, against the current state.
+     */
+    public void execute(AccountOperation op) {
+        switch (op.action()) {
+            case ROLE_CHANGED -> applyRoleChange(op.userId(),
+                    checkRoleChange(op.userId(), op.targetRole(), op.specialtyId(), op.clinicIds()));
+            case ACCOUNT_ENABLED, ACCOUNT_DISABLED -> applyEnabled(op.userId(), Boolean.TRUE.equals(op.enabled()));
+            default -> throw new IllegalArgumentException("Not an account operation: " + op.action());
+        }
+    }
+
+    private void applyEnabled(UUID id, boolean enabled) {
         if (!enabled) {
             revocations.revoke(id);
         }
         keycloak.setEnabled(id, enabled);
         if (!enabled) {
             keycloak.endSessions(id);
+        }
+    }
+
+    /**
+     * The FAILURE entry of a refused or failed operation. The original error stays the one the caller gets; if even
+     * this entry cannot be written, that error is added to it and the gap is logged.
+     */
+    private void recordFailure(AuditAction action, String resourceId, RuntimeException cause) {
+        try {
+            audit.record(action, RESOURCE, resourceId, AuditOutcome.FAILURE);
+        } catch (RuntimeException auditFailure) {
+            cause.addSuppressed(auditFailure);
+            log.error("AUDIT_GAP: the FAILURE entry of {} for {} could not be written ({})",
+                    action, resourceId, auditFailure.getClass().getSimpleName());
         }
     }
 
