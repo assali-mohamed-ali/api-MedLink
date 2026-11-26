@@ -147,7 +147,8 @@ class ReadAuditConnectionTest {
         jdbc.update("insert into clinics (id, name, city) values (?, ?, 'Sousse')", clinic, "Clinique " + clinic);
         jdbc.update("insert into practitioner_clinics (practitioner_id, clinic_id) values (?, ?)", practitioner, clinic);
         UUID slot = UUID.randomUUID();
-        Instant start = Instant.now().truncatedTo(ChronoUnit.DAYS).plus(6, ChronoUnit.DAYS).plus(9, ChronoUnit.HOURS);
+        // Started two days ago: a report may be written once the consultation has started (MLink-32 follow-up)
+        Instant start = Instant.now().minus(2, ChronoUnit.DAYS);
         jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) values (?, ?, ?, ?, ?, 'BOOKED')",
                 slot, practitioner, clinic, Timestamp.from(start), Timestamp.from(start.plus(30, ChronoUnit.MINUTES)));
         jdbc.update("insert into appointments (id, slot_id, patient_id, booked_by, status) values (?, ?, ?, ?, 'BOOKED')",
