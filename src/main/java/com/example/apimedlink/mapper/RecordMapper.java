@@ -15,6 +15,7 @@ public final class RecordMapper {
         return new RecordDto(
                 new RecordDto.PatientIdentity(patient.getId(), patient.getFirstName(), patient.getLastName(),
                         patient.getBirthDate(), patient.getPhone()),
-                List.of());
+                List.of(),
+                record.canWriteReport());
     }
 }

@@ -5,6 +5,7 @@ import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Patient;
 import com.example.apimedlink.repository.AppointmentRepository;
 import com.example.apimedlink.repository.PatientRepository;
+import java.time.Instant;
 import java.util.UUID;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -46,7 +47,8 @@ public class PatientRecordService {
                 throw notAttached();
             }
             Patient patient = patients.findById(patientId).orElseThrow(PatientRecordService::notAttached);
-            return new PatientRecord(patient);
+            return new PatientRecord(patient,
+                    appointments.existsStartedByPractitionerAndPatient(practitionerId, patientId, Instant.now()));
         });
         // Written before the record leaves: a read that cannot be traced is not answered
         audit.record(AuditAction.RECORD_VIEWED, RESOURCE, patientId.toString(), AuditOutcome.SUCCESS);

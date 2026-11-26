@@ -85,4 +85,16 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
               and a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED""")
     boolean existsByPractitionerAndPatient(
             @Param("practitionerId") UUID practitionerId, @Param("patientId") UUID patientId);
+
+    /**
+     * MLink-32 follow-up: a consultation of this practitioner with this patient has started (a BOOKED appointment whose
+     * slot began at or before {@code now}), so a report may be written about it.
+     */
+    @Query("""
+            select count(a) > 0 from Appointment a
+            where a.slot.practitioner.id = :practitionerId and a.patientId = :patientId
+              and a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED
+              and a.slot.startsAt <= :now""")
+    boolean existsStartedByPractitionerAndPatient(@Param("practitionerId") UUID practitionerId,
+            @Param("patientId") UUID patientId, @Param("now") Instant now);
 }
