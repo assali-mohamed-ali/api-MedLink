@@ -18,6 +18,8 @@ import com.example.apimedlink.repository.SpecialtyRepository;
 import com.example.apimedlink.repository.UserRepository;
 import com.example.apimedlink.security.Roles;
 import jakarta.persistence.EntityNotFoundException;
+import java.text.Collator;
+import java.util.Comparator;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.Locale;
@@ -29,6 +31,7 @@ import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.mail.MailException;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionTemplate;
 
 /**
@@ -100,6 +103,18 @@ public class AdminUserService {
         this.audit = audit;
         this.operations = operations;
         this.tx = tx;
+    }
+
+    /**
+     * The lists a practitioner's profile is chosen from (MLink-69), in French order by name ("Pédiatrie" before
+     * "Pneumologie"). A few dozen rows: sorted here, not in SQL, whose collation depends on the database.
+     */
+    @Transactional(readOnly = true)
+    public ProfileChoices profileChoices() {
+        Collator french = Collator.getInstance(Locale.FRENCH);
+        return new ProfileChoices(
+                clinics.findAll().stream().sorted(Comparator.comparing(Clinic::getName, french)).toList(),
+                specialties.findAll().stream().sorted(Comparator.comparing(Specialty::getName, french)).toList());
     }
 
     public KeycloakUserPage list(String search, int page, int size) {
