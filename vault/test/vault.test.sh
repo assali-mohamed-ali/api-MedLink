@@ -175,13 +175,19 @@ seed() { in_vault -e VAULT_TOKEN="$SETUP_TOKEN" "$NAME" sh /medlink-vault/seed-e
 as_root kv metadata delete medlink/staging/api > /dev/null
 if seed staging > "$WORK/seed1.log" 2>&1; then pass "seed-env.sh staging"; else fail "seed-env.sh staging"; cat "$WORK/seed1.log" >&2; fi
 for k in POSTGRES_PASSWORD APP_DB_PASSWORD KEYCLOAK_DB_PASSWORD KEYCLOAK_ADMIN_PASSWORD KC_BFF_CLIENT_SECRET \
-    KC_ADMIN_CLIENT_SECRET KC_DEV_USERS_PASSWORD APP_MFA_ENCRYPTION_KEY APP_REPORT_ENCRYPTION_KEY BACKUP_PASSPHRASE; do
+    KC_ADMIN_CLIENT_SECRET KC_DEV_USERS_PASSWORD APP_MFA_ENCRYPTION_KEY APP_REPORT_ENCRYPTION_KEY BACKUP_PASSPHRASE     APP_DOCUMENTS_ENCRYPTION_KEY MINIO_ROOT_USER MINIO_ROOT_PASSWORD; do
     as_root kv get -field="$k" medlink/staging/api > /dev/null 2>&1 || fail "seed: $k missing"
 done
-for k in APP_MFA_ENCRYPTION_KEY APP_REPORT_ENCRYPTION_KEY; do
+for k in APP_MFA_ENCRYPTION_KEY APP_REPORT_ENCRYPTION_KEY APP_DOCUMENTS_ENCRYPTION_KEY; do
     n="$(as_root kv get -field="$k" medlink/staging/api | openssl base64 -d -A | wc -c | tr -d ' ')"
     [ "$n" = 32 ] && pass "seed: $k is 32 bytes in base64" || fail "seed: $k decodes to $n bytes"
 done
+# MinIO (MLink-9) refuses a root user outside 3..20 characters or a password outside 8..40
+mu="$(as_root kv get -field=MINIO_ROOT_USER medlink/staging/api 2> /dev/null || true)"
+mp="$(as_root kv get -field=MINIO_ROOT_PASSWORD medlink/staging/api 2> /dev/null || true)"
+[ "${#mu}" -ge 3 ] && [ "${#mu}" -le 20 ] && [ "${#mp}" -ge 8 ] && [ "${#mp}" -le 40 ] &&
+    pass "seed: MinIO credentials fit MinIO's lengths" || fail "seed: MinIO user ${#mu} / password ${#mp} characters"
+case "$mu$mp" in *[!A-Za-z0-9-]*) fail "seed: MinIO credentials hold a character outside letters, digits and -";; esac
 pw="$(as_root kv get -field=KC_DEV_USERS_PASSWORD medlink/staging/api)"
 case "$pw" in *[A-Z]*) ;; *) fail "seed: KC_DEV_USERS_PASSWORD has no upper case";; esac
 case "$pw" in *[a-z]*) ;; *) fail "seed: KC_DEV_USERS_PASSWORD has no lower case";; esac

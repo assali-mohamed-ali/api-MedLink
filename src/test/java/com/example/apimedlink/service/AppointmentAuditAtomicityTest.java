@@ -6,6 +6,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.doThrow;
 
 import com.example.apimedlink.TestcontainersConfiguration;
+import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.model.AuditAction;
 import com.example.apimedlink.model.AuditEntry;
 import com.example.apimedlink.repository.AuditEntryRepository;
@@ -20,6 +21,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.context.annotation.Import;
 import org.springframework.dao.DataAccessResourceFailureException;
+import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.authentication.TestingAuthenticationToken;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -101,6 +103,31 @@ class AppointmentAuditAtomicityTest {
         assertThat(slotStatus(oldSlot)).isEqualTo("BOOKED");
         assertThat(slotStatus(newSlot)).isEqualTo("FREE");
         assertThat(jdbc.queryForObject("select count(*) from appointments where slot_id = ?", Integer.class, newSlot)).isZero();
+    }
+
+    /**
+     * Code owner's review on the MLink-10 PR: a move to the slot the appointment already holds is refused before anything
+     * changes. Without it, the slot was freed then booked again by the same move: a new appointment on the same slot,
+     * an audit row, and an APPOINTMENT_MOVED alert "from a date to itself".
+     */
+    @Test
+    void aMoveToTheSameSlotIsRefusedAndChangesNothing() {
+        UUID patient = patient();
+        UUID slot = freeSlot();
+        UUID booked = appointments.book(patient, slot).getId();
+        callerIs(patient);
+
+        assertThatThrownBy(() -> appointments.reschedule(booked, slot))
+                .isInstanceOfSatisfying(ApiException.class, refused -> {
+                    assertThat(refused.getStatus()).isEqualTo(HttpStatus.CONFLICT);
+                    assertThat(refused.getCode()).isEqualTo("SAME_SLOT");
+                });
+
+        assertThat(appointmentStatus(booked)).isEqualTo("BOOKED");
+        assertThat(slotStatus(slot)).isEqualTo("BOOKED");
+        assertThat(jdbc.queryForObject("select count(*) from appointments where slot_id = ?", Integer.class, slot)).isEqualTo(1);
+        assertThat(actions(booked)).containsExactly("APPOINTMENT_BOOKED");
+        assertThat(jdbc.queryForObject("select count(*) from alerts where appointment_id = ?", Integer.class, booked)).isZero();
     }
 
     /** One row per change, on the appointment it concerns: the move's row is on the new appointment. */
