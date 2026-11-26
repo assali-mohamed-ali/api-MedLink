@@ -9,7 +9,7 @@
     </parent>
     <groupId>com.example</groupId>
     <artifactId>api-MedLink</artifactId>
-    <version>1.1.1-SNAPSHOT</version>
+    <version>1.2.0</version>
     <name>api-MedLink</name>
     <description>api-MedLink</description>
     <url/>
