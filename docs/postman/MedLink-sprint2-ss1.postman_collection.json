@@ -2527,6 +2527,30 @@
           ]
         },
         {
+          "name": "200 · staff get the clinics and specialties of a practitioner's profile (MLink-69)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/profile-choices",
+            "description": "The back-office's 'Nouveau compte' and role change read these lists; the patients' /api/slots/filters refuses staff."
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const body = pm.response.json();",
+                  "pm.test(\"only clinics and specialties\", () => pm.expect(body).to.have.all.keys(\"clinics\", \"specialties\"));",
+                  "pm.test(\"the reference specialties (MLink-174)\", () => pm.expect(body.specialties.map((s) => s.name)).to.include(\"Cardiologie\"));",
+                  "pm.test(\"a clinic has its id, name and city\", () => pm.expect(body.clinics[0]).to.have.all.keys(\"id\", \"name\", \"city\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "200 · next patient login asks for a password change",
           "request": {
             "method": "POST",

@@ -128,6 +128,7 @@ from `X-Forwarded-For`, believed only from `TRUSTED_PROXIES` (loopback by defaul
 | 14 | `POST /api/auth/account/activate` | public | 5 | MLink-71 |
 | 15 | `PUT /api/admin/users/{id}/role` | staff | 5 | MLink-69 |
 | 16 | `PATCH /api/admin/users/{id}/status` | staff | 5 | MLink-70 |
+| 16b | `GET /api/admin/profile-choices` | staff | 5 | MLink-69 |
 
 ### 1 · `GET /api/auth/csrf`
 → **204**, sets the `XSRF-TOKEN` cookie (readable by JavaScript). React calls it once before
@@ -260,6 +261,12 @@ Disabling ends the user's Keycloak sessions **and their API sessions at once** (
 registry, §3 "Session still valid"); their next call answers 401 `SESSION_EXPIRED`.
 
 Existing `/api/users` endpoints become staff-only in sub-sprint 5.
+
+### 16b · `GET /api/admin/profile-choices` (staff)
+→ **200** `{clinics: [{id, name, city}], specialties: [{id, name}]}`, both in French order by name: what a practitioner's
+profile is chosen from in "Nouveau compte" (13) and the role change (15). Added on 2026-11-26: the dashboard read these
+lists from `GET /api/slots/filters`, the patients' slot search, which refuses staff (403), so no practitioner could be
+created from the back-office. Patient and practitioner **403**, no session **401**.
 
 ### React pages the mails and flows rely on (Ahlem)
 `/inscription`, `/verifier-email?token=`, `/connexion`, `/double-authentification`,
