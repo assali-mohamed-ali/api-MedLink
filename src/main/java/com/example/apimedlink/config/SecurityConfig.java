@@ -104,6 +104,9 @@ public class SecurityConfig {
                         .hasRole(Roles.ADMINISTRATIVE_STAFF)
                         .requestMatchers(HttpMethod.GET, "/api/patients/*/documents", "/api/patients/*/documents/*")
                         .hasAnyRole(Roles.PATIENT, Roles.ADMINISTRATIVE_STAFF)
+                        // US-16: the patient's own deletion request, patients only, before anything is read
+                        .requestMatchers("/api/patients/me/deletion-request")
+                        .hasRole(Roles.PATIENT)
                         // Staff only, decided before any body is read: a patient sending a bad body gets 403, not 400
                         .requestMatchers("/api/admin/**")
                         .hasRole(Roles.ADMINISTRATIVE_STAFF)
