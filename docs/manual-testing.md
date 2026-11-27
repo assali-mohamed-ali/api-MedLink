@@ -5,7 +5,7 @@ Use a local isolated development stack with PostgreSQL, Keycloak, MinIO and Mail
 ## A. Patient
 
 1. Open Inscription with consent required. Confirm the box starts unchecked. Submit otherwise valid registration without the policy version through the API and verify rejection. Accept and register through the browser. Activate the account through Mailpit.
-2. Log in, reload, edit telephone and address in Profil, and reload again. Check that the original names and email remain intact.
+2. Log in, reload, edit telephone and address in Profil, and reload again. Check that the original names and email remain intact. In Notifications, turn reminders off, reload and check it stays off; book an appointment within 24 hours and check Mailpit receives the confirmation but no reminder.
 3. Filter practitioner and clinic, find a future slot, review and book. Confirm receipt, a Mailpit message and the appointment in Mes rendez-vous.
 4. Reschedule to a valid slot with the same practitioner, then cancel before the deadline. Verify the prior slot release, status history and practitioner alert. Repeat with a booking inside the cancellation deadline and verify refusal.
 5. Request recovery with known and unknown synthetic addresses. Compare public messages. Open the actual reset link, replace the password, verify the previous session is revoked and retry the used link.
@@ -39,6 +39,7 @@ Use a local isolated development stack with PostgreSQL, Keycloak, MinIO and Mail
 
 1. From a recently authenticated patient account, download the profile JSON and check that it contains only that patient’s records. After the freshness window, repeat and verify reauthentication is required.
 2. Confirm a deletion request and check it from staff review. Try accepting a request covered by retention. Reject it with a synthetic reason and verify the patient sees the decision. Test withdrawal while pending. Verify appointments, documents and audit rows remain intact.
+3. With a patient who never had a consultation, approve the request. Verify the patient's open tab is logged out at the next action, a new login is refused, Mailpit holds "Votre compte MedLink est clôturé", and the patient's rows, appointments and audit entries remain. Check the export JSON (format `medlink-export/2`) of another patient lists results, consent and preferences, and that their results stay marked new in Mes résultats.
 
 ## G–H. Security and regression
 

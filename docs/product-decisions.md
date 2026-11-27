@@ -40,6 +40,76 @@ production). Le consentement doit être **exprès** : la case ne doit jamais êt
 - Approuver ne supprime rien : **la purge n'est pas implémentée** (elle touche aussi les documents chiffrés du stockage).
 - Le journal d'audit n'est jamais supprimé et ne contient aucune donnée médicale.
 
+## 3. Activer l'inscription en production (US-04)
+
+État au 27 novembre 2026 : le consentement est **obligatoire dans tous les profils** (dev, test, staging, production :
+`app.consent.required=true`). Une inscription sans `consentVersion`, avec une version vide ou une version ancienne reçoit
+400 `VALIDATION_FAILED` (champ `consentVersion`) et ne crée rien, ni dans l'API ni dans Keycloak. Chaque patient garde la
+version acceptée et l'horodatage (`patients.consent_version`, `patients.consented_at`). Aucune modification ultérieure
+du profil ne les réécrit.
+
+En production, les inscriptions restent **fermées** (503 `CONSENT_UNAVAILABLE`) tant que `APP_CONSENT_AVAILABLE` n'est
+pas à `true`. Après l'approbation du texte exact et de sa version par Md. Assali et un juriste :
+
+1. Si le texte approuvé diffère de `ConsentPolicy.TEXT`, remplacer le texte **et** la version
+   (`ConsentPolicy.CURRENT_VERSION`, par exemple `2026-12-v2`) dans une PR revue. Une version ne désigne jamais deux
+   textes différents.
+2. Déployer cette version de l'API.
+3. Dans l'environnement de production seulement, définir `APP_CONSENT_AVAILABLE=true`, puis redémarrer l'API.
+4. Vérifier : `GET /api/auth/consent` renvoie la version approuvée et `required: true`. Une inscription de test sans
+   consentement reçoit 400, une inscription avec la version renvoyée reçoit 201.
+
+Les patients inscrits avant un changement de version gardent la version qu'ils ont acceptée. Leur demander d'accepter le
+nouveau texte à la prochaine connexion n'est pas implémenté : à décider avec le juriste si le texte change.
+
+## 4. Préférences de notification (US-15)
+
+Décidé et implémenté (V30) : deux e-mails sont optionnels, tous deux actifs par défaut, y compris pour les patients
+existants :
+
+- `appointmentReminders` : le rappel dans les 24 heures avant un rendez-vous (US-12). Le job relit la préférence sous le
+  verrou du rendez-vous : un patient qui la désactive après le calcul des rappels ne reçoit rien ;
+- `examResults` : l'avis « nouveau résultat dans votre espace » (US-25), sans aucun contenu médical.
+
+La confirmation de réservation, les alertes de sécurité, l'activation et la réinitialisation du mot de passe restent
+toujours envoyées. MedLink n'envoie pas de SMS : l'e-mail est le seul canal, et l'écran ne propose pas de SMS.
+
+## 5. Changement d'adresse e-mail (US-15) — en attente
+
+Le critère « je modifie … mon e-mail » n'est pas implémenté. L'adresse est l'identifiant de connexion dans Keycloak
+(`username = email`, V6). La changer demande un parcours d'identité à approuver : décision **en attente** de Md. Assali.
+Proposition :
+
+1. Le patient saisit la nouvelle adresse et son mot de passe actuel (connexion récente exigée, comme l'export).
+2. L'API envoie un lien à usage unique et à durée limitée à la **nouvelle** adresse, et un avis sans lien à l'ancienne.
+   Elle répond de la même façon que l'adresse soit libre ou non (pas d'énumération de comptes).
+3. À l'ouverture du lien, l'API met à jour Keycloak (username, email, `emailVerified`) puis `users.email`, comme une
+   opération de compte durable (MLink-72). Elle révoque toutes les sessions du patient.
+4. L'audit trace la demande et le changement, sans les adresses.
+
+En attendant, le profil affiche l'adresse en lecture seule et indique de contacter l'accueil de la clinique.
+
+## 6. Étapes d'une demande de suppression (US-16)
+
+Les quatre étapes restent distinctes :
+
+| Étape | Qui | Effet | État |
+|---|---|---|---|
+| Demande | Patient (connexion récente) | `deletion_requests` PENDING, le compte reste actif | implémenté |
+| Décision | Personnel administratif | refus motivé (le patient lit le motif) ou approbation ; 409 `RETENTION_APPLIES` tant que la conservation court | implémenté |
+| Clôture du compte | automatique après approbation | dans la transaction de la décision : révocation locale des sessions, désactivation Keycloak enregistrée comme opération durable (exécutée après la validation ou par le worker), `account_closed_at`, e-mail au patient. Réversible : le personnel peut réactiver le compte | implémenté (V30) |
+| Anonymisation puis purge | — | irréversibles : identité, documents chiffrés du stockage, dossier | **bloquées** jusqu'à l'approbation de la politique de conservation |
+
+Le dossier médical et le journal d'audit sont conservés à chaque étape.
+
+## 7. Contenu de l'export (US-16, format `medlink-export/2`)
+
+Le JSON contient : le profil, le consentement (version, date), les préférences de notification, les rendez-vous, les
+comptes-rendus et les résultats d'examens (textes déchiffrés, auteur), la liste des documents et la route de
+téléchargement `/api/patients/{patientId}/documents/{documentId}`, ainsi que l'état de la demande de suppression. Les
+fichiers, pièces jointes des résultats comprises, ne sont pas intégrés au JSON. Ils se téléchargent un par un, connecté,
+par la route existante (chiffrement au repos, audit de chaque lecture). L'export ne marque pas les résultats comme lus.
+
 ## Sources (recherche du 27 novembre 2026)
 
 - Guide pratique de l'INPDP à destination des médecins libéraux (Conseil de l'Europe / INPDP) :
