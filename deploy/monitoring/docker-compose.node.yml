@@ -9,3 +9,8 @@ services:
       - --web.listen-address=${NODE_EXPORTER_BIND_ADDRESS:?Set NODE_EXPORTER_BIND_ADDRESS}:9100
     volumes:
       - /:/host:ro,rslave
+    # MLink-175: it runs on every host, the 0.9 GB front and Vault included, with the host's pid and network
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 64m

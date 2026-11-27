@@ -1,0 +1,395 @@
+{
+  "uid": "medlink-hosts",
+  "title": "MedLink hosts",
+  "description": "MLink-175: CPU, memory, disk and network of each host, from node_exporter (port 9110, private IP only).",
+  "tags": [
+    "medlink",
+    "hosts"
+  ],
+  "editable": false,
+  "schemaVersion": 41,
+  "time": {
+    "from": "now-6h",
+    "to": "now"
+  },
+  "refresh": "1m",
+  "timezone": "browser",
+  "templating": {
+    "list": [
+      {
+        "name": "env",
+        "label": "Environment",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "medlink-prometheus"
+        },
+        "query": {
+          "query": "label_values(node_uname_info{job=\"node\"}, env)",
+          "refId": "env"
+        },
+        "definition": "label_values(node_uname_info{job=\"node\"}, env)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1
+      },
+      {
+        "name": "instance",
+        "label": "Host",
+        "type": "query",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "medlink-prometheus"
+        },
+        "query": {
+          "query": "label_values(node_uname_info{job=\"node\", env=~\"$env\"}, instance)",
+          "refId": "instance"
+        },
+        "definition": "label_values(node_uname_info{job=\"node\", env=~\"$env\"}, instance)",
+        "refresh": 2,
+        "includeAll": true,
+        "multi": true,
+        "allValue": ".*",
+        "current": {
+          "selected": true,
+          "text": [
+            "All"
+          ],
+          "value": [
+            "$__all"
+          ]
+        },
+        "sort": 1
+      }
+    ]
+  },
+  "panels": [
+    {
+      "id": 1,
+      "type": "stat",
+      "title": "Up",
+      "description": "1 = Prometheus reaches the host's node_exporter.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "mappings": [
+            {
+              "type": "value",
+              "options": {
+                "0": {
+                  "text": "DOWN",
+                  "color": "red"
+                },
+                "1": {
+                  "text": "UP",
+                  "color": "green"
+                }
+              }
+            }
+          ]
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "medlink-prometheus"
+          },
+          "expr": "up{job=\"node\", env=~\"$env\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "Uptime",
+      "description": "Time since the last boot: a sudden reset means the host restarted.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 8,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "medlink-prometheus"
+          },
+          "expr": "node_time_seconds{job=\"node\", env=~\"$env\", instance=~\"$instance\"} - node_boot_time_seconds{job=\"node\", env=~\"$env\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "type": "gauge",
+      "title": "Root disk used",
+      "description": "Share of / in use; a disk alert at 85 % comes with the Alertmanager ticket.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 16,
+        "y": 0,
+        "w": 8,
+        "h": 4
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit",
+          "min": 0,
+          "max": 1,
+          "thresholds": {
+            "mode": "absolute",
+            "steps": [
+              {
+                "color": "green",
+                "value": null
+              },
+              {
+                "color": "orange",
+                "value": 0.75
+              },
+              {
+                "color": "red",
+                "value": 0.85
+              }
+            ]
+          }
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "medlink-prometheus"
+          },
+          "expr": "1 - node_filesystem_avail_bytes{job=\"node\", env=~\"$env\", instance=~\"$instance\", mountpoint=\"/\"} / node_filesystem_size_bytes{job=\"node\", env=~\"$env\", instance=~\"$instance\", mountpoint=\"/\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "type": "timeseries",
+      "title": "CPU used",
+      "description": "Share of CPU time not idle, all cores together (5-minute average).",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "medlink-prometheus"
+          },
+          "expr": "1 - avg by (instance) (rate(node_cpu_seconds_total{job=\"node\", env=~\"$env\", instance=~\"$instance\", mode=\"idle\"}[5m]))",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "type": "timeseries",
+      "title": "Memory used",
+      "description": "RAM in use, page cache excluded (MemAvailable). The front and Vault hosts have about 0.9 GB.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 4,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "medlink-prometheus"
+          },
+          "expr": "1 - node_memory_MemAvailable_bytes{job=\"node\", env=~\"$env\", instance=~\"$instance\"} / node_memory_MemTotal_bytes{job=\"node\", env=~\"$env\", instance=~\"$instance\"}",
+          "legendFormat": "{{instance}}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "Disk space used",
+      "description": "Every real filesystem; Docker's overlay and tmpfs mounts left out.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "percentunit"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "medlink-prometheus"
+          },
+          "expr": "1 - node_filesystem_avail_bytes{job=\"node\", env=~\"$env\", instance=~\"$instance\", fstype!~\"tmpfs|overlay|squashfs|ramfs\", mountpoint!~\"/run.*|/boot.*\"} / node_filesystem_size_bytes{job=\"node\", env=~\"$env\", instance=~\"$instance\", fstype!~\"tmpfs|overlay|squashfs|ramfs\", mountpoint!~\"/run.*|/boot.*\"}",
+          "legendFormat": "{{instance}} {{mountpoint}}"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "Disk I/O",
+      "description": "Bytes read and written per second, all disks.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 12,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "medlink-prometheus"
+          },
+          "expr": "sum by (instance) (rate(node_disk_read_bytes_total{job=\"node\", env=~\"$env\", instance=~\"$instance\"}[5m]))",
+          "legendFormat": "{{instance}} read"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "medlink-prometheus"
+          },
+          "expr": "sum by (instance) (rate(node_disk_written_bytes_total{job=\"node\", env=~\"$env\", instance=~\"$instance\"}[5m]))",
+          "legendFormat": "{{instance}} write"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Network",
+      "description": "Traffic of the real interfaces; loopback and Docker bridges left out.",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 20,
+        "w": 24,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "Bps"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "medlink-prometheus"
+          },
+          "expr": "sum by (instance) (rate(node_network_receive_bytes_total{job=\"node\", env=~\"$env\", instance=~\"$instance\", device!~\"lo|veth.*|br-.*|docker.*\"}[5m]))",
+          "legendFormat": "{{instance}} in"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "medlink-prometheus"
+          },
+          "expr": "sum by (instance) (rate(node_network_transmit_bytes_total{job=\"node\", env=~\"$env\", instance=~\"$instance\", device!~\"lo|veth.*|br-.*|docker.*\"}[5m]))",
+          "legendFormat": "{{instance}} out"
+        }
+      ]
+    }
+  ]
+}
