@@ -248,6 +248,18 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
     }
 
     @Override
+    public boolean isActivePractitioner(UUID id) {
+        try {
+            KeycloakUser account = getUser(id);
+            return account.enabled() && account.emailVerified()
+                    && groupsOf(id).stream().map(GroupRepresentation::path).toList()
+                            .equals(List.of(RoleGroups.pathOf(com.example.apimedlink.security.Roles.PRACTITIONER)));
+        } catch (jakarta.persistence.EntityNotFoundException missing) {
+            return false;
+        }
+    }
+
+    @Override
     public boolean isLastActiveStaff(UUID id) {
         String staffPath = RoleGroups.pathOf(com.example.apimedlink.security.Roles.ADMINISTRATIVE_STAFF);
         if (groupsOf(id).stream().noneMatch(group -> staffPath.equals(group.path()))) {

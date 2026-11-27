@@ -36,6 +36,9 @@ class AppointmentBookingFunctionalTest extends FunctionalTestBase {
     @Autowired
     JdbcTemplate jdbc;
 
+    @Autowired
+    com.example.apimedlink.service.PractitionerIdentityReconciler practitionerIdentity;
+
     @Test
     void aPatientBooksAFreeSlotAndItLeavesTheSearch() throws Exception {
         UUID practitioner = insertPractitioner("Rim", "Jaziri", insertSpecialty("Cardiologie (réservation)"));
@@ -64,6 +67,24 @@ class AppointmentBookingFunctionalTest extends FunctionalTestBase {
         Map<String, Object> search = body(patient.browser().call("/api/slots?practitionerId=" + practitioner
                 + "&from=" + DAY.minus(1, ChronoUnit.HOURS) + "&to=" + DAY.plus(1, ChronoUnit.DAYS)));
         assertThat((List<?>) search.get("items")).isEmpty();
+    }
+
+    @Test
+    void anExternalKeycloakDisableAndReenableAreReconciled() throws Exception {
+        String email = uniqueEmail("external-disable-practitioner");
+        UUID practitioner = console.createUser(email, PASSWORD, "/practitioners");
+        UUID specialty = insertSpecialty("Cardiologie externe " + practitioner);
+        jdbc.update("insert into users (id, username, email) values (?, ?, ?)", practitioner, email, email);
+        jdbc.update("insert into practitioners (id, first_name, last_name, specialty_id) values (?, 'Rim', 'Test', ?)",
+                practitioner, specialty);
+        console.disable(practitioner);
+        practitionerIdentity.reconcileOne(practitioner);
+        assertThat(jdbc.queryForObject("select booking_enabled from practitioners where id=?", Boolean.class, practitioner))
+                .isFalse();
+        console.update(practitioner, java.util.Map.of("enabled", true));
+        practitionerIdentity.reconcileOne(practitioner);
+        assertThat(jdbc.queryForObject("select booking_enabled from practitioners where id=?", Boolean.class, practitioner))
+                .isTrue();
     }
 
     @Test

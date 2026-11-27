@@ -43,6 +43,8 @@ keycloak:
     client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET}
 
 app:
+  practitioner-identity:
+    enabled: true
   consent:
     required: true
     # US-04: sign-ups stay closed (503 CONSENT_UNAVAILABLE) until the code owner and a lawyer approve the exact text

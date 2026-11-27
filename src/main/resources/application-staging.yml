@@ -43,6 +43,8 @@ keycloak:
     client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET}
 
 app:
+  practitioner-identity:
+    enabled: true
   consent:
     required: true
   cors:

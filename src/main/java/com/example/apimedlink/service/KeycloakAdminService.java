@@ -46,6 +46,9 @@ public interface KeycloakAdminService {
     /** Whether removing this enabled, verified staff account would leave no other active staff account. */
     boolean isLastActiveStaff(UUID id);
 
+    /** True only for an enabled, verified identity with exactly the practitioner group. */
+    boolean isActivePractitioner(UUID id);
+
     /** Puts the user in the given group and takes them out of any other group. Idempotent. */
     void moveToGroup(UUID id, String groupPath);
 

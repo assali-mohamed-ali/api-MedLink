@@ -45,12 +45,13 @@ public class AppointmentService {
     private final AlertService alerts;
     private final AppointmentConfirmation confirmation;
     private final KeycloakAdminService identity;
+    private final PractitionerIdentityReconciler practitionerIdentity;
     /** H-03: no cancel less than this before the start (app.appointments.cancel-deadline-hours). */
     private final Duration cancelDeadline;
 
     public AppointmentService(AppointmentRepository appointments, SlotRepository slots, PatientRepository patients,
             OwnershipGuard ownership, AuditService audit, AlertService alerts, AppointmentConfirmation confirmation,
-            KeycloakAdminService identity, AbsenceRepository absences,
+            KeycloakAdminService identity, AbsenceRepository absences, PractitionerIdentityReconciler practitionerIdentity,
             @Value("${app.appointments.cancel-deadline-hours}") long cancelDeadlineHours) {
         this.absences = absences;
         this.appointments = appointments;
@@ -61,6 +62,7 @@ public class AppointmentService {
         this.alerts = alerts;
         this.confirmation = confirmation;
         this.identity = identity;
+        this.practitionerIdentity = practitionerIdentity;
         this.cancelDeadline = Duration.ofHours(cancelDeadlineHours);
     }
 
@@ -232,6 +234,7 @@ public class AppointmentService {
     private Appointment bookLocked(Slot slot, UUID patientId, UUID bookedBy, Instant now) {
         if (slot.getStatus() != SlotStatus.FREE || !slot.getStartsAt().isAfter(now)
                 || !slot.getPractitioner().isBookingEnabled()
+                || !practitionerIdentity.eligibleNow(slot.getPractitioner().getId())
                 || slot.getPractitioner().getClinics().stream().noneMatch(clinic -> clinic.getId().equals(slot.getClinic().getId()))
                 || absences.covers(slot.getPractitioner().getId(), slot.getStartsAt(), slot.getEndsAt())) {
             throw new ApiException(HttpStatus.CONFLICT, "SLOT_TAKEN", SLOT_TAKEN);

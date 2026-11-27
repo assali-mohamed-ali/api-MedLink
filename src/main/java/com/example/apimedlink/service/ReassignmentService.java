@@ -44,10 +44,12 @@ public class ReassignmentService {
     private final AbsenceRepository absences;
     private final AuditService audit;
     private final AppointmentConfirmation confirmation;
+    private final PractitionerIdentityReconciler practitionerIdentity;
 
     public ReassignmentService(ReassignmentRepository proposals, AppointmentRepository appointments,
             SlotRepository slots, PatientRepository patients, PractitionerRepository practitioners,
-            AbsenceRepository absences, AuditService audit, AppointmentConfirmation confirmation) {
+            AbsenceRepository absences, AuditService audit, AppointmentConfirmation confirmation,
+            PractitionerIdentityReconciler practitionerIdentity) {
         this.proposals = proposals;
         this.appointments = appointments;
         this.slots = slots;
@@ -56,6 +58,7 @@ public class ReassignmentService {
         this.absences = absences;
         this.audit = audit;
         this.confirmation = confirmation;
+        this.practitionerIdentity = practitionerIdentity;
     }
 
     @Transactional(readOnly = true)
@@ -192,6 +195,7 @@ public class ReassignmentService {
                 && source.getClinic().getId().equals(target.getClinic().getId())
                 && !source.getPractitioner().getId().equals(target.getPractitioner().getId())
                 && target.getPractitioner().isBookingEnabled()
+                && practitionerIdentity.eligibleNow(target.getPractitioner().getId())
                 && practitioners.clinicActive(target.getPractitioner().getId(), target.getClinic().getId())
                 && !absences.covers(target.getPractitioner().getId(), target.getStartsAt(), target.getEndsAt())
                 && !appointments.overlapsOther(original.getPatientId(), original.getId(), target.getStartsAt(), target.getEndsAt());
