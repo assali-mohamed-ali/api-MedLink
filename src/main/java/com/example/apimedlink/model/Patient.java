@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.PrimaryKeyJoinColumn;
 import jakarta.persistence.Table;
+import java.time.Instant;
 import java.time.LocalDate;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -36,6 +37,12 @@ public class Patient extends User {
 
     @Column(length = 255)
     private String address;
+
+    /** US-04: the version of the consent text the patient accepted at sign-up, and when. Null when none was given. */
+    @Column(length = 30)
+    private String consentVersion;
+
+    private Instant consentedAt;
 
     /** The profile of a sign-up; id, username and email are set once Keycloak has the account. */
     public Patient(String firstName, String lastName, LocalDate birthDate, String phone, String address) {

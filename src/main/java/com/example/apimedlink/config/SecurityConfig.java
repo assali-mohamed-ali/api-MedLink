@@ -69,7 +69,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/livez", "/readyz")
                         .permitAll()
                         // Public auth endpoints (plan.md §4); CSRF still applies to these POSTs
-                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf")
+                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/api/auth/consent")
                         .permitAll()
                         .requestMatchers(HttpMethod.POST,
                                 "/api/auth/login",
