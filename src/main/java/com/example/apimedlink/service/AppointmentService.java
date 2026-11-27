@@ -7,6 +7,7 @@ import com.example.apimedlink.model.AuditAction;
 import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Slot;
 import com.example.apimedlink.model.SlotStatus;
+import com.example.apimedlink.repository.AbsenceRepository;
 import com.example.apimedlink.repository.AppointmentRepository;
 import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.repository.SlotRepository;
@@ -35,6 +36,7 @@ public class AppointmentService {
     /** V13: one BOOKED appointment per slot at most. */
     static final String ONE_ACTIVE_PER_SLOT = "appointments_one_active_per_slot";
 
+    private final AbsenceRepository absences;
     private final AppointmentRepository appointments;
     private final SlotRepository slots;
     private final PatientRepository patients;
@@ -48,8 +50,9 @@ public class AppointmentService {
 
     public AppointmentService(AppointmentRepository appointments, SlotRepository slots, PatientRepository patients,
             OwnershipGuard ownership, AuditService audit, AlertService alerts, AppointmentConfirmation confirmation,
-            KeycloakAdminService identity,
+            KeycloakAdminService identity, AbsenceRepository absences,
             @Value("${app.appointments.cancel-deadline-hours}") long cancelDeadlineHours) {
+        this.absences = absences;
         this.appointments = appointments;
         this.slots = slots;
         this.patients = patients;
@@ -80,7 +83,7 @@ public class AppointmentService {
         checkCancelDeadline(slot, now);
         appointment.setStatus(AppointmentStatus.CANCELLED);
         appointment.setCancelledAt(now);
-        slot.setStatus(SlotStatus.FREE);
+        release(slot);
         audit.recordWithin(AuditAction.APPOINTMENT_CANCELLED, "APPOINTMENT", appointmentId.toString(),
                 AuditOutcome.SUCCESS);
         // MLink-37 (review on #125): the practitioner's alert, in this transaction; its mail leaves after the commit
@@ -126,7 +129,7 @@ public class AppointmentService {
         checkCancelDeadline(oldSlot, now);
         old.setStatus(AppointmentStatus.CANCELLED);
         old.setCancelledAt(now);
-        oldSlot.setStatus(SlotStatus.FREE);
+        release(oldSlot);
         appointments.saveAndFlush(old);
         slots.saveAndFlush(oldSlot);
         Appointment moved = bookLocked(newSlot, old.getPatientId(), now);
@@ -136,6 +139,12 @@ public class AppointmentService {
         alerts.onAppointmentMoved(old, moved);
         confirmation.onBooked(moved);
         return moved;
+    }
+
+    /** A declared absence must not be undone by cancellation or a move. The slot is already locked. */
+    private void release(Slot slot) {
+        boolean absent = absences.covers(slot.getPractitioner().getId(), slot.getStartsAt(), slot.getEndsAt());
+        slot.setStatus(absent ? SlotStatus.CLOSED : SlotStatus.FREE);
     }
 
     private Slot slotToBook(UUID slotId) {
@@ -217,7 +226,8 @@ public class AppointmentService {
 
     /** As above, with who booked it (the patient, or a staff member for US-30). */
     private Appointment bookLocked(Slot slot, UUID patientId, UUID bookedBy, Instant now) {
-        if (slot.getStatus() != SlotStatus.FREE || !slot.getStartsAt().isAfter(now)) {
+        if (slot.getStatus() != SlotStatus.FREE || !slot.getStartsAt().isAfter(now)
+                || absences.covers(slot.getPractitioner().getId(), slot.getStartsAt(), slot.getEndsAt())) {
             throw new ApiException(HttpStatus.CONFLICT, "SLOT_TAKEN", SLOT_TAKEN);
         }
         // MLink-167: one place at a time. A move has already cancelled (and flushed) the appointment it replaces,

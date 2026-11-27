@@ -79,9 +79,14 @@ public class AbsenceService {
                 new ApiException(HttpStatus.CONFLICT, "PRACTITIONER_PROFILE_MISSING", "Votre profil praticien est indisponible."));
         Absence absence = absences.save(new Absence(practitionerId, from, to,
                 reason == null || reason.isBlank() ? null : reason.trim(), now));
-        List<UUID> candidateIds = absences.freeSlotsOverlapping(practitionerId, from, to).stream()
-                .map(Slot::getId).sorted().toList();
-        int closed = candidateIds.stream().mapToInt(id -> slots.closeIfFree(id, practitionerId)).sum();
+        // Lock every overlapping slot, including booked ones, in the same order as rescheduling.
+        // A concurrent patient release must either observe this absence or finish before we close free slots.
+        List<UUID> candidateIds = absences.overlappingSlotIds(practitionerId, from, to).stream().sorted().toList();
+        int closed = 0;
+        for (UUID id : candidateIds) {
+            slots.findForBookingById(id).orElseThrow();
+            closed += slots.closeIfFree(id, practitionerId);
+        }
         audit.recordWithin(AuditAction.ACCOUNT_UPDATED, RESOURCE_ABSENCE, absence.getId().toString(), AuditOutcome.SUCCESS);
         return new DeclaredAbsence(absence, closed, toDecide(practitionerId, absence));
     }

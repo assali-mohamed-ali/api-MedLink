@@ -2,7 +2,6 @@ package com.example.apimedlink.repository;
 
 import com.example.apimedlink.model.Absence;
 import com.example.apimedlink.model.Appointment;
-import com.example.apimedlink.model.Slot;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
@@ -23,10 +22,10 @@ public interface AbsenceRepository extends JpaRepository<Absence, UUID> {
             + "and a.startsAt < :to and a.endsAt > :from")
     boolean covers(@Param("practitionerId") UUID practitionerId, @Param("from") Instant from, @Param("to") Instant to);
 
-    /** The practitioner's FREE slots overlapping {@code [from, to)}, to be closed. */
-    @Query("select s from Slot s where s.practitioner.id = :practitionerId "
-            + "and s.status = com.example.apimedlink.model.SlotStatus.FREE and s.startsAt < :to and s.endsAt > :from")
-    List<Slot> freeSlotsOverlapping(@Param("practitionerId") UUID practitionerId, @Param("from") Instant from,
+    /** All overlapping slots, including booked ones that may be released concurrently. */
+    @Query("select s.id from Slot s where s.practitioner.id = :practitionerId "
+            + "and s.startsAt < :to and s.endsAt > :from")
+    List<UUID> overlappingSlotIds(@Param("practitionerId") UUID practitionerId, @Param("from") Instant from,
             @Param("to") Instant to);
 
     /** The practitioner's BOOKED appointments on slots overlapping {@code [from, to)}, earliest first, with slot and clinic. */
