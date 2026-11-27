@@ -54,6 +54,9 @@ public interface SlotRepository extends JpaRepository<Slot, UUID>, JpaSpecificat
             @Param("patientId") UUID patientId, @Param("sourceAppointment") UUID sourceAppointment,
             @Param("now") Instant now, Pageable page);
 
+    @Query("select s.practitioner.id from Slot s where s.id = :id")
+    Optional<UUID> practitionerOf(@Param("id") UUID id);
+
     /** A practitioner's slots starting in {@code [from, to)}, whatever their status or clinic, earliest first. */
     @EntityGraph(attributePaths = {"clinic"})
     @Query("""

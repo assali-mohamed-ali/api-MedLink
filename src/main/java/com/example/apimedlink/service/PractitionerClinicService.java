@@ -19,9 +19,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * US-29: staff set the clinics a practitioner works in. A clinic cannot be taken off a practitioner who still holds
- * a slot there, whatever its status (the database refuses it too, V13): this is the conservative rule, pending the
- * team's decision on removing a clinic with future appointments. Takes and returns entities and plain values.
+ * US-29: staff set active clinic assignments. Future open slots and unresolved bookings block removal;
+ * historical slot foreign keys survive in inactive assignments. Takes and returns entities and plain values.
  */
 @Service
 public class PractitionerClinicService {

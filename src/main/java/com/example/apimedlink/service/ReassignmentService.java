@@ -112,8 +112,9 @@ public class ReassignmentService {
     public Proposal decide(UUID id, UUID caller, Party party, Boolean accepted) {
         Reassignment proposal = proposals.findForChangeById(id).orElseThrow(ReassignmentService::foreign);
         Appointment original = appointments.findForChangeById(proposal.getAppointmentId()).orElseThrow(ReassignmentService::foreign);
-        Slot targetRef = slots.findById(proposal.getTargetSlotId()).orElseThrow(ReassignmentService::foreign);
-        UUID entitled = party == Party.PATIENT ? original.getPatientId() : targetRef.getPractitioner().getId();
+        // Read only the owner ID here. Loading the target entity before locking it could cache a stale FREE status.
+        UUID entitled = party == Party.PATIENT ? original.getPatientId()
+                : slots.practitionerOf(proposal.getTargetSlotId()).orElseThrow(ReassignmentService::foreign);
         if (!entitled.equals(caller)) {
             throw foreign();
         }
