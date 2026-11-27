@@ -15,11 +15,11 @@
 | US-03 | POST /api/auth/password/forgot with email and POST /api/auth/password/reset with token and newPassword. The public response is generic for recovery requests. | Recovery request and mailed reset route, linked from login |
 | US-04 | GET /api/auth/consent returns version, text and required. Registration accepts consentVersion and records its timestamp. Production registration is held pending policy approval. | Policy loaded from the API, explicit unchecked acknowledgement |
 | US-08 | AppointmentConfirmation uses the committed appointment to send confirmation for patient booking, staff booking, and patient rescheduling. | Existing confirmation and new staff receipt |
-| US-13, US-25 | GET /api/results/me, POST and GET /api/patients/{id}/results. Publisher posts title, examType, examDate, content and optional existing documentId. Patient sees publication time, author and new indicator. | Patient results and attachment download, practitioner review and publication inside the patient record |
+| US-13, US-25 | GET /api/results/me, POST and GET /api/patients/{id}/results. Lists use page (default 0), size (default 20, maximum 50) and return items, page, size, total, unseen. Publication accepts optional documentId and requestId; 201 new, 200 replay, 409 REQUEST_ID_REUSED for incompatible reuse. Only displayed patient results become seen. | Paged patient results and unseen count, practitioner attachment selection/upload and publication inside the patient record |
 | US-15 | GET and PUT /api/patients/me return phone and address. The request allowlist matches those fields. | Editable contact details under patient profile |
 | US-16 | GET /api/patients/me/export downloads JSON. GET/POST/DELETE /api/patients/me/deletion-request manage patient requests. Staff reviews via GET /api/admin/deletion-requests and POST /api/admin/deletion-requests/{patientId}/decision. | Patient profile export and request controls, administrative review page |
 | US-21 | GET and POST /api/practitioner/absences, GET /api/practitioner/absences/{absenceId}/appointments, POST /api/practitioner/appointments/{appointmentId}/absence-decision. | Absence periods and explicit appointment decisions |
-| US-22 | GET /api/practitioner/patients?q= returns bounded, relationship-scoped summaries. | Practitioner patient directory |
+| US-22 | GET /api/practitioner/patients?q=&page=&size= returns items, page, size, total; search by name, full name or record number with the record's relationship rule. | Paged practitioner patient directory and record number |
 | US-29 | PUT /api/admin/practitioners/{practitionerId}/clinics accepts clinicIds and returns updated assignments. Existing GET /api/admin/practitioners and profile choices provide current values. | Staff clinic-assignment editor and review step |
 | US-30 | GET /api/admin/slots and /api/admin/slots/filters share slot search with the patient contract. POST /api/admin/appointments accepts patientId and slotId. | Staff patient search, slot filters, confirmation and receipt |
 
@@ -27,7 +27,7 @@ Controllers use existing Springdoc scanning for OpenAPI/Scalar. The maintained P
 
 ## Persistence and authorization
 
-Migrations V24–V29 add registration consent, reset tokens, deletion requests, absences, encrypted examination results and a reassignment scaffold. Apply in order with Flyway. V29 adds persistence only. Restore a synthetic V23 snapshot before testing an existing-data upgrade.
+Migrations V24–V31 add registration consent, reset tokens, deletion requests, absences, encrypted examination results, a reassignment scaffold (V29), notification preferences and account closure (V30), and record numbers and result publication tracking (V31). Apply in order with Flyway. V29 adds persistence only. Restore a synthetic V23 snapshot before testing an existing-data upgrade.
 
 The original BFF still keeps Keycloak sessions and tokens server-side with role guards, CSRF, and HttpOnly cookies. Administrative booking uses the patient for ownership, the staff identity for booking attribution and audit, and checks the patient’s verified active account. Clinic assignments, absence declaration and slot opening serialize through the practitioner schedule lock. Deletion submission and decisions serialize through the patient lock. Personal export and deletion initiation require an interactive login within ten minutes. Export sends Cache-Control no-store.
 
@@ -35,9 +35,19 @@ The exam-result workflow reuses encryption for the medical title, type and conte
 
 ## Acceptance evidence and remaining work
 
-See the [manual acceptance instructions](manual-testing.md). The complete release gate remains open for the reasons recorded in the matrix, including the approved consent wording, verified identity-email change and notification preferences, exam publication notification and dedicated attachment upload, personal data export completeness and account closure, and two-party reassignment before clinic removal. The incoming retention proposal is recorded in the project decision document and awaits review. The workflow preserves patient records and audit history.
+See the [manual acceptance instructions](manual-testing.md). The complete release gate remains open for the reasons recorded in the matrix, including approved consent wording, verified identity-email change, retention approval before anonymisation/purge, completed-versus-started consultation policy, overlapping-export protection, browser acceptance of V30/V31, and two-party reassignment before clinic removal. The incoming retention proposal is recorded in the project decision document and awaits review. The workflow preserves patient records and audit history.
 
 ## Verification commands and evidence
+
+### Batch 2 handoff (27 November 2026)
+
+- API head under review: `0437d262d433e6bd9186df5d8c29f07af7413906`; dashboard `bcf88d47192a0610f0af545b05e6eb3f262a8bd1`.
+- [Dashboard CI](https://github.com/assali-mohamed-ali/medlink-dashboard/actions/runs/46077144925): npm ci, npm test (581 passed in 84 files, 0 failed, 0 skipped), npm run lint (2 warnings, 0 errors), npm run build all completed successfully (exit 0 per CI step). Separate budget and contrast commands were not confirmed on this head.
+- [API CI](https://github.com/assali-mohamed-ali/api-MedLink/actions/runs/46077036424) and [CD](https://github.com/assali-mohamed-ali/api-MedLink/actions/runs/46077036299) were still in progress at inspection. CodeQL, secrets, dependency check, ZAP and container scans reported success. Dependency Review skipped. AI disclosure requires actual human acknowledgement; leave it unchecked until human review.
+- Local clone attempts returned exit 128 (GitHub DNS unavailable); Docker is unavailable. Neither Maven order, local frontend checks, Newman, Flyway fresh/upgrade to V31 nor Chromium was executed here. CI is used for candidate validation by explicit request; no new story is marked VALIDATED.
+- Earlier handoff reported targeted V30/V31 tests; those are historical reports, not independently rerun in this environment.
+
+### Historical verification (before V30/V31)
 
 | Check | Command or evidence | Result |
 | --- | --- | --- |
@@ -63,8 +73,8 @@ The first combined API verification found profile whitespace validation, Postgre
 ## Git
 
 - Consolidated source for the API was d47deea8fe50d611f65ee2386232a5a3ece2ecb2.
-- Dashboard integration is 613bc586bc6177a1b6d3510103fa372de6f98b33 on feat/backlog-us01-us32. Its API dependency is this branch through the V29 migrations and staff slot routes.
-- The feature branches are local. Production release remains gated by the coverage matrix.
+- Dashboard integration is 613bc586bc6177a1b6d3510103fa372de6f98b33 on feat/backlog-us01-us32. The newer dashboard `bcf88d4` requires API `0437d26` or later with V31 and paged responses.
+- The feature branches are published in API PR #167 and dashboard PR #47. Production release remains gated by the coverage matrix.
 
 ## AI disclosure
 

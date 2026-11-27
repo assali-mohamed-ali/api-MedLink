@@ -15,14 +15,15 @@ Use a local isolated development stack with PostgreSQL, Keycloak, MinIO and Mail
 1. Start login for an enrolled practitioner. Try the agenda before completing MFA. Complete TOTP and check access.
 2. Open availability in two assigned clinics. Attempt a conflicting slot and confirm the original entry remains. Filter the agenda by clinic and inspect its cancelled states.
 3. Declare an absence covering a free slot and a booked appointment. Verify the system closes the free slot and requires a decision on the booked appointment. Try to open or reopen a slot within the absence. Resolve bookings one at a time and confirm Mailpit delivery.
-4. Search Mes patients for a linked and an unrelated patient. Open a permitted record, confirm an audit entry, add a consultation report after the permitted stage, and reload history.
+4. Search Mes patients by name, full name and the displayed record number (MED-…); use linked homonyms and an unrelated synthetic patient. Set a small page size through the API and confirm the total and that every returned patient opens the same record. Verify the foreign record is refused and successful reads are audited. Add a consultation report after the currently permitted start, not before; the completed-versus-started decision is pending. Verify newest-first history and read/write audit without medical text.
 
 ## C. Examination results
 
-1. Upload a synthetic document under its correct patient with an administrative test account.
-2. From a linked practitioner’s patient record, prepare an exam result with title, exam type, date and content. Associate the allowed document identifier and confirm publication. Check practitioner history.
-3. Open Mes résultats as the patient, expand the result, and download the attachment. Verify the publication fields and compare the file to the original fixture.
-4. Repeat the read as another patient, the publication as an unrelated practitioner, and attachment assignment using another patient’s document. Verify refusal without disclosure of the foreign content.
+1. Upload a synthetic document as staff. As a linked practitioner, list and select it, then upload a second valid synthetic attachment from the patient record. Verify direct practitioner download is refused and the patient can download the exact bytes. Test an invalid file and foreign patient upload/list.
+2. Publish a result with title, type, date and content. Re-send the identical requestId and verify 200 with the same id, not a second result; reuse it for another linked patient and expect 409 REQUEST_ID_REUSED. Check paged practitioner history and the patient association.
+3. Publish enough results to span multiple pages. Open Mes résultats as the patient, verify items/page/size/total/unseen, expand and download. Read one page and check only those results become seen; navigate to the next page and confirm the remaining count. Invalid page/size returns 400. Compare downloaded bytes and inspect the audit.
+4. Confirm Mailpit receives a notice only after successful publication, without medical content. Disable exam-result notifications, publish another result and confirm no notice; simulate a temporary SMTP outage on an isolated stack and verify retry with stable Message-ID. A repeated requestId must not create a second result or a new notification event.
+5. Repeat as another patient, unrelated practitioner and wrong-role caller. Verify no foreign content or attachment is disclosed. Record browser and Newman evidence separately; none of these updated scenarios are marked passed until executed.
 
 ## D. Staff-assisted booking
 

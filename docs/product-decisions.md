@@ -110,6 +110,10 @@ téléchargement `/api/patients/{patientId}/documents/{documentId}`, ainsi que l
 fichiers, pièces jointes des résultats comprises, ne sont pas intégrés au JSON. Ils se téléchargent un par un, connecté,
 par la route existante (chiffrement au repos, audit de chaque lecture). L'export ne marque pas les résultats comme lus.
 
+## 8. Moment de rédaction du compte-rendu (US-24) — en attente
+
+Le critère produit indique une consultation « terminée ». Le code actuel autorise la rédaction après le début de la consultation, et `ConsultationReportFunctionalTest` protège cette règle. Ne pas modifier cette condition ni l'immutabilité des comptes-rendus finalisés avant confirmation de Md. Assali. La recette doit vérifier l'ordre antéchronologique et l'audit des lectures/écritures, indépendamment de cette décision.
+
 ## Sources (recherche du 27 novembre 2026)
 
 - Guide pratique de l'INPDP à destination des médecins libéraux (Conseil de l'Europe / INPDP) :
