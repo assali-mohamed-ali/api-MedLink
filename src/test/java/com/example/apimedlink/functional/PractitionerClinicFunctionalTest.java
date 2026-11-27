@@ -70,6 +70,33 @@ class PractitionerClinicFunctionalTest extends FunctionalTestBase {
     }
 
     @Test
+    void historicalSlotsKeepTheirInactiveAssignmentAndCanBeReactivated() throws Exception {
+        Browser staff = staff();
+        UUID kept = insertClinic("Clinique US29 kept");
+        UUID old = insertClinic("Clinique US29 historical");
+        UUID practitioner = insertPractitioner();
+        for (UUID clinic : List.of(kept, old)) {
+            jdbc.update("insert into practitioner_clinics (practitioner_id, clinic_id) values (?, ?)", practitioner, clinic);
+        }
+        Instant start = Instant.now().minus(3, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS);
+        UUID slot = UUID.randomUUID();
+        jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) values (?, ?, ?, ?, ?, 'CLOSED')",
+                slot, practitioner, old, Timestamp.from(start), Timestamp.from(start.plus(30, ChronoUnit.MINUTES)));
+
+        HttpResponse<String> removed = staff.putJson(path(practitioner), ids(kept));
+        assertThat(removed.statusCode()).as(removed.body()).isEqualTo(200);
+        assertThat(clinicNames(removed)).containsExactly("Clinique US29 kept");
+        assertThat(jdbc.queryForObject("select active from practitioner_clinics where practitioner_id = ? and clinic_id = ?",
+                Boolean.class, practitioner, old)).isFalse();
+        assertThat(jdbc.queryForObject("select clinic_id from slots where id = ?", UUID.class, slot)).isEqualTo(old);
+
+        HttpResponse<String> restored = staff.putJson(path(practitioner), ids(kept, old));
+        assertThat(restored.statusCode()).as(restored.body()).isEqualTo(200);
+        assertThat(jdbc.queryForObject("select active from practitioner_clinics where practitioner_id = ? and clinic_id = ?",
+                Boolean.class, practitioner, old)).isTrue();
+    }
+
+    @Test
     void anUnknownPractitionerOrClinicIsNotFoundAndAnEmptyListIsInvalid() throws Exception {
         Browser staff = staff();
         UUID clinic = insertClinic("Clinique US29 E");
