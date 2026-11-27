@@ -2,7 +2,7 @@ package com.example.apimedlink.controller;
 
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.security.Roles;
-import com.example.apimedlink.service.StatsExportService;
+import com.example.apimedlink.service.MonthlyStatsReleaseService;
 import com.example.apimedlink.service.StatsIndicator;
 import java.nio.charset.StandardCharsets;
 import java.time.LocalDate;
@@ -26,9 +26,9 @@ import org.springframework.web.bind.annotation.RestController;
 @RequestMapping("/api/admin/stats")
 public class StatsExportController {
 
-    private final StatsExportService exports;
+    private final MonthlyStatsReleaseService exports;
 
-    public StatsExportController(StatsExportService exports) {
+    public StatsExportController(MonthlyStatsReleaseService exports) {
         this.exports = exports;
     }
 
@@ -53,7 +53,7 @@ public class StatsExportController {
 
     private static Set<StatsIndicator> parseIndicators(String indicators) {
         if (indicators == null || indicators.isBlank()) {
-            return EnumSet.allOf(StatsIndicator.class);
+            return EnumSet.of(StatsIndicator.APPOINTMENTS_PER_STATUS);
         }
         EnumSet<StatsIndicator> chosen = EnumSet.noneOf(StatsIndicator.class);
         for (String name : indicators.split(",")) {

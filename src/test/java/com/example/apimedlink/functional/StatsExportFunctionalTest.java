@@ -46,6 +46,24 @@ class StatsExportFunctionalTest extends FunctionalTestBase {
         assertThat(deniedExports()).isEqualTo(before + 1);
     }
 
+    @Test
+    void aClosedMonthHasOneImmutableReleaseAndRejectsOverlapsAndOtherPartitions() throws Exception {
+        Browser staff = new Browser().login("staff.dev@medlink.local", DEV_USERS_PASSWORD);
+        String prefix = "/api/admin/stats/export?";
+        String month = "from=2002-02-01&to=2002-02-28";
+        var first = staff.call(prefix + month + "&indicators=APPOINTMENTS_PER_STATUS");
+        assertThat(first.statusCode()).isEqualTo(422);
+        assertThat(staff.call(prefix + month + "&indicators=APPOINTMENTS_PER_STATUS").statusCode()).isEqualTo(422);
+        var changed = staff.call(prefix + month + "&indicators=APPOINTMENTS_PER_DAY");
+        assertThat(changed.statusCode()).isEqualTo(409);
+        assertThat(changed.body()).contains("STATS_PARTITION_LOCKED");
+        assertThat(staff.call(prefix + "from=2002-02-02&to=2002-02-28").statusCode()).isEqualTo(400);
+        assertThat(staff.call(prefix + month + "&indicators=APPOINTMENTS_PER_STATUS,APPOINTMENTS_PER_DAY")
+                .statusCode()).isEqualTo(400);
+        assertThat(db.queryForObject("select count(*) from monthly_stats_releases where month_start=date '2002-02-01'",
+                Integer.class)).isEqualTo(1);
+    }
+
     private long deniedExports() {
         Long count = db.queryForObject("""
                 select count(*) from audit_entries
