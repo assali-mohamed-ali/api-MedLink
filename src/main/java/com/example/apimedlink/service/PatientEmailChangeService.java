@@ -154,9 +154,9 @@ public class PatientEmailChangeService {
             return;
         }
         try {
-            if (!alreadyChanged || !account.emailVerified()) {
-                identity.changeVerifiedEmail(id, change.newEmail());
-            }
+            // Retry the verified, idempotent write even if email already matches: username and
+            // verification must agree too before local identity can be committed.
+            identity.changeVerifiedEmail(id, change.newEmail());
         } catch (EmailTakenException conflict) {
             finish(id, AuditOutcome.DENIED);
             return;

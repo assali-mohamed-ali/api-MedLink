@@ -148,6 +148,12 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
                     expectSuccess(response.getStatusCode(), "change verified email");
                     return null;
                 }));
+        // A 204 alone is insufficient: an identity profile can ignore a read-only attribute.
+        UserRepresentation updated = getUserRepresentation(id);
+        if (!email.equalsIgnoreCase(updated.email()) || !email.equalsIgnoreCase(updated.username())
+                || !Boolean.TRUE.equals(updated.emailVerified())) {
+            throw new KeycloakUnavailableException("change verified email: identity readback mismatch");
+        }
     }
 
     @Override
@@ -166,6 +172,10 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
 
     @Override
     public KeycloakUser getUser(UUID id) {
+        return toUser(id, getUserRepresentation(id));
+    }
+
+    private UserRepresentation getUserRepresentation(UUID id) {
         UserRepresentation user = call("get user", bearer -> http.get().uri(users + "/{id}", id)
                 .header(HttpHeaders.AUTHORIZATION, bearer)
                 .accept(MediaType.APPLICATION_JSON)
@@ -177,7 +187,7 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
         if (user == null) {
             throw new KeycloakUnavailableException("get user: empty body");
         }
-        return toUser(id, user);
+        return user;
     }
 
     @Override

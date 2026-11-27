@@ -12,6 +12,20 @@ Cette section prévaut sur les décisions antérieures en conflit. Le code owner
 - US-32 : mois civil terminé, un seul indicateur pour chaque mois, résultat (y compris suppression) figé globalement (V36). Seuil de groupe maintenu ; limitation des attaques par différence, pas de garantie formelle de confidentialité différentielle.
 - Recette : tests fonctionnels et composants ajoutés, test de migration V23 vers le dernier schéma avec PostgreSQL réel, tests de privilèges du rôle applicatif. CI en attente ; Newman et recette navigateur sur la pile intégrée restent à exécuter avant de déclarer la couverture validée.
 
+### Pré-requis Keycloak pour US-15
+
+Keycloak 26.7.5 refuse une modification du nom d'utilisateur lorsque `editUsernameAllowed` est désactivé.
+Le fichier de realm active cette possibilité mais limite les modifications des attributs username et email au
+contexte administratif (profil utilisateur, droits d'écriture admin uniquement). Le compte technique conserve ses
+droits existants : aucun droit de gestion du realm n'est ajouté. L'API vérifie le nom d'utilisateur, l'adresse
+et le statut vérifié relus dans Keycloak avant de valider la synchronisation locale.
+
+Pour un realm déjà importé, Keycloak ne réapplique pas le JSON au redémarrage. Un opérateur habilité doit, avant
+d'activer ce parcours, vérifier le profil existant, conserver ses autres attributs et validateurs, limiter d'abord
+les droits d'écriture de username et email à Admin dans Realm settings > User profile, puis activer Edit username.
+Vérifier les deux permissions, la restriction des utilisateurs directs et le parcours de changement sur une pile
+isolée. Ne pas réimporter ou supprimer le realm existant. Aucun environnement déployé n'a été modifié ici.
+
 ## Historique du 27 novembre (supplanté sur les points ci-dessus)
 
 Date : 27 novembre 2026. Source : réponses données par l'équipe aux six questions ouvertes de

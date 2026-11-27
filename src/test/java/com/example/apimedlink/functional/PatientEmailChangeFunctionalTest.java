@@ -16,6 +16,20 @@ class PatientEmailChangeFunctionalTest extends FunctionalTestBase {
     @Autowired JdbcTemplate jdbc;
 
     @Test
+    void realmAllowsOnlyAdministrativeUsernameAndEmailChanges() {
+        assertThat(console.realm().get("editUsernameAllowed")).isEqualTo(true);
+        var profile = (java.util.Map<?, ?>) console.read("/users/profile");
+        var attributes = (java.util.List<?>) profile.get("attributes");
+        for (String name : java.util.List.of("username", "email")) {
+            var attribute = attributes.stream().map(a -> (java.util.Map<?, ?>) a)
+                    .filter(a -> name.equals(a.get("name"))).findFirst().orElseThrow();
+            var permissions = (java.util.Map<?, ?>) attribute.get("permissions");
+            assertThat(permissions.get("edit")).as(name + " edit permissions")
+                    .isEqualTo(java.util.List.of("admin"));
+        }
+    }
+
+    @Test
     void verifiedNewEmailChangesLoginAndPreservesPatientIdentity() throws Exception {
         String old = uniqueEmail("email-change-old"), target = uniqueEmail("email-change-new");
         UUID id = console.createUser(old, PASSWORD);
@@ -37,6 +51,12 @@ class PatientEmailChangeFunctionalTest extends FunctionalTestBase {
         assertThat(patient.postJson(PATH + "/confirm", "{\"code\":\"" + code + "\"}").statusCode()).isEqualTo(202);
         assertThat(jdbc.queryForObject("select email from users where id=?", String.class, id)).isEqualTo(target);
         assertThat(jdbc.queryForObject("select username from users where id=?", String.class, id)).isEqualTo(target);
+        var identity = (java.util.Map<?, ?>) console.read("/users/{id}", id);
+        assertThat(identity.get("email")).isEqualTo(target);
+        assertThat(identity.get("username")).isEqualTo(target);
+        assertThat(identity.get("emailVerified")).isEqualTo(true);
+        assertThat(identity.get("firstName")).isEqualTo("Console");
+        assertThat(identity.get("lastName")).isEqualTo("User");
         assertThat(patient.call("/api/patients/me").statusCode()).isEqualTo(401);
         Browser again = new Browser();
         assertThat(again.apiLogin(target, PASSWORD).statusCode()).isEqualTo(200);
