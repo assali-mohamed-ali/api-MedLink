@@ -193,6 +193,8 @@ public class AppointmentService {
         Appointment appointment = bookLocked(slotToBook(slotId), patientId, staffId, Instant.now());
         audit.recordWithin(AuditAction.APPOINTMENT_BOOKED, "APPOINTMENT", appointment.getId().toString(),
                 AuditOutcome.SUCCESS);
+        // US-08: the patient gets the same confirmation as for their own booking (the staff member is only the actor)
+        confirmation.onBooked(appointment);
         return appointment;
     }
 

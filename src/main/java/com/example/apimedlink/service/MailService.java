@@ -278,6 +278,8 @@ public class MailService {
                 + "<p>L'équipe MedLink</p>";
         send(to, "Confirmation de votre rendez-vous MedLink", text, html,
                 "<appointment-confirmation-" + appointmentId + "@medlink.local>");
+    }
+
     /** US-21: the practitioner is absent and cancelled the appointment. Throws like {@link #sendEmailVerification}. */
     public void sendAppointmentCancelledByPractitioner(String to, String firstName, String practitioner, String clinic,
             Instant startsAt) {
