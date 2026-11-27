@@ -39,6 +39,13 @@ class StaffBookingFunctionalTest extends FunctionalTestBase {
         HttpResponse<String> response = staff.postJson("/api/admin/appointments", body(patient, slot));
 
         assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
+        assertThat(response.body()).contains("\"bookedByStaff\":true").doesNotContain(staffId.toString());
+        String patientEmail = jdbc.queryForObject("select email from users where id = ?", String.class, patient);
+        Browser holder = new Browser();
+        assertThat(holder.apiLogin(patientEmail, PASSWORD).statusCode()).isEqualTo(200);
+        HttpResponse<String> history = holder.call("/api/appointments/me");
+        assertThat(history.statusCode()).isEqualTo(200);
+        assertThat(history.body()).contains("\"bookedByStaff\":true").doesNotContain(staffId.toString());
         assertThat(jdbc.queryForObject("select booked_by from appointments where slot_id = ? and status = 'BOOKED'",
                 UUID.class, slot)).isEqualTo(staffId);
         assertThat(jdbc.queryForObject("select patient_id from appointments where slot_id = ?", UUID.class, slot))

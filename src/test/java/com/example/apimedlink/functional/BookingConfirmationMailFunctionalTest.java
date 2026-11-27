@@ -43,6 +43,8 @@ class BookingConfirmationMailFunctionalTest extends FunctionalTestBase {
         assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
         List<Map<?, ?>> mails = mailbox.to(email, SUBJECT);
         assertThat(mails).hasSize(1);
+        assertThat(jdbc.queryForObject("select confirmation_sent_at from appointments where slot_id = ?",
+                Timestamp.class, slot)).isNotNull();
         assertThat(mailbox.text(mails.get(0))).contains("Bonjour Amel,").contains("Clinique MedLink Confirmation")
                 .contains("Dr Sami Confirme").contains("/patient/rendez-vous");
     }
