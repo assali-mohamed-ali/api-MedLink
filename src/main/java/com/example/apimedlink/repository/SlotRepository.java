@@ -1,6 +1,7 @@
 package com.example.apimedlink.repository;
 
 import com.example.apimedlink.model.Slot;
+import com.example.apimedlink.model.SlotStatus;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.List;
@@ -23,6 +24,19 @@ import org.springframework.data.repository.query.Param;
  * transaction: every query below loads the clinic it returns with the slot.
  */
 public interface SlotRepository extends JpaRepository<Slot, UUID>, JpaSpecificationExecutor<Slot> {
+
+    interface SlotCount {
+        SlotStatus getStatus();
+        long getTotal();
+    }
+
+    @Query("""
+            select s.status as status, count(s) as total from Slot s
+            where s.clinic.id = :clinicId and s.startsAt >= :from and s.startsAt < :to
+            group by s.status
+            """)
+    List<SlotCount> countClinicCapacity(@Param("clinicId") UUID clinicId,
+            @Param("from") Instant from, @Param("to") Instant to);
 
     /** A page of slots with their practitioner, specialty and clinic loaded in the same query (no N+1). */
     @Override

@@ -10,7 +10,10 @@ import com.example.apimedlink.repository.PractitionerRepository;
 import java.text.Collator;
 import java.time.Instant;
 import java.util.Comparator;
-import java.util.EnumMap;
+import java.util.LinkedHashMap;
+import com.example.apimedlink.model.SlotStatus;
+import com.example.apimedlink.repository.SlotRepository;
+import org.springframework.transaction.annotation.Isolation;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -31,13 +34,15 @@ public class ClinicActivityService {
     private final AgendaService agendas;
     private final ClinicRepository clinics;
     private final AppointmentRepository appointments;
+    private final SlotRepository slots;
 
     public ClinicActivityService(PractitionerRepository practitioners, AgendaService agendas,
-            ClinicRepository clinics, AppointmentRepository appointments) {
+            ClinicRepository clinics, AppointmentRepository appointments, SlotRepository slots) {
         this.practitioners = practitioners;
         this.agendas = agendas;
         this.clinics = clinics;
         this.appointments = appointments;
+        this.slots = slots;
     }
 
     @Transactional(readOnly = true)
@@ -45,17 +50,26 @@ public class ClinicActivityService {
         return clinics.findAll(Sort.by("name", "id"));
     }
 
-    @Transactional(readOnly = true)
-    public Map<AppointmentStatus, Long> activity(UUID clinicId, Instant from, Instant to) {
+    @Transactional(readOnly = true, isolation = Isolation.REPEATABLE_READ)
+    public Map<String, Long> activity(UUID clinicId, Instant from, Instant to) {
         if (!clinics.existsById(clinicId)) {
             throw new ApiException(HttpStatus.NOT_FOUND, "CLINIC_NOT_FOUND", "Cette clinique n'existe pas.");
         }
-        Map<AppointmentStatus, Long> counts = new EnumMap<>(AppointmentStatus.class);
+        Map<String, Long> counts = new LinkedHashMap<>();
         for (AppointmentStatus status : AppointmentStatus.values()) {
-            counts.put(status, 0L);
+            counts.put(status.name(), 0L);
         }
         appointments.countActivity(clinicId, from, to)
-                .forEach(count -> counts.put(count.getStatus(), count.getTotal()));
+                .forEach(count -> counts.put(count.getStatus().name(), count.getTotal()));
+        Map<SlotStatus, Long> capacity = new java.util.EnumMap<>(SlotStatus.class);
+        slots.countClinicCapacity(clinicId, from, to)
+                .forEach(count -> capacity.put(count.getStatus(), count.getTotal()));
+        long free = capacity.getOrDefault(SlotStatus.FREE, 0L);
+        long booked = capacity.getOrDefault(SlotStatus.BOOKED, 0L);
+        counts.put("OPEN_SLOTS", free);
+        counts.put("BOOKED_SLOTS", booked);
+        counts.put("CLOSED_SLOTS", capacity.getOrDefault(SlotStatus.CLOSED, 0L));
+        counts.put("OCCUPANCY_PERCENT", free + booked == 0 ? 0L : Math.round(100.0 * booked / (free + booked)));
         return counts;
     }
 

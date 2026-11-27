@@ -7,7 +7,6 @@ import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.exception.ErrorBody;
 import com.example.apimedlink.mapper.AgendaMapper;
 import com.example.apimedlink.mapper.ClinicActivityMapper;
-import com.example.apimedlink.model.AppointmentStatus;
 import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.service.ClinicActivityService;
 import java.time.Duration;
@@ -55,7 +54,7 @@ public class ClinicActivityController {
     }
 
     @GetMapping("/clinics/{clinicId}/activity")
-    public Map<AppointmentStatus, Long> activity(@PathVariable UUID clinicId,
+    public Map<String, Long> activity(@PathVariable UUID clinicId,
             @RequestParam(required = false) Instant from, @RequestParam(required = false) Instant to) {
         Map<String, String> errors = new LinkedHashMap<>();
         validatePeriod(from, to, errors);
