@@ -84,13 +84,14 @@ public class AdminUserService {
     private final AuditService audit;
     private final AccountOperationRunner operations;
     private final TransactionTemplate tx;
+    private final StaffAccessGuard staffAccess;
 
     public AdminUserService(KeycloakAdminService keycloak, UserRepository users, PatientRepository patients,
                             PractitionerRepository practitioners, SpecialtyRepository specialties,
                             ClinicRepository clinics, PractitionerProfiles profiles,
                             SessionRevocationStore revocations, EmailTokenService tokens,
                             MailService mail, AuditService audit, AccountOperationRunner operations,
-                            TransactionTemplate tx) {
+                            TransactionTemplate tx, StaffAccessGuard staffAccess) {
         this.keycloak = keycloak;
         this.users = users;
         this.patients = patients;
@@ -104,6 +105,7 @@ public class AdminUserService {
         this.audit = audit;
         this.operations = operations;
         this.tx = tx;
+        this.staffAccess = staffAccess;
     }
 
     /**
@@ -278,9 +280,17 @@ public class AdminUserService {
      */
     public void execute(AccountOperation op) {
         switch (op.action()) {
-            case ROLE_CHANGED -> applyRoleChange(op.userId(),
-                    checkRoleChange(op.userId(), op.targetRole(), op.specialtyId(), op.clinicIds()));
-            case ACCOUNT_ENABLED, ACCOUNT_DISABLED -> applyEnabled(op.userId(), Boolean.TRUE.equals(op.enabled()));
+            case ROLE_CHANGED -> {
+                Runnable change = () -> applyRoleChange(op.userId(),
+                        checkRoleChange(op.userId(), op.targetRole(), op.specialtyId(), op.clinicIds()));
+                if (Roles.PRACTITIONER.equals(op.targetRole())) {
+                    staffAccess.protect(op.userId(), change);
+                } else {
+                    change.run();
+                }
+            }
+            case ACCOUNT_ENABLED -> applyEnabled(op.userId(), true);
+            case ACCOUNT_DISABLED -> staffAccess.protect(op.userId(), () -> applyEnabled(op.userId(), false));
             default -> throw new IllegalArgumentException("Not an account operation: " + op.action());
         }
     }

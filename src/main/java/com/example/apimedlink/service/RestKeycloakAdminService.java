@@ -231,6 +231,45 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
     }
 
     @Override
+    public boolean isLastActiveStaff(UUID id) {
+        String staffPath = RoleGroups.pathOf(com.example.apimedlink.security.Roles.ADMINISTRATIVE_STAFF);
+        if (groupsOf(id).stream().noneMatch(group -> staffPath.equals(group.path()))) {
+            return false;
+        }
+        KeycloakUser target = getUser(id);
+        if (!target.enabled() || !target.emailVerified()) {
+            return false;
+        }
+        String group = groupId(staffPath);
+        String members = "/admin/realms/" + keycloak.realm() + "/groups/{group}/members?first={first}&max=100";
+        for (int first = 0; ; first += 100) {
+            int offset = first;
+            UserRepresentation[] page = call("list staff members", bearer -> http.get()
+                    .uri(members, group, offset)
+                    .header(HttpHeaders.AUTHORIZATION, bearer)
+                    .accept(MediaType.APPLICATION_JSON)
+                    .exchange((request, response) -> {
+                        expectSuccess(response.getStatusCode(), "list staff members");
+                        return response.bodyTo(UserRepresentation[].class);
+                    }));
+            if (page == null) {
+                throw new KeycloakUnavailableException("list staff members: missing response");
+            }
+            for (UserRepresentation member : page) {
+                UUID other = UUID.fromString(member.id());
+                if (!id.equals(other) && Boolean.TRUE.equals(member.enabled())
+                        && Boolean.TRUE.equals(member.emailVerified())
+                        && groupsOf(other).stream().map(GroupRepresentation::path).toList().equals(List.of(staffPath))) {
+                    return false;
+                }
+            }
+            if (page.length < 100) {
+                return true;
+            }
+        }
+    }
+
+    @Override
     public void moveToGroup(UUID id, String groupPath) {
         String target = groupId(groupPath);
         List<GroupRepresentation> current = groupsOf(id); // 404 here when the user does not exist
