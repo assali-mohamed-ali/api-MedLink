@@ -90,9 +90,10 @@ class PatientOverlapFunctionalTest extends FunctionalTestBase {
     @Test
     void aMoveOntoAnotherAppointmentsTimeIsRefusedAndTheOldOneIsKept() throws Exception {
         Patient patient = patient();
-        String toMove = id(book(patient.browser(), slot("Report A", NINE, 30)));
+        UUID original = slot("Report A", NINE, 30);
+        String toMove = id(book(patient.browser(), original));
         assertThat(book(patient.browser(), slot("Report B", NINE.plus(2, ChronoUnit.HOURS), 30)).statusCode()).isEqualTo(201);
-        UUID target = slot("Report C", NINE.plus(2, ChronoUnit.HOURS), 30);
+        UUID target = slotOfSamePractitioner(original, NINE.plus(2, ChronoUnit.HOURS));
 
         HttpResponse<String> move = move(patient.browser(), toMove, target);
 
@@ -102,15 +103,17 @@ class PatientOverlapFunctionalTest extends FunctionalTestBase {
         assertThat(slotStatus(target)).isEqualTo("FREE");
     }
 
-    /** The appointment being moved does not block its own time: moving it by a quarter of an hour is fine. */
+    /** US-10: changing practitioner requires the separate staff reassignment workflow. */
     @Test
-    void aMoveOverlappingOnlyTheMovedAppointmentIsFine() throws Exception {
+    void aMoveToAnotherPractitionerIsRefusedAndTheOriginalIsKept() throws Exception {
         Patient patient = patient();
         String toMove = id(book(patient.browser(), slot("Décalage A", NINE, 30)));
 
         HttpResponse<String> move = move(patient.browser(), toMove, slot("Décalage B", NINE.plus(15, ChronoUnit.MINUTES), 30));
 
-        assertThat(move.statusCode()).as(move.body()).isEqualTo(200);
+        assertThat(move.statusCode()).as(move.body()).isEqualTo(409);
+        assertThat(body(move).get("code")).isEqualTo("DIFFERENT_PRACTITIONER");
+        assertThat(appointmentStatus(toMove)).isEqualTo("BOOKED");
     }
 
     /** Two sessions of one patient booking two overlapping slots at the same instant: one appointment, never two. */
@@ -200,6 +203,14 @@ class PatientOverlapFunctionalTest extends FunctionalTestBase {
         UUID id = UUID.randomUUID();
         jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) values (?, ?, ?, ?, ?, 'FREE')",
                 id, practitioner, clinic, Timestamp.from(start), Timestamp.from(start.plus(minutes, ChronoUnit.MINUTES)));
+        return id;
+    }
+
+    private UUID slotOfSamePractitioner(UUID original, Instant start) {
+        UUID id = UUID.randomUUID();
+        jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) "
+                        + "select ?, practitioner_id, clinic_id, ?, ?, 'FREE' from slots where id = ?",
+                id, Timestamp.from(start), Timestamp.from(start.plus(30, ChronoUnit.MINUTES)), original);
         return id;
     }
 

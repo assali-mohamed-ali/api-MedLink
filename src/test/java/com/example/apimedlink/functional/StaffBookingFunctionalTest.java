@@ -9,6 +9,8 @@ import java.time.Instant;
 import java.time.temporal.ChronoUnit;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executors;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -55,6 +57,37 @@ class StaffBookingFunctionalTest extends FunctionalTestBase {
                 .as("the slot is taken").isEqualTo(409);
         assertThat(staff.postJson("/api/admin/appointments", body(UUID.randomUUID(), freeSlot())).statusCode())
                 .as("unknown patient").isEqualTo(404);
+    }
+
+    @Test
+    void staffAndPatientCompetingForTheSameSlotCreateOnlyOneBooking() throws Exception {
+        String staffEmail = email("booking-race-staff");
+        console.createUser(staffEmail, PASSWORD, "/administrative-staff");
+        Browser staff = new Browser().login(staffEmail, PASSWORD);
+        UUID assisted = patient();
+        UUID direct = patient();
+        String directEmail = jdbc.queryForObject("select email from users where id = ?", String.class, direct);
+        Browser holder = new Browser();
+        assertThat(holder.apiLogin(directEmail, PASSWORD).statusCode()).isEqualTo(200);
+        UUID slot = freeSlot();
+        CountDownLatch go = new CountDownLatch(1);
+        var pool = Executors.newFixedThreadPool(2);
+        try {
+            var first = pool.submit(() -> {
+                go.await();
+                return staff.postJson("/api/admin/appointments", body(assisted, slot)).statusCode();
+            });
+            var second = pool.submit(() -> {
+                go.await();
+                return holder.postJson("/api/appointments", "{\"slotId\":\"" + slot + "\"}").statusCode();
+            });
+            go.countDown();
+            assertThat(List.of(first.get(), second.get())).containsExactlyInAnyOrder(201, 409);
+        } finally {
+            pool.shutdownNow();
+        }
+        assertThat(jdbc.queryForObject("select count(*) from appointments where slot_id = ? and status = 'BOOKED'",
+                Integer.class, slot)).isEqualTo(1);
     }
 
     @Test
