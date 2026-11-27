@@ -79,3 +79,14 @@ The first combined API verification found profile whitespace validation, Postgre
 ## AI disclosure
 
 Any future pull request must declare AI assistance and leave the human review checkbox for the reviewer.
+
+## 27 November 2026 — remaining workflow implementation
+
+- V32 persists confirmation delivery and staff-booking provenance. Confirmation attempts follow committed bookings, retry pending future bookings and use stable message IDs; a crash between SMTP and database commit can still cause duplicate delivery. Cancelled appointments are not retried.
+- V33 gates scheduling on practitioner account changes made through MedLink. Existing disabled identities and externally changed Keycloak accounts still require reconciliation; do not infer that the default backfill verifies Keycloak status.
+- V34 preserves historical clinic foreign keys as inactive assignments. Future unresolved bookings/open slots block removal. Staff propose an eligible replacement; only the patient and replacement practitioner can decide. Both approvals are required for an atomic transfer; decline or unavailable target preserves the original. The decision to close the original slot is intentional for clinic removal.
+- Patient moves are restricted to the same practitioner. Staff and direct booking share the same lock; a regression test races both callers. Absence-covered slots remain closed after cancellation or rescheduling.
+- Staff removal guard protects the last enabled, verified administrative-staff account. Advisory lock serializes removal through the API; external Keycloak administration remains a separate operational responsibility. This does not create a portal administrator role.
+- Clinic occupancy is rounded booked slots divided by free plus booked slots, excluding closed slots, using the same half-open period as appointment counts. A zero denominator is displayed as no slots. CSV export rejects configured thresholds below five distinct patients and escapes spreadsheet formula prefixes, including after whitespace. Overlapping-export differencing is still a product/privacy decision.
+- Tests for the new paths have been authored and pushed in separate test-first commits, but red/green and mutation evidence is not available locally. Prior dashboard HEAD 2d2cf62 passed 584 tests in 84 files; prior API 0437d26 passed 1,242 tests. Neither is evidence of passing the current head.
+- Pending: latest CI, reverse-order verification, Newman and cross-role browser acceptance, V23→V34 upgrade, consent wording, verified email-change workflow, retention/anonymisation, report consultation timing, overlapping-export privacy policy, external identity reconciliation. No new story is marked VALIDATED.
