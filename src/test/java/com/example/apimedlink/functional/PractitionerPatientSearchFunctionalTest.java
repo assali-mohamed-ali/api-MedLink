@@ -52,7 +52,7 @@ class PractitionerPatientSearchFunctionalTest extends FunctionalTestBase {
         assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
         List<Map<String, Object>> found = list(response);
         assertThat(found).extracting(row -> row.get("id")).containsExactlyInAnyOrder(mine.toString(), alsoMine.toString());
-        assertThat(found.get(0)).containsOnlyKeys("id", "firstName", "lastName");
+        assertThat(found.get(0)).containsOnlyKeys("id", "firstName", "lastName", "recordNumber");
         assertThat(response.body()).doesNotContain(notMine.toString()).doesNotContain(unlinked.toString());
     }
 
@@ -101,10 +101,70 @@ class PractitionerPatientSearchFunctionalTest extends FunctionalTestBase {
         assertThat(new Browser().call("/api/practitioner/patients?q=a").statusCode()).isEqualTo(401);
     }
 
+    /**
+     * US-22: a record number finds the linked patient whatever way it is typed; a homonym of a linked patient and a
+     * stranger's record number find nothing; every patient listed opens (record 200), the others do not (403).
+     */
+    @Test
+    void aRecordNumberFindsOnlyALinkedPatientAndEveryResultOpensItsRecord() throws Exception {
+        String tag = "Rn" + UUID.randomUUID().toString().substring(0, 6);
+        Pro pro = practitioner();
+        UUID linked = patient("Sami", tag + "Lie");
+        UUID homonym = patient("Sami", tag + "Lie");
+        UUID stranger = patient("Nour", tag + "Inconnu");
+        booked(pro.id(), linked, PAST, "BOOKED");
+        long linkedNumber = jdbc.queryForObject("select record_number from patients where id = ?", Long.class, linked);
+        long strangerNumber = jdbc.queryForObject("select record_number from patients where id = ?", Long.class, stranger);
+        String label = String.format("MED-%06d", linkedNumber);
+
+        for (String typed : List.of(label, label.toLowerCase(), "MED " + linkedNumber, String.format("%06d", linkedNumber))) {
+            List<Map<String, Object>> found = list(pro.browser().call("/api/practitioner/patients?q="
+                    + java.net.URLEncoder.encode(typed, java.nio.charset.StandardCharsets.UTF_8)));
+            assertThat(found).as(typed).extracting(row -> row.get("id")).containsExactly(linked.toString());
+            assertThat(found.get(0)).containsEntry("recordNumber", label);
+        }
+        assertThat(list(pro.browser().call("/api/practitioner/patients?q=" + String.format("MED-%06d", strangerNumber))))
+                .as("a stranger's number").isEmpty();
+        List<Map<String, Object>> byName = list(pro.browser().call("/api/practitioner/patients?q="
+                + java.net.URLEncoder.encode("sami " + tag.toLowerCase(), java.nio.charset.StandardCharsets.UTF_8)));
+        assertThat(byName).as("full name, the homonym left out").extracting(row -> row.get("id"))
+                .containsExactly(linked.toString());
+
+        for (Map<String, Object> row : byName) {
+            assertThat(pro.browser().call("/api/patients/" + row.get("id") + "/record").statusCode()).isEqualTo(200);
+        }
+        assertThat(pro.browser().call("/api/patients/" + homonym + "/record").statusCode()).isEqualTo(403);
+        assertThat(pro.browser().call("/api/patients/" + stranger + "/record").statusCode()).isEqualTo(403);
+    }
+
+    /** US-22: the search is paged; {@code total} counts every match and the pages do not overlap. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void theSearchIsPagedWithATotal() throws Exception {
+        String tag = "Pg" + UUID.randomUUID().toString().substring(0, 6);
+        Pro pro = practitioner();
+        UUID first = patient("Amel", tag + "A");
+        UUID second = patient("Amel", tag + "B");
+        booked(pro.id(), first, PAST, "BOOKED");
+        booked(pro.id(), second, PAST.plus(1, ChronoUnit.HOURS), "BOOKED");
+        String q = "/api/practitioner/patients?q=" + tag.toLowerCase();
+
+        Map<String, Object> page0 = mapper.readValue(pro.browser().call(q + "&size=1&page=0").body(), Map.class);
+        Map<String, Object> page1 = mapper.readValue(pro.browser().call(q + "&size=1&page=1").body(), Map.class);
+
+        assertThat(page0).containsEntry("total", 2).containsEntry("size", 1).containsEntry("page", 0);
+        assertThat(((List<Map<String, Object>>) page0.get("items"))).extracting(row -> row.get("id"))
+                .containsExactly(first.toString());
+        assertThat(((List<Map<String, Object>>) page1.get("items"))).extracting(row -> row.get("id"))
+                .containsExactly(second.toString());
+        assertThat(pro.browser().call(q + "&size=51").statusCode()).isEqualTo(400);
+        assertThat(pro.browser().call(q + "&page=-1").statusCode()).isEqualTo(400);
+    }
+
     @SuppressWarnings("unchecked")
     private List<Map<String, Object>> list(HttpResponse<String> response) {
         assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
-        return mapper.readValue(response.body(), List.class);
+        return (List<Map<String, Object>>) mapper.readValue(response.body(), Map.class).get("items");
     }
 
     private Pro practitioner() throws Exception {
