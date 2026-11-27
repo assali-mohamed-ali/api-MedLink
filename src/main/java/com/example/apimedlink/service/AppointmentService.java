@@ -176,8 +176,29 @@ public class AppointmentService {
         return appointment;
     }
 
+    /**
+     * US-30: a member of the administrative staff books a free slot for a patient (patient_id = the patient,
+     * booked_by = the staff member). Same rules and locks as a patient's own booking (MLink-102/167); 404 when the patient
+     * has no profile. Audited in the same transaction.
+     */
+    @Transactional
+    public Appointment bookFor(UUID patientId, UUID slotId, UUID staffId) {
+        if (patients.lockForBooking(patientId).isEmpty()) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "PATIENT_NOT_FOUND", "Ce patient n'existe pas.");
+        }
+        Appointment appointment = bookLocked(slotToBook(slotId), patientId, staffId, Instant.now());
+        audit.recordWithin(AuditAction.APPOINTMENT_BOOKED, "APPOINTMENT", appointment.getId().toString(),
+                AuditOutcome.SUCCESS);
+        return appointment;
+    }
+
     /** Books a slot already locked by the caller's transaction, for the patient (patient_id = booked_by). */
     private Appointment bookLocked(Slot slot, UUID patientId, Instant now) {
+        return bookLocked(slot, patientId, patientId, now);
+    }
+
+    /** As above, with who booked it (the patient, or a staff member for US-30). */
+    private Appointment bookLocked(Slot slot, UUID patientId, UUID bookedBy, Instant now) {
         if (slot.getStatus() != SlotStatus.FREE || !slot.getStartsAt().isAfter(now)) {
             throw new ApiException(HttpStatus.CONFLICT, "SLOT_TAKEN", SLOT_TAKEN);
         }
@@ -189,7 +210,7 @@ public class AppointmentService {
         slot.setStatus(SlotStatus.BOOKED);
         Appointment appointment;
         try {
-            appointment = appointments.saveAndFlush(new Appointment(slot, patientId, patientId));
+            appointment = appointments.saveAndFlush(new Appointment(slot, patientId, bookedBy));
         } catch (DataIntegrityViolationException e) {
             // MLink-103: the unique index on a slot's active appointment (V13) is the last guard against a double
             // booking; losing to it is the same "taken" answer as above, never a server error
