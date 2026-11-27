@@ -1,50 +1,47 @@
-# api-MedLink
+<p align="center">
+  <img src="docs/images/banner.svg" alt="MedLink API: health portal across three clinics, Spring Boot BFF" width="100%">
+</p>
 
-[![CI](https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/ci.yml/badge.svg?branch=master)](https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/ci.yml)
-[![CodeQL](https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/sast-codeql.yml/badge.svg?branch=master)](https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/sast-codeql.yml)
-![Java 17](https://img.shields.io/badge/Java-17-informational)
-![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1-informational)
-![Keycloak 26.8](https://img.shields.io/badge/Keycloak-26.8-informational)
-![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-informational)
-[![Release](https://img.shields.io/github/v/release/assali-mohamed-ali/api-MedLink)](https://github.com/assali-mohamed-ali/api-MedLink/releases)
+<p align="center">
+  <a href="https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/ci.yml"><img src="https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/ci.yml/badge.svg?branch=master" alt="CI"></a>
+  <a href="https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/sast-codeql.yml"><img src="https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/sast-codeql.yml/badge.svg?branch=master" alt="CodeQL"></a>
+  <a href="https://github.com/assali-mohamed-ali/api-MedLink/releases"><img src="https://img.shields.io/github/v/release/assali-mohamed-ali/api-MedLink?color=0e5245" alt="Release"></a>
+  <img src="https://img.shields.io/badge/Java-17-0e5245?logo=openjdk&logoColor=white" alt="Java 17">
+  <img src="https://img.shields.io/badge/Spring%20Boot-4.1-0e5245?logo=springboot&logoColor=white" alt="Spring Boot 4.1">
+  <img src="https://img.shields.io/badge/Keycloak-26.8-0e5245?logo=keycloak&logoColor=white" alt="Keycloak 26.8">
+  <img src="https://img.shields.io/badge/PostgreSQL-18-0e5245?logo=postgresql&logoColor=white" alt="PostgreSQL 18">
+</p>
 
-The API of **MedLink**, a health portal for patients, practitioners and administrative staff across three
-clinics (Sousse, Sfax, Tunis). The React front is the companion repository
-[medlink-dashboard](https://github.com/assali-mohamed-ali/medlink-dashboard).
+<p align="center">
+  <a href="https://med-l.ink"><b>Production</b></a> ·
+  <a href="https://staging.med-l.ink"><b>Staging</b></a> ·
+  <a href="https://github.com/assali-mohamed-ali/medlink-dashboard"><b>Front (medlink-dashboard)</b></a> ·
+  <a href="https://medlink.youtrack.cloud"><b>YouTrack</b></a> ·
+  <a href="https://github.com/assali-mohamed-ali/api-MedLink/releases/tag/v1.2.0"><b>Release v1.2.0</b></a>
+</p>
 
-| | |
-|---|---|
-| **Production** | https://med-l.ink (release [v1.2.0](https://github.com/assali-mohamed-ali/api-MedLink/releases/tag/v1.2.0), 2026-11-26) |
-| **Staging** | https://staging.med-l.ink |
-| **Tracker** | YouTrack, project `MLink`: https://medlink.youtrack.cloud |
+The API of **MedLink**, a health portal for patients, practitioners and administrative staff across three clinics
+(Sousse, Sfax, Tunis). Release **v1.2.0** runs in production since 2026-11-26.
 
-**What it does**
+> [!IMPORTANT]
+> **The browser never talks to Keycloak.** This API is the only component that does. The browser holds an HttpOnly
+> session cookie and a readable `XSRF-TOKEN` cookie, never a token, a Keycloak page, link or mail.
 
-- **Patients:** register, verify their email, find a free slot by clinic, specialty or practitioner, book, cancel or
-  reschedule an appointment, read their consultation reports and download their documents.
-- **Practitioners** (password + authenticator code): manage their agenda and slots, receive alerts, open the record
-  of a patient they see, write consultation reports (encrypted at rest).
-- **Administrative staff** (password + authenticator code): create and manage accounts (role, status, name, forced
-  password change), publish patient documents (encrypted, stored in MinIO), supervise each clinic's activity, search
-  the audit journal, export anonymised statistics as CSV.
-- **Operations:** repeated suspicious events in the audit journal send a security alert mail to an operations
-  mailbox (`APP_SECURITY_ALERTS_RECIPIENT`); Prometheus, Grafana and Alertmanager watch the API and the hosts.
-
-> **The browser never talks to Keycloak.** This API is the only component that does. The browser holds an
-> HttpOnly session cookie and a readable `XSRF-TOKEN` cookie, never a token, a Keycloak page, link or mail.
+<table>
+  <tr>
+    <td width="25%" valign="top"><b>Patients</b><br><sub>register, verify their email, find a free slot by clinic, specialty or practitioner, book, cancel or reschedule, read their consultation reports and download their documents</sub></td>
+    <td width="25%" valign="top"><b>Practitioners</b><br><sub>password + authenticator code; agenda and slots, alerts, the record of a patient they see, consultation reports encrypted at rest</sub></td>
+    <td width="25%" valign="top"><b>Administrative staff</b><br><sub>password + authenticator code; accounts (role, status, name, forced password change), patient documents (encrypted, MinIO), clinic activity, audit journal, anonymised CSV statistics</sub></td>
+    <td width="25%" valign="top"><b>Operations</b><br><sub>security alert mails to an operations mailbox (<code>APP_SECURITY_ALERTS_RECIPIENT</code>); Prometheus, Grafana and Alertmanager watch the API and the hosts</sub></td>
+  </tr>
+</table>
 
 ## Contents
 
-1. [Quick start](#1-quick-start)
-2. [How auth works](#2-how-auth-works)
-3. [Project structure](#3-project-structure)
-4. [Rules for code](#4-rules-for-code)
-5. [From ticket to merge](#5-from-ticket-to-merge)
-6. [CI checks](#6-ci-checks)
-7. [Environments and release flow](#7-environments-and-release-flow)
-8. [Dev setup in detail](#8-dev-setup-in-detail)
-9. [Troubleshooting](#9-troubleshooting)
-10. [Security and docs](#10-security-and-docs)
+[1. Quick start](#1-quick-start) · [2. How auth works](#2-how-auth-works) · [3. Project structure](#3-project-structure) ·
+[4. Rules for code](#4-rules-for-code) · [5. From ticket to merge](#5-from-ticket-to-merge) · [6. CI checks](#6-ci-checks) ·
+[7. Environments and release flow](#7-environments-and-release-flow) · [8. Dev setup in detail](#8-dev-setup-in-detail) ·
+[9. Troubleshooting](#9-troubleshooting) · [10. Security and docs](#10-security-and-docs)
 
 ## 1. Quick start
 
@@ -62,9 +59,11 @@ cd api-MedLink
 The script creates `.env` with random secrets, starts Postgres, Keycloak, Mailpit and MinIO (patient documents),
 checks the realm, runs the tests, starts the API and logs in as `patient.dev` to prove the whole chain works
 (`/api/auth/me` answers with the roles exactly `["PATIENT"]`); it also checks that `practitioner.dev` is asked for
-the staff code (no session on the password alone). Add `-SkipTests` / `--skip-tests` for a faster run. **Re-run it
-after every `git pull`**: it keeps your Keycloak in step with the team's realm file. All options:
+the staff code (no session on the password alone). Add `-SkipTests` / `--skip-tests` for a faster run. All options:
 [§8](#8-dev-setup-in-detail).
+
+> [!TIP]
+> **Re-run the script after every `git pull`**: it keeps your Keycloak in step with the team's realm file.
 
 **What you get**
 
@@ -136,7 +135,9 @@ sequenceDiagram
 | `GET /api/patients/{patientId}/documents/{documentId}` | the patient owner, or staff | 200 bytes · 403 for a practitioner · 404 for another patient or unknown document |
 | `GET /api/users/_health` | logged in | 200 |
 
-The other routes, by role (the access matrix test lists the exact answer of each route for every caller):
+<details>
+<summary><b>The other routes, by role</b> (the access matrix test lists the exact answer of each route for every caller)</summary>
+<br>
 
 | Who | Routes |
 |---|---|
@@ -145,6 +146,8 @@ The other routes, by role (the access matrix test lists the exact answer of each
 | patient | `GET /api/slots` and `GET /api/slots/filters` (free slots by clinic, specialty, practitioner) · `POST /api/appointments` · `GET /api/appointments/me` · `POST /api/appointments/{id}/cancel` · `POST /api/appointments/{id}/reschedule` · `GET /api/reports/me` (own consultation reports) |
 | practitioner | `GET /api/practitioner/agenda` · `POST /api/practitioner/slots` · `PATCH /api/practitioner/slots/{id}` · `GET /api/practitioner/alerts` · `POST /api/practitioner/alerts/{id}/read` · `GET /api/patients/{id}/record` (only a patient they see) · `POST` and `GET /api/patients/{id}/reports` (after the consultation only) |
 | staff | `GET` and `POST /api/admin/users` · `PUT /api/admin/users/{id}/role` · `PATCH /api/admin/users/{id}/status` · `PUT /api/admin/users/{id}/name` · `POST /api/admin/users/{id}/force-password-reset` · `GET /api/admin/profile-choices` · `GET /api/admin/practitioners` · `GET /api/admin/clinics` · `GET /api/admin/clinics/{clinicId}/activity` · `GET /api/admin/agenda` · `GET /api/admin/audit-entries` · `GET /api/admin/stats/export` (CSV) |
+
+</details>
 
 Full contracts: [plan.md §4](docs/sprints/sprint-2/plan.md). Patient documents:
 [feature guide](docs/features/patient-documents.md) and [decision 0002](docs/decisions/0002-patient-documents-package.md).
@@ -399,8 +402,9 @@ Boot's compose integration); setup B, the tests and the servers use `medlink_app
 
 ## 10. Security and docs
 
-**Report a vulnerability privately**, never in a public issue: see [SECURITY.md](SECURITY.md)
-(`security@medlink.example.com`, or a DM to @assali-mohamed-ali starting with `[SECURITY]`).
+> [!WARNING]
+> **Report a vulnerability privately**, never in a public issue: see [SECURITY.md](SECURITY.md)
+> (`security@medlink.example.com`, or a DM to @assali-mohamed-ali starting with `[SECURITY]`).
 
 Scalar and `/v3/api-docs` exist in dev only: staging and prod answer 404 (GitHub #65). In staging and prod the
 actuator (metrics, `/actuator/health`) is only on the private management port 9000, never public (the monitoring
@@ -421,3 +425,5 @@ actuator exposes only `health,info,prometheus`: don't open more without a securi
 | [docs/DEVSECOPS.md](docs/DEVSECOPS.md) | the security gates of the pipeline, from the workstation to production |
 | [docs/operations/](docs/operations/) | servers, Vault, WAF, monitoring (Prometheus, Grafana, Alertmanager), backup and restore |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | pre-commit hooks and contribution steps |
+
+<p align="center"><sub>MedLink · project of the Labs Cyber Security and Coding module, ESPRIM 5CC1 · 2026–2027</sub></p>
