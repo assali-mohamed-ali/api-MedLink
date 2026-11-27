@@ -22,6 +22,7 @@ réussite n'est faite ici. Le frontend (`medlink-dashboard`) n'a pas pu être mo
 | US-03 mot de passe oublié | `feat/forgot-password` | `POST /api/auth/password/forgot` et `/reset` | V25 |
 | US-16 export | `feat/patient-export` | `GET /api/patients/me/export` (JSON) | aucune |
 | US-16 demande de suppression | `feat/patient-deletion-request` | côté patient : `POST`/`GET`/`DELETE /api/patients/me/deletion-request` ; côté **personnel administratif** : `GET /api/admin/deletion-requests` et `POST /api/admin/deletion-requests/{patientId}/decision` (approbation bloquée tant que la conservation court, refus motivé) ; **ne supprime rien** | V26 |
+| US-21 absences | `feat/practitioner-absences` | `POST /api/practitioner/absences` (ferme les créneaux libres, liste les rendez-vous réservés à traiter) ; `POST /api/practitioner/appointments/{id}/absence-decision` : annuler, ou reporter à la même heure la semaine suivante (même clinique, créneau libre requis) ; le patient reçoit un e-mail | V27 |
 | Décisions produit | `docs/product-decisions` | les six décisions de l'équipe | — |
 | Audit initial | `docs/backlog-coverage` | matrice de couverture US-01 à US-32 | — |
 
@@ -33,6 +34,9 @@ US-05 (liste des praticiens) : déjà couverte (filtres de recherche de créneau
   refuse un script plus ancien appliqué après un plus récent.
 - `feat/patient-profile` et `feat/practitioner-clinics` ajoutent le même helper `putJson` dans `FunctionalTestBase` (texte
   identique) : la fusion du second ne devrait pas poser de conflit.
+- `MailService` : `feat/booking-confirmation-mail`, `feat/forgot-password` et `feat/practitioner-absences` ajoutent chacune des méthodes
+  au même endroit : conflit de fusion attendu, à résoudre en gardant les trois blocs. Migrations : V24 (consentement), V25 (mot de passe
+  oublié), V26 (suppression), V27 (absences).
 - `SecurityConfig` : chaque branche ajoute sa règle à un endroit différent ; vérifier tout de même la fusion.
 
 ## Non fait
@@ -40,7 +44,7 @@ US-05 (liste des praticiens) : déjà couverte (filtres de recherche de créneau
 - **US-16 purge définitive** : volontairement non implémentée. Le personnel peut approuver une demande quand aucune conservation
   ne s'applique, mais rien n'est supprimé : une purge touche aussi les documents chiffrés du stockage objet.
 - **US-29 réaffectation** des rendez-vous futurs vers un autre praticien avec double confirmation (décidée, non codée).
-- **US-21** absences avec report à la semaine suivante ou annulation par le praticien (décidée, non codée).
+- **US-21** : un créneau ouvert plus tard pendant une absence n'est pas encore bloqué.
 - **US-13 / US-25** résultats d'examens, **US-30** réservation par le personnel : non codées.
 - **Frontend** : aucune page (profil, consentement, mot de passe oublié `/reinitialiser-mot-de-passe`, export, demande de
   suppression, recherche de patients) ; le front doit envoyer `consentVersion` à l'inscription.
