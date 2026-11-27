@@ -79,6 +79,9 @@ public class SecurityConfig {
                                 "/api/auth/account/activate",
                                 "/api/auth/account/activate/resend",
                                 "/api/auth/password",
+                                // US-03: forgot my password, then the link from the mail
+                                "/api/auth/password/forgot",
+                                "/api/auth/password/reset",
                                 // Staff code step: the pending step login started is the guard (MLink-62/63)
                                 "/api/auth/mfa/setup",
                                 "/api/auth/mfa/verify")
