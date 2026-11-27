@@ -41,7 +41,7 @@ public class SlotController {
      * 400 instead of 403 (review on #87). Every broken rule is listed in {@code details}, under its field, in French.
      */
     @GetMapping
-    @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
+    @PreAuthorize("hasAnyRole('" + Roles.PATIENT + "', '" + Roles.ADMINISTRATIVE_STAFF + "')")
     public SlotSearchResponse search(
             @RequestParam(name = "from", required = false) String fromText,
             @RequestParam(name = "to", required = false) String toText,
@@ -78,7 +78,7 @@ public class SlotController {
 
     /** The lists of the search form (MLink-163): clinics, specialties, practitioners with their clinics. */
     @GetMapping("/filters")
-    @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
+    @PreAuthorize("hasAnyRole('" + Roles.PATIENT + "', '" + Roles.ADMINISTRATIVE_STAFF + "')")
     public SlotFiltersResponse filters() {
         return SlotMapper.toFiltersResponse(service.filters());
     }

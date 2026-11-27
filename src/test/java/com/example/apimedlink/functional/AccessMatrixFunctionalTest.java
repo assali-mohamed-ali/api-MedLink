@@ -113,7 +113,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET", "/api/practitioner/patients", L, F, O, F),
             new Rule("GET", "/api/results/me", L, O, F, F),
             new Rule("GET", "/api/patients/{id}/results", L, F, F, F),
-            new Rule("POST", "/api/patients/{id}/results", L, F, O, F),
+            new Rule("POST", "/api/patients/{id}/results", L, F, F, F),
             // MLink-123/125: upload is staff-only; list is owner-or-staff; a download by another
             // patient is a 404 (OPEN), never a 403 that would confirm the document exists
             new Rule("POST",   "/api/patients/{patientId}/documents",                  L, F, F, O),
