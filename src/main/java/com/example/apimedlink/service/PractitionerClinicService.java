@@ -42,7 +42,7 @@ public class PractitionerClinicService {
     /** Replaces the practitioner's clinics by {@code clinicIds}; returns the practitioner with the new list. */
     @Transactional
     public Practitioner assign(UUID practitionerId, List<UUID> clinicIds) {
-        Practitioner practitioner = practitioners.findById(practitionerId).orElseThrow(() ->
+        Practitioner practitioner = practitioners.lockSchedule(practitionerId).orElseThrow(() ->
                 new ApiException(HttpStatus.NOT_FOUND, "PRACTITIONER_NOT_FOUND", "Ce praticien n'existe pas."));
         Set<UUID> wanted = new HashSet<>(clinicIds);
         List<Clinic> found = clinics.findAllById(wanted);

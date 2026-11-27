@@ -70,6 +70,8 @@ public class DeletionReviewService {
         if (decision == DeletionStatus.PENDING) {
             throw new IllegalArgumentException("A decision is APPROVED or REJECTED");
         }
+        patients.lockForBooking(patientId).orElseThrow(() ->
+                new ApiException(HttpStatus.NOT_FOUND, "REQUEST_NOT_FOUND", "Cette demande n'existe pas."));
         DeletionRequest request = requests.findById(patientId).orElseThrow(() ->
                 new ApiException(HttpStatus.NOT_FOUND, "REQUEST_NOT_FOUND", "Cette demande n'existe pas."));
         if (request.getStatus() != DeletionStatus.PENDING) {

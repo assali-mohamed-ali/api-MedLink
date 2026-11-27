@@ -42,11 +42,13 @@ public class AppointmentService {
     private final AuditService audit;
     private final AlertService alerts;
     private final AppointmentConfirmation confirmation;
+    private final KeycloakAdminService identity;
     /** H-03: no cancel less than this before the start (app.appointments.cancel-deadline-hours). */
     private final Duration cancelDeadline;
 
     public AppointmentService(AppointmentRepository appointments, SlotRepository slots, PatientRepository patients,
             OwnershipGuard ownership, AuditService audit, AlertService alerts, AppointmentConfirmation confirmation,
+            KeycloakAdminService identity,
             @Value("${app.appointments.cancel-deadline-hours}") long cancelDeadlineHours) {
         this.appointments = appointments;
         this.slots = slots;
@@ -55,6 +57,7 @@ public class AppointmentService {
         this.audit = audit;
         this.alerts = alerts;
         this.confirmation = confirmation;
+        this.identity = identity;
         this.cancelDeadline = Duration.ofHours(cancelDeadlineHours);
     }
 
@@ -189,6 +192,15 @@ public class AppointmentService {
     public Appointment bookFor(UUID patientId, UUID slotId, UUID staffId) {
         if (patients.lockForBooking(patientId).isEmpty()) {
             throw new ApiException(HttpStatus.NOT_FOUND, "PATIENT_NOT_FOUND", "Ce patient n'existe pas.");
+        }
+        KeycloakUser account;
+        try {
+            account = identity.getUser(patientId);
+        } catch (jakarta.persistence.EntityNotFoundException missing) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "PATIENT_NOT_FOUND", "Ce patient n'existe pas.");
+        }
+        if (!account.enabled() || !account.emailVerified()) {
+            throw new ApiException(HttpStatus.CONFLICT, "PATIENT_NOT_ELIGIBLE", "Ce compte patient est inactif.");
         }
         Appointment appointment = bookLocked(slotToBook(slotId), patientId, staffId, Instant.now());
         audit.recordWithin(AuditAction.APPOINTMENT_BOOKED, "APPOINTMENT", appointment.getId().toString(),

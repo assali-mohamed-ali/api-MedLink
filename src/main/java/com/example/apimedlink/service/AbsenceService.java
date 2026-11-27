@@ -15,6 +15,7 @@ import com.example.apimedlink.repository.AppointmentRepository;
 import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.repository.SlotRepository;
 import com.example.apimedlink.repository.UserRepository;
+import com.example.apimedlink.repository.PractitionerRepository;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -47,6 +48,7 @@ public class AbsenceService {
     static final Duration NEXT_WEEK = Duration.ofDays(7);
 
     private final AbsenceRepository absences;
+    private final PractitionerRepository practitioners;
     private final AppointmentRepository appointments;
     private final SlotRepository slots;
     private final PatientRepository patients;
@@ -55,7 +57,8 @@ public class AbsenceService {
     private final MailService mail;
 
     public AbsenceService(AbsenceRepository absences, AppointmentRepository appointments, SlotRepository slots,
-            PatientRepository patients, UserRepository users, AuditService audit, MailService mail) {
+            PatientRepository patients, UserRepository users, AuditService audit, MailService mail, PractitionerRepository practitioners) {
+        this.practitioners = practitioners;
         this.absences = absences;
         this.appointments = appointments;
         this.slots = slots;
@@ -72,12 +75,15 @@ public class AbsenceService {
             throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED", "Certains champs sont invalides.",
                     Map.of("endsAt", "La fin doit être après le début et dans le futur, pour 90 jours au plus."));
         }
+        practitioners.lockSchedule(practitionerId).orElseThrow(() ->
+                new ApiException(HttpStatus.CONFLICT, "PRACTITIONER_PROFILE_MISSING", "Votre profil praticien est indisponible."));
         Absence absence = absences.save(new Absence(practitionerId, from, to,
                 reason == null || reason.isBlank() ? null : reason.trim(), now));
-        List<Slot> free = absences.freeSlotsOverlapping(practitionerId, from, to);
-        free.forEach(slot -> slot.setStatus(SlotStatus.CLOSED));
+        List<UUID> candidateIds = absences.freeSlotsOverlapping(practitionerId, from, to).stream()
+                .map(Slot::getId).sorted().toList();
+        int closed = candidateIds.stream().mapToInt(id -> slots.closeIfFree(id, practitionerId)).sum();
         audit.recordWithin(AuditAction.ACCOUNT_UPDATED, RESOURCE_ABSENCE, absence.getId().toString(), AuditOutcome.SUCCESS);
-        return new DeclaredAbsence(absence, free.size(), toDecide(practitionerId, absence));
+        return new DeclaredAbsence(absence, closed, toDecide(practitionerId, absence));
     }
 
     @Transactional(readOnly = true)

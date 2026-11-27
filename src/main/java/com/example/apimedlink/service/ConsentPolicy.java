@@ -6,14 +6,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Component;
 
-/**
- * US-04: the consent text patients accept when they sign up, and its version. The version is recorded with the patient.
- * {@code app.consent.required} (true in staging and production): a sign-up without consent is refused. A version that
- * is not the current one is always refused: the visitor must read the current text. The wording was confirmed by the code owner, who asked for
- * it to follow Tunisian law: it is based on Organic Law 2004-63 and the INPDP guide for doctors (consent, access by persons
- * bound by professional secrecy, hosting in Tunisia, 20-year retention, rights, INPDP). To be reviewed by a lawyer before
- * production (docs/product-decisions.md).
- */
+/** Registration requires the current policy version in staging and production. */
 @Component
 public class ConsentPolicy {
 
@@ -29,9 +22,19 @@ public class ConsentPolicy {
             + "en cas de désaccord.";
 
     private final boolean required;
+    private final boolean available;
 
-    public ConsentPolicy(@Value("${app.consent.required:false}") boolean required) {
+    public ConsentPolicy(@Value("${app.consent.required:false}") boolean required,
+            @Value("${app.consent.available:true}") boolean available) {
         this.required = required;
+        this.available = available;
+    }
+
+    public void requireAvailable() {
+        if (!available) {
+            throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE, "CONSENT_UNAVAILABLE",
+                    "Les inscriptions sont momentanément indisponibles.");
+        }
     }
 
     public boolean required() {
@@ -40,6 +43,7 @@ public class ConsentPolicy {
 
     /** Throws a 400 naming {@code consentVersion} when the consent is missing (and required) or is an old text. */
     public void check(String providedVersion) {
+        requireAvailable();
         if (providedVersion == null) {
             if (required) {
                 throw refused("Vous devez accepter le consentement pour créer un compte.");

@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Size;
  */
 public record UpdatePatientProfileRequest(
         @Size(max = 30, message = "Le numéro de téléphone est trop long.")
-        @Pattern(regexp = "^[+]?[0-9 ]*$", message = "Le numéro de téléphone ne peut contenir que des chiffres, des espaces et un + au début.")
+        @Pattern(regexp = "^ *[+]?[0-9 ]*$", message = "Le numéro de téléphone ne peut contenir que des chiffres, des espaces et un + au début.")
         String phone,
 
         @Size(max = 255, message = "L'adresse est trop longue (255 caractères au plus).")

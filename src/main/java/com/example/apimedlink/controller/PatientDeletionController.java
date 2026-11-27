@@ -5,6 +5,8 @@ import com.example.apimedlink.mapper.DeletionRequestMapper;
 import com.example.apimedlink.model.DeletionRequest;
 import com.example.apimedlink.security.CurrentUser;
 import com.example.apimedlink.security.Roles;
+import com.example.apimedlink.security.RecentPatientLogin;
+import jakarta.servlet.http.HttpServletRequest;
 import com.example.apimedlink.service.PatientDeletionService;
 import io.swagger.v3.oas.annotations.Operation;
 import java.util.Optional;
@@ -28,10 +30,12 @@ public class PatientDeletionController {
 
     private final PatientDeletionService service;
     private final CurrentUser currentUser;
+    private final RecentPatientLogin recentLogin;
 
-    public PatientDeletionController(PatientDeletionService service, CurrentUser currentUser) {
+    public PatientDeletionController(PatientDeletionService service, CurrentUser currentUser, RecentPatientLogin recentLogin) {
         this.service = service;
         this.currentUser = currentUser;
+        this.recentLogin = recentLogin;
     }
 
     @Operation(summary = "The state of the caller's deletion request")
@@ -42,7 +46,8 @@ public class PatientDeletionController {
 
     @Operation(summary = "Ask for the caller's data to be deleted (records the request only)")
     @PostMapping
-    public DeletionRequestDto request() {
+    public DeletionRequestDto request(HttpServletRequest request) {
+        recentLogin.require(request);
         return toDto(Optional.of(service.request(currentUser.id())));
     }
 

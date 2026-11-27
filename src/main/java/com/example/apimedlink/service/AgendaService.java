@@ -7,12 +7,14 @@ import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Clinic;
 import com.example.apimedlink.model.Slot;
 import com.example.apimedlink.model.SlotStatus;
+import com.example.apimedlink.model.Practitioner;
 import com.example.apimedlink.repository.AppointmentRepository;
 import com.example.apimedlink.repository.BookedAppointment;
 import com.example.apimedlink.repository.ClinicRepository;
 import com.example.apimedlink.repository.PractitionerRepository;
 import com.example.apimedlink.repository.SlotRepository;
 import com.example.apimedlink.service.SlotChange.Change;
+import com.example.apimedlink.repository.AbsenceRepository;
 import java.sql.SQLException;
 import java.time.Clock;
 import java.time.Duration;
@@ -41,6 +43,8 @@ import org.springframework.transaction.support.TransactionTemplate;
  */
 @Service
 public class AgendaService {
+
+    private final AbsenceRepository absences;
 
     /** Assumptions of this task, not requirements of the cahier des charges: to confirm with the team. */
     static final Duration MIN_DURATION = Duration.ofMinutes(10);
@@ -73,7 +77,8 @@ public class AgendaService {
 
     public AgendaService(SlotRepository slots, AppointmentRepository appointments, ClinicRepository clinics,
             PractitionerRepository practitioners, Clock clock, PlatformTransactionManager transactionManager,
-            AuditService audit) {
+            AuditService audit, AbsenceRepository absences) {
+        this.absences = absences;
         this.slots = slots;
         this.appointments = appointments;
         this.clinics = clinics;
@@ -108,9 +113,6 @@ public class AgendaService {
     public Slot open(UUID practitionerId, UUID clinicId, Instant startsAt, Instant endsAt) {
         validateNewSlot(startsAt, endsAt);
         requireProfile(practitionerId);
-        Clinic clinic = clinics.findOfPractitioner(practitionerId).stream()
-                .filter(own -> own.getId().equals(clinicId)).findFirst()
-                .orElseThrow(AgendaService::clinicNotTheirs);
         for (int attempt = 1; ; attempt++) {
             List<Slot> inTheWay = slots.findOverlapping(practitionerId, startsAt, endsAt);
             if (!inTheWay.isEmpty()) {
@@ -119,7 +121,13 @@ public class AgendaService {
             try {
                 // The slot and its audit row in one transaction: both are kept, or neither (review on #116)
                 return transaction.execute(status -> {
-                    Slot saved = slots.saveAndFlush(new Slot(practitioners.getReferenceById(practitionerId), clinic, startsAt, endsAt));
+                    Practitioner practitioner = practitioners.lockSchedule(practitionerId)
+                            .orElseThrow(AgendaService::clinicNotTheirs);
+                    requireNoAbsence(practitionerId, startsAt, endsAt);
+                    Clinic clinic = clinics.findOfPractitioner(practitionerId).stream()
+                            .filter(own -> own.getId().equals(clinicId)).findFirst()
+                            .orElseThrow(AgendaService::clinicNotTheirs);
+                    Slot saved = slots.saveAndFlush(new Slot(practitioner, clinic, startsAt, endsAt));
                     audit.recordWithin(AuditAction.SLOT_OPENED, RESOURCE_SLOT, saved.getId().toString(), AuditOutcome.SUCCESS);
                     return saved;
                 });
@@ -158,6 +166,10 @@ public class AgendaService {
      */
     @Transactional
     public SlotChange setStatus(UUID practitionerId, UUID slotId, SlotStatus target) {
+        if (target == SlotStatus.FREE) {
+            practitioners.lockSchedule(practitionerId)
+                    .orElseThrow(() -> new AccessDeniedException("Not the practitioner's slot"));
+        }
         Slot slot = findOwn(practitionerId, slotId);
         if (slot.getStatus() == target) {
             return new SlotChange(slot, Change.NONE);
@@ -191,6 +203,7 @@ public class AgendaService {
             throw new ApiException(HttpStatus.CONFLICT, "SLOT_IN_PAST",
                     "Ce créneau est déjà commencé ou passé : il ne peut plus être rouvert.");
         }
+        requireNoAbsence(practitionerId, slot.getStartsAt(), slot.getEndsAt());
         if (slots.reopenIfClosed(slot.getId(), practitionerId, now) == 1) {
             audit.recordWithin(AuditAction.SLOT_OPENED, RESOURCE_SLOT, slot.getId().toString(), AuditOutcome.SUCCESS);
             return new SlotChange(findOwn(practitionerId, slot.getId()), Change.OPENED);
@@ -200,6 +213,13 @@ public class AgendaService {
             return new SlotChange(current, Change.NONE);
         }
         throw changedMeanwhile();
+    }
+
+    private void requireNoAbsence(UUID practitionerId, Instant start, Instant end) {
+        if (absences.covers(practitionerId, start, end)) {
+            throw new ApiException(HttpStatus.CONFLICT, "SLOT_IN_ABSENCE",
+                    "Ce créneau chevauche une absence déclarée.");
+        }
     }
 
     private void requireProfile(UUID practitionerId) {

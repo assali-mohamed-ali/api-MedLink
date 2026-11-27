@@ -51,6 +51,18 @@ class StaffBookingFunctionalTest extends FunctionalTestBase {
     }
 
     @Test
+    void staffCannotBookForAnUnverifiedPatient() throws Exception {
+        String email = email("booking-staff");
+        console.createUser(email, PASSWORD, "/administrative-staff");
+        Browser staff = new Browser().login(email, PASSWORD);
+        UUID slot = freeSlot();
+
+        assertThat(staff.postJson("/api/admin/appointments", body(patient(false), slot)).statusCode())
+                .isEqualTo(409);
+        assertThat(jdbc.queryForObject("select status from slots where id = ?", String.class, slot)).isEqualTo("FREE");
+    }
+
+    @Test
     void patientsPractitionersAndAnonymousCallersAreRefused() throws Exception {
         String patientEmail = email("booking-patient");
         console.createUser(patientEmail, PASSWORD);
@@ -72,8 +84,13 @@ class StaffBookingFunctionalTest extends FunctionalTestBase {
     }
 
     private UUID patient() {
-        UUID id = UUID.randomUUID();
-        jdbc.update("insert into users (id, username, email) values (?, ?, ?)", id, "patient-" + id, "patient-" + id + "@example.com");
+        return patient(true);
+    }
+
+    private UUID patient(boolean verified) {
+        String email = email("assisted-booking");
+        UUID id = console.createUser(email, PASSWORD, verified);
+        jdbc.update("insert into users (id, username, email) values (?, ?, ?)", id, email, email);
         jdbc.update("insert into patients (id, first_name, last_name, birth_date) values (?, 'Amel', 'Ben Salah', ?)",
                 id, Date.valueOf("1990-04-12"));
         return id;

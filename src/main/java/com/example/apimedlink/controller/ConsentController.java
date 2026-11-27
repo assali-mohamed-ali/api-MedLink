@@ -23,6 +23,7 @@ public class ConsentController {
     @Operation(summary = "The current consent text and its version")
     @GetMapping
     public ConsentDto current() {
+        policy.requireAvailable();
         return new ConsentDto(ConsentPolicy.CURRENT_VERSION, ConsentPolicy.TEXT, policy.required());
     }
 }

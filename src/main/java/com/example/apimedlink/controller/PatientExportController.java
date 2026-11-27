@@ -4,6 +4,8 @@ import com.example.apimedlink.dto.PatientExportDto;
 import com.example.apimedlink.mapper.PatientExportMapper;
 import com.example.apimedlink.security.CurrentUser;
 import com.example.apimedlink.security.Roles;
+import com.example.apimedlink.security.RecentPatientLogin;
+import jakarta.servlet.http.HttpServletRequest;
 import com.example.apimedlink.service.PatientExportService;
 import io.swagger.v3.oas.annotations.Operation;
 import java.time.Instant;
@@ -23,15 +25,18 @@ public class PatientExportController {
 
     private final PatientExportService service;
     private final CurrentUser currentUser;
+    private final RecentPatientLogin recentLogin;
 
-    public PatientExportController(PatientExportService service, CurrentUser currentUser) {
+    public PatientExportController(PatientExportService service, CurrentUser currentUser, RecentPatientLogin recentLogin) {
         this.service = service;
         this.currentUser = currentUser;
+        this.recentLogin = recentLogin;
     }
 
     @Operation(summary = "Export the caller’s profile, appointments, reports and document metadata")
     @GetMapping
-    public ResponseEntity<PatientExportDto> export() {
+    public ResponseEntity<PatientExportDto> export(HttpServletRequest request) {
+        recentLogin.require(request);
         PatientExportDto body = PatientExportMapper.toDto(service.export(currentUser.id()), Instant.now());
         return ResponseEntity.ok()
                 .cacheControl(org.springframework.http.CacheControl.noStore())

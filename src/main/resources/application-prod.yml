@@ -45,6 +45,7 @@ keycloak:
 app:
   consent:
     required: true
+    available: false
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://medlink.example.com}
   documents:

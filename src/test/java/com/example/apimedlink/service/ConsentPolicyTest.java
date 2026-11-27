@@ -12,7 +12,7 @@ class ConsentPolicyTest {
 
     @Test
     void whenRequiredAMissingConsentIsRefusedNamingTheField() {
-        ConsentPolicy policy = new ConsentPolicy(true);
+        ConsentPolicy policy = new ConsentPolicy(true, true);
 
         assertThatThrownBy(() -> policy.check(null)).isInstanceOf(ApiException.class)
                 .satisfies(e -> assertThat(((ApiException) e).getDetails()).containsKey("consentVersion"));
@@ -20,13 +20,13 @@ class ConsentPolicyTest {
 
     @Test
     void whenNotRequiredAMissingConsentPasses() {
-        assertThatCode(() -> new ConsentPolicy(false).check(null)).doesNotThrowAnyException();
+        assertThatCode(() -> new ConsentPolicy(false, true).check(null)).doesNotThrowAnyException();
     }
 
     @Test
     void theCurrentVersionAlwaysPassesAndAnyOtherIsRefused() {
         for (boolean required : new boolean[] {true, false}) {
-            ConsentPolicy policy = new ConsentPolicy(required);
+            ConsentPolicy policy = new ConsentPolicy(required, true);
             assertThatCode(() -> policy.check(ConsentPolicy.CURRENT_VERSION)).doesNotThrowAnyException();
             assertThatThrownBy(() -> policy.check("2020-01-v0")).isInstanceOf(ApiException.class);
         }
