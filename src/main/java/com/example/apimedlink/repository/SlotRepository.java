@@ -29,6 +29,10 @@ public interface SlotRepository extends JpaRepository<Slot, UUID>, JpaSpecificat
     @EntityGraph(attributePaths = {"practitioner", "practitioner.specialty", "clinic"})
     Page<Slot> findAll(Specification<Slot> spec, Pageable pageable);
 
+    /** US-29: whether the practitioner still holds a slot, of any status, in the clinic. */
+    @Query("select count(s) > 0 from Slot s where s.practitioner.id = :practitionerId and s.clinic.id = :clinicId")
+    boolean holdsSlotsIn(@Param("practitionerId") UUID practitionerId, @Param("clinicId") UUID clinicId);
+
     /** A practitioner's slots starting in {@code [from, to)}, whatever their status or clinic, earliest first. */
     @EntityGraph(attributePaths = {"clinic"})
     @Query("""
