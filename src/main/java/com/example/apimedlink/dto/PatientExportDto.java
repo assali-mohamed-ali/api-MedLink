@@ -1,5 +1,6 @@
 package com.example.apimedlink.dto;
 
+import com.example.apimedlink.document.DocumentDto;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;

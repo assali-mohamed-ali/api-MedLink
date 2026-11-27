@@ -89,6 +89,8 @@ public class SecurityConfig {
                         // Patients only, checked before the body is read: a body Spring cannot parse would otherwise
                         // give a non-patient the 400 of the parsing, not 403 (review on #87). The method keeps its
                         // @PreAuthorize as well.
+                        .requestMatchers(HttpMethod.GET, "/api/slots", "/api/slots/filters")
+                        .hasRole(Roles.PATIENT)
                         .requestMatchers(HttpMethod.POST, "/api/appointments", "/api/appointments/**")
                         .hasRole(Roles.PATIENT)
                         // US-16: the patient's own export, patients only

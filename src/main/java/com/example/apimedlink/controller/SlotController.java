@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** Endpoint 25.2 (MLink-98): a patient searches the free slots; its input rules are MLink-100 (25.4). */
 @RestController
-@RequestMapping("/api/slots")
+@RequestMapping({"/api/slots", "/api/admin/slots"})
 public class SlotController {
 
     /** A search looks one month ahead at most: bounds the work one request can ask of the database. */

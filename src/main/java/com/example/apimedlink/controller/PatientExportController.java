@@ -29,11 +29,12 @@ public class PatientExportController {
         this.currentUser = currentUser;
     }
 
-    @Operation(summary = "Everything MedLink holds about the caller, as a JSON file")
+    @Operation(summary = "Export the caller’s profile, appointments, reports and document metadata")
     @GetMapping
     public ResponseEntity<PatientExportDto> export() {
         PatientExportDto body = PatientExportMapper.toDto(service.export(currentUser.id()), Instant.now());
         return ResponseEntity.ok()
+                .cacheControl(org.springframework.http.CacheControl.noStore())
                 .header(HttpHeaders.CONTENT_DISPOSITION,
                         ContentDisposition.attachment().filename("medlink-export.json").build().toString())
                 .body(body);
