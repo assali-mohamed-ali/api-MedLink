@@ -229,6 +229,13 @@ class StatsExportServiceTest {
     }
 
     @Test
+    void formulaPrefixesAfterWhitespaceAreEscaped() {
+        databaseHolds(many(5, "2026-11-10", AppointmentStatus.BOOKED, " \t=1+1"));
+        assertThat(service.export(FROM, TO, EnumSet.of(StatsIndicator.APPOINTMENTS_PER_SPECIALTY)))
+                .contains("APPOINTMENTS_PER_SPECIALTY,' \t=1+1,5");
+    }
+
+    @Test
     void aSpecialtyWithACommaIsQuoted() {
         databaseHolds(many(6, "2026-11-10", AppointmentStatus.BOOKED, "ORL, voix"));
 
@@ -251,8 +258,8 @@ class StatsExportServiceTest {
     }
 
     @Test
-    void aMinimumGroupSizeBelowTwoIsRefusedAtStartup() {
-        assertThatThrownBy(() -> new StatsExportService(facts, audit, 1)).isInstanceOf(IllegalStateException.class);
+    void aMinimumGroupSizeBelowFiveIsRefusedAtStartup() {
+        assertThatThrownBy(() -> new StatsExportService(facts, audit, 4)).isInstanceOf(IllegalStateException.class);
     }
 
     private static void assertInvalid(org.assertj.core.api.ThrowableAssert.ThrowingCallable call) {

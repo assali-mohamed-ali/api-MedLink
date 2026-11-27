@@ -43,14 +43,24 @@ class ClinicActivityFunctionalTest extends FunctionalTestBase {
         insertAppointment(insertSlot(practitioner, clinic, end, "BOOKED"), patient);
         insertAppointment(insertSlot(practitioner, TUNIS, DAY.plus(2, ChronoUnit.HOURS), "BOOKED"), patient);
 
+        UUID free = insertSlot(practitioner, clinic, DAY.plus(1, ChronoUnit.HOURS), "FREE");
+        insertSlot(practitioner, clinic, DAY.plus(3, ChronoUnit.HOURS), "CLOSED");
+        jdbc.update("insert into appointments (id, slot_id, patient_id, booked_by, status) values (?, ?, ?, ?, 'CANCELLED')",
+                UUID.randomUUID(), free, patient, patient);
+
         Browser staff = staff();
         assertThat(list(staff.call("/api/admin/clinics")))
                 .anySatisfy(item -> assertThat(item).containsEntry("id", clinic.toString()));
         HttpResponse<String> response = staff.call(activity(clinic, DAY, end));
         assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
-        assertThat(Browser.json(response)).isEqualTo(Map.of("BOOKED", 1, "CANCELLED", 0));
+        assertThat(Browser.json(response)).isEqualTo(Map.of("BOOKED", 1, "CANCELLED", 1, "OPEN_SLOTS", 1,
+                "BOOKED_SLOTS", 1, "CLOSED_SLOTS", 1, "OCCUPANCY_PERCENT", 50));
         assertThat(staff.call(activity(UUID.randomUUID(), DAY, end)).statusCode()).isEqualTo(404);
         assertThat(staff.call(activity(clinic, end, DAY)).statusCode()).isEqualTo(400);
+        assertThat(staff.call(activity(clinic, DAY, DAY.plus(32, ChronoUnit.DAYS))).statusCode()).isEqualTo(400);
+        assertThat(Browser.json(staff.call(activity(clinic, DAY.minus(2, ChronoUnit.DAYS), DAY.minus(1, ChronoUnit.DAYS)))))
+                .isEqualTo(Map.of("BOOKED", 0, "CANCELLED", 0, "OPEN_SLOTS", 0,
+                        "BOOKED_SLOTS", 0, "CLOSED_SLOTS", 0, "OCCUPANCY_PERCENT", 0));
     }
 
     private static String activity(UUID clinic, Instant from, Instant to) {
