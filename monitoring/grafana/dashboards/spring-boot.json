@@ -128,6 +128,78 @@
           "expr": "100 * (1 - node_filesystem_avail_bytes{job=\"node\",fstype=~\"ext[234]|xfs|btrfs\"} / node_filesystem_size_bytes{job=\"node\",fstype=~\"ext[234]|xfs|btrfs\"})"
         }
       ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "JVM heap used and max",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{job}} used",
+          "expr": "sum by (job) (jvm_memory_used_bytes{job=~\"api-medlink-.+\", area=\"heap\"})"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "{{job}} max",
+          "expr": "sum by (job) (jvm_memory_max_bytes{job=~\"api-medlink-.+\", area=\"heap\"})"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Database pool (Hikari)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{job}} active",
+          "expr": "sum by (job) (hikaricp_connections_active{job=~\"api-medlink-.+\"})"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "{{job}} pending",
+          "expr": "sum by (job) (hikaricp_connections_pending{job=~\"api-medlink-.+\"})"
+        },
+        {
+          "refId": "C",
+          "legendFormat": "{{job}} max",
+          "expr": "sum by (job) (hikaricp_connections_max{job=~\"api-medlink-.+\"})"
+        }
+      ]
     }
   ]
 }

@@ -7,6 +7,8 @@ services:
       - ${MONITORING_TARGETS_DIR:?Set MONITORING_TARGETS_DIR}:/etc/prometheus/targets:ro
       - ../../monitoring/alerts/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
       - prometheus-data:/prometheus
+    # MLink-175: the monitoring host also runs staging; bounded so a scrape spike cannot starve the API
+    mem_limit: 512m
 
   alertmanager:
     image: prom/alertmanager:v0.35.1
@@ -15,6 +17,7 @@ services:
       - ${ALERTMANAGER_CONFIG:?Set ALERTMANAGER_CONFIG}:/etc/alertmanager/alertmanager.yml:ro
       - alertmanager-data:/alertmanager
     secrets: [smtp_password]
+    mem_limit: 64m
 
   grafana:
     image: grafana/grafana:13.3.2
@@ -23,11 +26,18 @@ services:
     environment:
       GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_password
       GF_USERS_ALLOW_SIGN_UP: 'false'
+      # MLink-175: no anonymous viewer, and no call home from the monitoring host
+      GF_AUTH_ANONYMOUS_ENABLED: 'false'
+      GF_ANALYTICS_REPORTING_ENABLED: 'false'
+      GF_ANALYTICS_CHECK_FOR_UPDATES: 'false'
+      GF_ANALYTICS_CHECK_FOR_PLUGIN_UPDATES: 'false'
+      GF_NEWS_NEWS_FEED_ENABLED: 'false'
     volumes:
       - ../../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
       - ../../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
       - grafana-data:/var/lib/grafana
     secrets: [grafana_password]
+    mem_limit: 256m
 
 secrets:
   smtp_password:
