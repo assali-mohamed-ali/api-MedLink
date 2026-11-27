@@ -61,6 +61,29 @@ public class MailService {
         send(to, "Confirmez votre adresse e-mail MedLink", text, html);
     }
 
+    /** US-03: the link to choose a new password. Throws like {@link #sendEmailVerification}. */
+    public void sendPasswordReset(String to, String firstName, String token) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl)
+                .path("/reinitialiser-mot-de-passe")
+                .queryParam("token", token)
+                .build()
+                .toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        String text = hello + "\n\n"
+                + "Vous avez demandé à réinitialiser votre mot de passe MedLink. Ouvrez ce lien pour en choisir un nouveau :\n\n"
+                + link + "\n\n"
+                + "Ce lien est valable 1 heure et ne peut servir qu'une fois.\n"
+                + "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe ne change pas.\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Vous avez demandé à réinitialiser votre mot de passe MedLink.</p>"
+                + "<p><a href=\"" + HtmlUtils.htmlEscape(link) + "\">Choisir un nouveau mot de passe</a></p>"
+                + "<p>Ce lien est valable 1 heure et ne peut servir qu'une fois.<br>"
+                + "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe ne change pas.</p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Réinitialisation de votre mot de passe MedLink", text, html);
+    }
+
     /**
      * A practitioner's or staff member's first staff-code setup (MLink-62): only the owner of the mailbox gets
      * past it, so a stolen password alone cannot enrol a code. Throws like {@link #sendEmailVerification}.
