@@ -63,6 +63,16 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
     List<UUID> findRemindersDue(@Param("status") AppointmentStatus status, @Param("from") Instant from,
             @Param("until") Instant until);
 
+    /** Pending confirmations for future, still-booked appointments; cancelled bookings are never retried. */
+    @Query(value = "select a.id from appointments a join slots s on s.id = a.slot_id "
+            + "where a.status = 'BOOKED' and a.confirmation_sent_at is null and s.starts_at > :now "
+            + "and a.created_at > :since order by a.created_at, a.id limit 50", nativeQuery = true)
+    List<UUID> findPendingConfirmations(@Param("now") Instant now, @Param("since") Instant since);
+
+    @Query(value = "select id from appointments where id = :id and confirmation_sent_at is null "
+            + "for update skip locked", nativeQuery = true)
+    Optional<UUID> lockPendingConfirmation(@Param("id") UUID id);
+
     boolean existsBySlot_IdAndStatus(UUID slotId, AppointmentStatus status);
 
     /**

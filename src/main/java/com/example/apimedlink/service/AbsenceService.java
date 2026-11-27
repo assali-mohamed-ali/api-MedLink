@@ -171,7 +171,10 @@ public class AbsenceService {
                     "Le patient a déjà un rendez-vous à ce moment-là : annulez celui-ci à la place.");
         }
         newLocked.setStatus(SlotStatus.BOOKED);
-        Appointment moved = appointments.saveAndFlush(new Appointment(newLocked, patientId, practitionerId));
+        Appointment replacement = new Appointment(newLocked, patientId, practitionerId);
+        // This flow sends its own postponement notice, not a generic booking confirmation.
+        replacement.setConfirmationSentAt(now);
+        Appointment moved = appointments.saveAndFlush(replacement);
         audit.recordWithin(AuditAction.APPOINTMENT_RESCHEDULED, "APPOINTMENT", moved.getId().toString(),
                 AuditOutcome.SUCCESS);
         afterCommit(() -> notify(appointmentId, to, () -> mail.sendAppointmentPostponedByPractitioner(

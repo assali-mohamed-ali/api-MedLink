@@ -238,7 +238,9 @@ public class AppointmentService {
         slot.setStatus(SlotStatus.BOOKED);
         Appointment appointment;
         try {
-            appointment = appointments.saveAndFlush(new Appointment(slot, patientId, bookedBy));
+            Appointment created = new Appointment(slot, patientId, bookedBy);
+            created.setBookedByStaff(!patientId.equals(bookedBy));
+            appointment = appointments.saveAndFlush(created);
         } catch (DataIntegrityViolationException e) {
             // MLink-103: the unique index on a slot's active appointment (V13) is the last guard against a double
             // booking; losing to it is the same "taken" answer as above, never a server error
