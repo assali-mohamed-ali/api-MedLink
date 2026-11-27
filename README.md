@@ -4,10 +4,31 @@
 [![CodeQL](https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/sast-codeql.yml/badge.svg?branch=master)](https://github.com/assali-mohamed-ali/api-MedLink/actions/workflows/sast-codeql.yml)
 ![Java 17](https://img.shields.io/badge/Java-17-informational)
 ![Spring Boot 4.1](https://img.shields.io/badge/Spring%20Boot-4.1-informational)
-![Keycloak](https://img.shields.io/badge/Keycloak-26-informational)
+![Keycloak 26.8](https://img.shields.io/badge/Keycloak-26.8-informational)
+![PostgreSQL 18](https://img.shields.io/badge/PostgreSQL-18-informational)
+[![Release](https://img.shields.io/github/v/release/assali-mohamed-ali/api-MedLink)](https://github.com/assali-mohamed-ali/api-MedLink/releases)
 
 The API of **MedLink**, a health portal for patients, practitioners and administrative staff across three
-clinics.
+clinics (Sousse, Sfax, Tunis). The React front is the companion repository
+[medlink-dashboard](https://github.com/assali-mohamed-ali/medlink-dashboard).
+
+| | |
+|---|---|
+| **Production** | https://med-l.ink (release [v1.2.0](https://github.com/assali-mohamed-ali/api-MedLink/releases/tag/v1.2.0), 2026-11-26) |
+| **Staging** | https://staging.med-l.ink |
+| **Tracker** | YouTrack, project `MLink`: https://medlink.youtrack.cloud |
+
+**What it does**
+
+- **Patients:** register, verify their email, find a free slot by clinic, specialty or practitioner, book, cancel or
+  reschedule an appointment, read their consultation reports and download their documents.
+- **Practitioners** (password + authenticator code): manage their agenda and slots, receive alerts, open the record
+  of a patient they see, write consultation reports (encrypted at rest).
+- **Administrative staff** (password + authenticator code): create and manage accounts (role, status, name, forced
+  password change), publish patient documents (encrypted, stored in MinIO), supervise each clinic's activity, search
+  the audit journal, export anonymised statistics as CSV.
+- **Operations:** repeated suspicious events in the audit journal send a security alert mail to an operations
+  mailbox (`APP_SECURITY_ALERTS_RECIPIENT`); Prometheus, Grafana and Alertmanager watch the API and the hosts.
 
 > **The browser never talks to Keycloak.** This API is the only component that does. The browser holds an
 > HttpOnly session cookie and a readable `XSRF-TOKEN` cookie, never a token, a Keycloak page, link or mail.
@@ -20,7 +41,7 @@ clinics.
 4. [Rules for code](#4-rules-for-code)
 5. [From ticket to merge](#5-from-ticket-to-merge)
 6. [CI checks](#6-ci-checks)
-7. [Environments](#7-environments)
+7. [Environments and release flow](#7-environments-and-release-flow)
 8. [Dev setup in detail](#8-dev-setup-in-detail)
 9. [Troubleshooting](#9-troubleshooting)
 10. [Security and docs](#10-security-and-docs)
@@ -60,7 +81,8 @@ after every `git pull`**: it keeps your Keycloak in step with the team's realm f
 `MedLink-Dev-2026!` (the value of `KC_DEV_USERS_PASSWORD`). `practitioner.dev` and `staff.dev` also need a code
 from an authenticator app (Google Authenticator, Aegis, …): their first login enrols it with a QR code.
 
-**Stack:** Spring Boot 4.1 · Java 17 · Keycloak 26 · PostgreSQL · Flyway · MinIO (S3) · Testcontainers.
+**Stack:** Spring Boot 4.1 · Java 17 · Keycloak 26.8 · PostgreSQL 18 · Flyway (V1–V23) · MinIO (S3) ·
+Testcontainers.
 Package `com.example.apimedlink`. Do not downgrade a version to make code compile.
 
 ## 2. How auth works
@@ -114,6 +136,16 @@ sequenceDiagram
 | `GET /api/patients/{patientId}/documents/{documentId}` | the patient owner, or staff | 200 bytes · 403 for a practitioner · 404 for another patient or unknown document |
 | `GET /api/users/_health` | logged in | 200 |
 
+The other routes, by role (the access matrix test lists the exact answer of each route for every caller):
+
+| Who | Routes |
+|---|---|
+| anyone | `POST /api/auth/account/activate` (first password from the mailed link of a staff-created account) · `POST /api/auth/account/activate/resend` (202, the same whether or not the account exists) |
+| logged in | `POST /api/auth/password` (change one's own password; every session ends) |
+| patient | `GET /api/slots` and `GET /api/slots/filters` (free slots by clinic, specialty, practitioner) · `POST /api/appointments` · `GET /api/appointments/me` · `POST /api/appointments/{id}/cancel` · `POST /api/appointments/{id}/reschedule` · `GET /api/reports/me` (own consultation reports) |
+| practitioner | `GET /api/practitioner/agenda` · `POST /api/practitioner/slots` · `PATCH /api/practitioner/slots/{id}` · `GET /api/practitioner/alerts` · `POST /api/practitioner/alerts/{id}/read` · `GET /api/patients/{id}/record` (only a patient they see) · `POST` and `GET /api/patients/{id}/reports` (after the consultation only) |
+| staff | `GET` and `POST /api/admin/users` · `PUT /api/admin/users/{id}/role` · `PATCH /api/admin/users/{id}/status` · `PUT /api/admin/users/{id}/name` · `POST /api/admin/users/{id}/force-password-reset` · `GET /api/admin/profile-choices` · `GET /api/admin/practitioners` · `GET /api/admin/clinics` · `GET /api/admin/clinics/{clinicId}/activity` · `GET /api/admin/agenda` · `GET /api/admin/audit-entries` · `GET /api/admin/stats/export` (CSV) |
+
 Full contracts: [plan.md §4](docs/sprints/sprint-2/plan.md). Patient documents:
 [feature guide](docs/features/patient-documents.md) and [decision 0002](docs/decisions/0002-patient-documents-package.md).
 
@@ -150,13 +182,15 @@ src/main/resources/
 ├── application-dev.yml        local
 ├── application-staging.yml    pre-prod
 ├── application-prod.yml       prod
-└── db/migration/              Flyway V*__*.sql (V22 = patient_documents)
+└── db/migration/              Flyway V*__*.sql (V1 to V23; V22 = patient_documents)
 
 src/test/java/.../functional/  real API + Keycloak + Postgres + Mailpit (+ MinIO for document tests),
                                driven over HTTP like a browser
 keycloak/realm-medlink.json    the realm: roles, groups, clients, lockout, dev users
 scripts/setup-dev.ps1 / .sh    one-command dev setup (keep both in step)
-docs/                          sprint plan and report, decisions, Postman collection
+deploy/                        server overlay, per-environment settings, host preparation, WAF, monitoring stack
+monitoring/                    Prometheus rules, Grafana dashboards and provisioning
+docs/                          sprint plan and report, decisions, operations runbooks, Postman collection
 ```
 
 ## 4. Rules for code
@@ -199,14 +233,12 @@ Tasks live in YouTrack, project `MLink` (https://medlink.youtrack.cloud).
    Changed an endpoint? Run the Postman collection in `docs/postman/` with `npx newman@6.2.1 run <file>`
    from the repository root; its patient-documents folder uploads
    `docs/postman/fixtures/patient-document.pdf`.
-5. **Open the product PR against `staging`** (after the release-pipeline migration described in
-   [Deployment](docs/DEPLOYMENT.md)). Use a Conventional Commit title such as `feat: add appointment booking`.
-   The pipeline tests and scans the PR, deploys merged `staging` commits, then runs post-deployment smoke tests.
-6. **Promotion:** after the API and dashboard staging deploy/smoke jobs both pass, automation deploys the same
-   verified digest to production, unless repository variable `AUTO_DEPLOY_PROD=false`. The gate requires staging
-   to contain `master`, so a stale staging branch cannot reach production. A failed gate blocks the next step.
-   The legacy path (behind `AUTO_DEPLOY_PROD=false` and `ENABLE_AUTO_PROMOTION=true`) keeps the `staging -> prod`
-   PR, Release Please Maven/CHANGELOG release, and `vX.Y.Z` tag deployment.
+5. **Open the PR against `master`** with a Conventional Commit title such as `feat: add appointment booking`
+   (product work goes to its epic branch first, see [CLAUDE.md](CLAUDE.md)). CI and the CD build/scan run on the
+   PR; nothing is deployed from it.
+6. **Promotion** (current settings, see [§7](#7-environments-and-release-flow)): a `master -> staging` PR deploys
+   staging; a `staging -> prod` PR lets Release Please open the release PR; merging it tags `vX.Y.Z`, which deploys
+   production by the verified image digest. Example: #157 → #158 → #159 released 1.2.0 on 2026-11-26.
 7. **AI disclosure and review:** if an AI tool helped, tick *"J'ai utilisé des outils d'IA générative…"* and
    tick *"Je confirme avoir relu…"* yourself only after reviewing the changes. Both must be in the same state.
    Keep code-owner review and CodeQL on the setup/configuration PRs; fully automatic product promotion requires
@@ -250,10 +282,10 @@ repositories, needed for reliable rate limits), repository variable `AUTO_DEPLOY
 described in [Deployment](docs/DEPLOYMENT.md). `PROMOTION_TOKEN` and `ENABLE_AUTO_PROMOTION` are only for the legacy
 release path.
 
-**One-time migration warning:** the current `master`, `staging`, and `prod` branches have diverged. Keep repository variable `AUTO_DEPLOY_PROD=false` until the workflow files are carried across and branch baselines are deliberately reconciled in reviewed PRs. This PR adds
-the workflow/configuration on `master` only. Do not expect automation to run on `staging` or `prod` until these
-files are carried there and the branch baselines are reconciled in reviewed PRs. Do not blindly auto-merge the full
-legacy branch difference into production. See the migration checklist in [Deployment](docs/DEPLOYMENT.md).
+**Current settings (2026-11-27):** `AUTO_DEPLOY_PROD=false` and `ENABLE_AUTO_PROMOTION=true`, so releases take the
+promotion path: `master -> staging` PR, `staging -> prod` PR, Release Please release PR, `vX.Y.Z` tag, production
+deploy. The automatic digest promotion stays off until the team decides to switch; the migration checklist is in
+[Deployment](docs/DEPLOYMENT.md). Servers, Vault, WAF and monitoring: [docs/operations/](docs/operations/).
 
 ## 8. Dev setup in detail
 
@@ -300,7 +332,8 @@ Logs of the last run: `%TEMP%\medlink-setup` (Windows) or `$TMPDIR/medlink-setup
 The shared services must stay identical in both files (`ComposeFilesTest` fails when they drift).
 `compose.yaml` also defines the API under the `full` profile: `docker compose --profile full up --build`
 gives a zero-config dev stack with the fixed dev secrets, without touching the coding setup. Staging and
-prod use file B with `--env-file .env.staging` or `.env.prod`.
+prod use file B with the server overlay `deploy/docker-compose.server.yml` and an `.env` rendered from
+`deploy/env/<environment>.env` and Vault ([Deployment](docs/DEPLOYMENT.md)).
 
 </details>
 
@@ -350,7 +383,7 @@ Boot's compose integration); setup B, the tests and the servers use `medlink_app
 | `release version 17 not supported` | your default Java is older than 17: point `JAVA_HOME` at a JDK 17 (the setup script does it by itself) |
 | `mvnw` not recognized in PowerShell | type `.\mvnw` |
 | `Could not find a valid Docker environment` | start Docker Desktop (the tests use Testcontainers) |
-| `keycloak-db-1 exited (1)`, log says `in 18+, these Docker images…` | the compose files run PostgreSQL 18 with a PostgreSQL 16 volume path; `-Reset` does not help. Tracked on #74 |
+| `keycloak-db-1 exited (1)`, log says `in 18+, these Docker images…` | an old compose file: pull, the compose files now set `PGDATA` for PostgreSQL 18; then re-run the setup script |
 | `... must be set` from compose | `.env` is missing or incomplete: run the setup script, or copy `.env.example` and replace every `change-me` value (the setup script generates them for you) |
 | `app.mfa.encryption-key must be base64` or `must be 32 bytes` at startup | `APP_MFA_ENCRYPTION_KEY` still holds the `.env.example` placeholder: replace it with `openssl rand -base64 32` (32 random bytes in base64), or run the setup script |
 | roles look wrong, or `staff.dev` cannot log in | your Keycloak holds an old realm: re-run the setup script, or `-Reset` |
@@ -370,8 +403,9 @@ Boot's compose integration); setup B, the tests and the servers use `medlink_app
 (`security@medlink.example.com`, or a DM to @assali-mohamed-ali starting with `[SECURITY]`).
 
 Scalar and `/v3/api-docs` exist in dev only: staging and prod answer 404 (GitHub #65). In staging and prod the
-actuator (metrics, `/actuator/health`) is only on the private management port 9000, never published; the public
-port keeps `/livez` and `/readyz` (GitHub #49). The
+actuator (metrics, `/actuator/health`) is only on the private management port 9000, never public (the monitoring
+host reads it on the API host's private address only); the public port keeps `/livez` and `/readyz` (GitHub #49).
+Staging sits behind a Caddy WAF with the OWASP Core Rule Set ([waf.md](docs/operations/waf.md)). The
 actuator exposes only `health,info,prometheus`: don't open more without a security review.
 
 | Document | What is in it |
@@ -384,3 +418,6 @@ actuator exposes only `health,info,prometheus`: don't open more without a securi
 | [docs/decisions/](docs/decisions/) | decision records (0002 covers patient documents) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [security/threat-model.md](security/threat-model.md) | architecture, trust boundaries, threats and controls mapped to code and tests |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | staging/production host, GitHub Environment secrets, rollout, rollback and recovery |
+| [docs/DEVSECOPS.md](docs/DEVSECOPS.md) | the security gates of the pipeline, from the workstation to production |
+| [docs/operations/](docs/operations/) | servers, Vault, WAF, monitoring (Prometheus, Grafana, Alertmanager), backup and restore |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | pre-commit hooks and contribution steps |
