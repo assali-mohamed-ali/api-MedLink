@@ -13,7 +13,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 /**
  * US-16 (request part): a patient asks for their data to be deleted, reads the state, and takes the request back. The
- * request deletes nothing (the purge is not implemented until the retention period is confirmed); asking twice keeps
+ * request deletes nothing (the purge is not implemented yet; staff decide, see AdminDeletionRequestFunctionalTest); asking twice keeps
  * the first request; every change is audited. Practitioners, staff and anonymous callers are refused. NOT RUN in the
  * session that wrote it (no Docker).
  */
@@ -47,7 +47,8 @@ class PatientDeletionRequestFunctionalTest extends FunctionalTestBase {
         Map<String, Object> first = mapper.readValue(asked.body(), Map.class);
         assertThat(first).containsEntry("requested", true);
         assertThat(first.get("requestedAt")).isNotNull();
-        assertThat(first.get("scheduledFor")).isNotNull();
+        assertThat(first.get("dueAt")).isNotNull();
+        assertThat(first).containsEntry("status", "PENDING");
 
         Map<String, Object> again = mapper.readValue(patient.postJson(PATH, "").body(), Map.class);
         assertThat(again.get("requestedAt")).as("the first request is kept").isEqualTo(first.get("requestedAt"));

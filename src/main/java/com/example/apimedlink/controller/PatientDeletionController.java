@@ -54,6 +54,6 @@ public class PatientDeletionController {
     }
 
     private DeletionRequestDto toDto(Optional<DeletionRequest> request) {
-        return DeletionRequestMapper.toDto(request, request.map(service::scheduledFor).orElse(null));
+        return DeletionRequestMapper.toDto(request, request.map(service::dueAt).orElse(null));
     }
 }
