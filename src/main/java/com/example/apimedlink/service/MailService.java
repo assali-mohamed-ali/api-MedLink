@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -277,6 +278,45 @@ public class MailService {
                 + "<p>L'équipe MedLink</p>";
         send(to, "Confirmation de votre rendez-vous MedLink", text, html,
                 "<appointment-confirmation-" + appointmentId + "@medlink.local>");
+    /** US-21: the practitioner is absent and cancelled the appointment. Throws like {@link #sendEmailVerification}. */
+    public void sendAppointmentCancelledByPractitioner(String to, String firstName, String practitioner, String clinic,
+            Instant startsAt) {
+        ZonedDateTime local = startsAt.atZone(CLINICS_ZONE);
+        sendNotice(to, firstName, "Votre rendez-vous MedLink est annulé", List.of(
+                "Votre praticien est absent : votre rendez-vous est annulé.",
+                "Date : " + local.format(DAY) + " à " + local.format(TIME) + " (heure de Tunisie)",
+                "Praticien : " + practitioner,
+                "Clinique : " + clinic,
+                "Vous pouvez réserver un autre créneau depuis votre espace."));
+    }
+
+    /** US-21: the practitioner is absent and moved the appointment to the same time next week. */
+    public void sendAppointmentPostponedByPractitioner(String to, String firstName, String practitioner, String clinic,
+            Instant oldStart, Instant newStart) {
+        ZonedDateTime from = oldStart.atZone(CLINICS_ZONE);
+        ZonedDateTime to2 = newStart.atZone(CLINICS_ZONE);
+        sendNotice(to, firstName, "Votre rendez-vous MedLink est reporté", List.of(
+                "Votre praticien est absent : votre rendez-vous est reporté à la semaine suivante.",
+                "Ancienne date : " + from.format(DAY) + " à " + from.format(TIME) + " (heure de Tunisie)",
+                "Nouvelle date : " + to2.format(DAY) + " à " + to2.format(TIME) + " (heure de Tunisie)",
+                "Praticien : " + practitioner,
+                "Clinique : " + clinic,
+                "Si cette date ne vous convient pas, annulez ou reportez le rendez-vous depuis votre espace."));
+    }
+
+    private void sendNotice(String to, String firstName, String subject, List<String> lines) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl).path("/patient/rendez-vous").build().toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        StringBuilder text = new StringBuilder(hello).append("\n\n");
+        StringBuilder html = new StringBuilder("<p>").append(HtmlUtils.htmlEscape(hello)).append("</p>");
+        for (String line : lines) {
+            text.append(line).append("\n");
+            html.append("<p>").append(HtmlUtils.htmlEscape(line)).append("</p>");
+        }
+        text.append("\n").append(link).append("\n\nL'équipe MedLink");
+        html.append("<p><a href=\"").append(HtmlUtils.htmlEscape(link)).append("\">Voir mes rendez-vous</a></p>")
+                .append("<p>L'équipe MedLink</p>");
+        send(to, subject, text.toString(), html.toString());
     }
 
     /** The Message-ID of an appointment's reminder: one per appointment, whatever the try. */
