@@ -177,6 +177,7 @@ services:
       - 'MAIL_USERNAME='
       - 'MAIL_PASSWORD='
       - 'MAIL_FROM=MedLink <no-reply@medlink.local>'
+      - 'APP_SECURITY_ALERTS_RECIPIENT='
       - 'APP_FRONTEND_URL=http://localhost:3000'
     ports:
       - '8080:8080'

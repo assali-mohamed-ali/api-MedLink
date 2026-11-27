@@ -19,6 +19,18 @@ import org.springframework.data.repository.query.Param;
 /** Patients' appointments on slots (MLink-97). */
 public interface AppointmentRepository extends JpaRepository<Appointment, UUID> {
 
+    interface StatusCount {
+        AppointmentStatus getStatus();
+        long getTotal();
+    }
+
+    @Query("""
+            select a.status as status, count(a) as total from Appointment a
+            where a.slot.clinic.id = :clinicId and a.slot.startsAt >= :from and a.slot.startsAt < :to
+            group by a.status""")
+    List<StatusCount> countActivity(@Param("clinicId") UUID clinicId, @Param("from") Instant from,
+            @Param("to") Instant to);
+
     /** A page of one patient's appointments with their slot, clinic and practitioner (MLink-108, no N+1). */
     @EntityGraph(attributePaths = {"slot", "slot.clinic", "slot.practitioner"})
     Page<Appointment> findByPatientId(UUID patientId, Pageable pageable);

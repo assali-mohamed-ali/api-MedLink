@@ -2527,6 +2527,38 @@
           ]
         },
         {
+          "name": "204 · staff edit the disposable patient account name (MLink-20)",
+          "request": {
+            "method": "PUT",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\"firstName\":\"Amel\",\"lastName\":\"MedLink QA\"}"
+            },
+            "url": "{{baseUrl}}/api/admin/users/{{targetUserId}}/name"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));"
+                ]
+              }
+            }
+          ]
+        },
+        {
           "name": "200 · staff get the clinics and specialties of a practitioner's profile (MLink-69)",
           "request": {
             "method": "GET",
@@ -2588,6 +2620,48 @@
                 "exec": [
                   "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
                   "pm.test(\"the clinics and the items\", () => pm.expect(pm.response.json()).to.have.all.keys(\"clinics\", \"items\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff list the clinics (MLink-35)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/clinics"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const clinics = pm.response.json();",
+                  "pm.test(\"clinic identity only\", () => pm.expect(clinics[0]).to.have.all.keys(\"id\", \"name\", \"city\"));",
+                  "pm.collectionVariables.set(\"activityClinicId\", clinics[0].id);"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff read appointment counts for one clinic (MLink-35)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/clinics/{{activityClinicId}}/activity?from=2026-12-01T00:00:00Z&to=2026-12-08T00:00:00Z"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "pm.test(\"counts only\", () => pm.expect(pm.response.json()).to.have.all.keys(\"BOOKED\", \"CANCELLED\"));"
                 ]
               }
             }
@@ -8036,6 +8110,30 @@
                   "pm.test(\"one document\", () => pm.expect(page.total).to.eql(1));",
                   "pm.test(\"the uploaded id\", () => pm.expect(page.items[0].id).to.eql(pm.collectionVariables.get(\"docId\")));",
                   "pm.test(\"default page and size\", () => pm.expect(page.page).to.eql(0) && pm.expect(page.size).to.eql(20));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "200 · staff find the document list audit for the patient (MLink-17, MLink-33)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/admin/audit-entries?patientId={{docPatientId}}&action=DOCUMENT_LIST"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));",
+                  "const page = pm.response.json();",
+                  "pm.test(\"a document list read appears for this patient\", () => {",
+                  "  pm.expect(page.items.some(item => item.action === \"DOCUMENT_LIST\" &&",
+                  "    item.resourceId === pm.collectionVariables.get(\"docPatientId\"))).to.be.true;",
+                  "});"
                 ]
               }
             }

@@ -6,6 +6,7 @@ import com.example.apimedlink.model.AuditAction;
 import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Clinic;
 import com.example.apimedlink.model.EmailToken.Purpose;
+import com.example.apimedlink.model.Patient;
 import com.example.apimedlink.model.Practitioner;
 import com.example.apimedlink.model.Specialty;
 import com.example.apimedlink.model.User;
@@ -289,6 +290,45 @@ public class AdminUserService {
         keycloak.setEnabled(id, enabled);
         if (!enabled) {
             keycloak.endSessions(id);
+        }
+    }
+
+    /**
+     * MLink-20: updates Keycloak and the name fields of any local patient or practitioner profile.
+     *
+     * @throws EntityNotFoundException when the account is unknown (404)
+     * @throws ApiException 400 VALIDATION_FAILED for blank or overlong names
+     */
+    public void updateNames(UUID id, String firstName, String lastName) {
+        String cleanFirst = firstName == null ? null : firstName.trim();
+        String cleanLast = lastName == null ? null : lastName.trim();
+        if (cleanFirst == null || cleanFirst.isEmpty() || cleanFirst.length() > 100) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED",
+                    "Certains champs sont invalides.", Map.of("firstName", "Le prénom est obligatoire (100 caractères au maximum)."));
+        }
+        if (cleanLast == null || cleanLast.isEmpty() || cleanLast.length() > 100) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED",
+                    "Certains champs sont invalides.", Map.of("lastName", "Le nom est obligatoire (100 caractères au maximum)."));
+        }
+        String resourceId = id.toString();
+        audit.record(AuditAction.ACCOUNT_UPDATED, RESOURCE, resourceId, AuditOutcome.ATTEMPTED);
+        try {
+            tx.executeWithoutResult(status -> {
+                users.lockLocalAccount(id).flatMap(users::findById).ifPresent(user -> {
+                    if (user instanceof Patient patient) {
+                        patient.setFirstName(cleanFirst);
+                        patient.setLastName(cleanLast);
+                    } else if (user instanceof Practitioner practitioner) {
+                        practitioner.setFirstName(cleanFirst);
+                        practitioner.setLastName(cleanLast);
+                    }
+                });
+                audit.recordInCurrentTransaction(AuditAction.ACCOUNT_UPDATED, RESOURCE, resourceId, AuditOutcome.SUCCESS);
+                keycloak.updateUser(id, cleanFirst, cleanLast);
+            });
+        } catch (RuntimeException failure) {
+            recordFailure(AuditAction.ACCOUNT_UPDATED, resourceId, failure);
+            throw failure;
         }
     }
 

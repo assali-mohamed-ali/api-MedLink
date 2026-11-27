@@ -228,6 +228,10 @@ public class MailService {
         return "<appointment-reminder-" + appointmentId + "@medlink.local>";
     }
 
+    void sendSecurityAlert(String to, String text) {
+        send(to, "Alerte de sécurité MedLink", text, "<pre>" + HtmlUtils.htmlEscape(text) + "</pre>");
+    }
+
     private void send(String to, String subject, String text, String html) {
         send(to, subject, text, html, null);
     }

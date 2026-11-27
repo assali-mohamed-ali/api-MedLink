@@ -134,6 +134,20 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
     }
 
     @Override
+    public void updateUser(UUID id, String firstName, String lastName) {
+        UserRepresentation body = new UserRepresentation(null, null, null, firstName, lastName, null, null, null);
+        call("update user", bearer -> http.put().uri(users + "/{id}", id)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange((request, response) -> {
+                    expectFound(response.getStatusCode(), id);
+                    expectSuccess(response.getStatusCode(), "update user");
+                    return null;
+                }));
+    }
+
+    @Override
     public KeycloakUser getUser(UUID id) {
         UserRepresentation user = call("get user", bearer -> http.get().uri(users + "/{id}", id)
                 .header(HttpHeaders.AUTHORIZATION, bearer)

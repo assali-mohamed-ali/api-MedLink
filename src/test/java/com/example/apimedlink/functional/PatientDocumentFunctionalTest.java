@@ -364,6 +364,51 @@ class PatientDocumentFunctionalTest extends PatientDocumentFunctionalTestBase {
         assertThat(staff.call("/api/users/" + patient.id()).statusCode()).as("the user is gone").isEqualTo(404);
     }
 
+    @Test
+    void listingPatientDocumentsIsAudited() throws Exception {
+        TestPatient patient = newPatient("audit-list");
+        Browser staff = staff();
+
+        upload(staff, patient.id(), "Compte rendu", "compte-rendu.pdf", "application/pdf", PDF);
+        staff.call(documentsPath(patient.id()));
+
+        long count = db.queryForObject(
+                "select count(*) from audit_entries where action = 'DOCUMENT_LIST' "
+                        + "and resource_type = 'PATIENT' and resource_id = ?",
+                Long.class, patient.id().toString());
+        assertThat(count).isEqualTo(1L);
+    }
+
+    @Test
+    void theAuditLogCanBeFilteredByPatient() throws Exception {
+        TestPatient owner = newPatient("audit-owner");
+        TestPatient other = newPatient("audit-other");
+        Browser staff = staff();
+        Map<?, ?> dto = upload(staff, owner.id(), "Prive", "prive.pdf", "application/pdf", PDF);
+        db.update("""
+                insert into audit_entries
+                    (id, timestamp, user_id, action, resource_type, resource_id, ip_address, outcome)
+                values (?, now(), ?, 'RECORD_VIEWED', 'PATIENT', ?, '198.18.0.1', 'SUCCESS')
+                """,
+                UUID.randomUUID(), owner.id(), owner.id().toString());
+        db.update("""
+                insert into audit_entries
+                    (id, timestamp, user_id, action, resource_type, resource_id, ip_address, outcome)
+                values (?, now(), ?, 'RECORD_VIEWED', 'PATIENT', ?, '198.18.0.1', 'SUCCESS')
+                """,
+                UUID.randomUUID(), other.id(), other.id().toString());
+
+        Map<?, ?> page = Browser.json(staff.call(
+                "/api/admin/audit-entries?patientId=" + owner.id() + "&size=100"));
+        List<?> items = (List<?>) page.get("items");
+        List<String> resourceIds = items.stream()
+                .map(item -> String.valueOf(((Map<?, ?>) item).get("resourceId")))
+                .toList();
+
+        assertThat(resourceIds).contains(owner.id().toString(), String.valueOf(dto.get("id")));
+        assertThat(resourceIds).doesNotContain(other.id().toString());
+    }
+
     private static List<Object> ids(Map<?, ?> page) {
         return ((List<?>) page.get("items")).stream()
                 .map(item -> (Object) ((Map<?, ?>) item).get("id"))
