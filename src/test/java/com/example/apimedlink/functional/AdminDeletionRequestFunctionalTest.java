@@ -71,7 +71,52 @@ class AdminDeletionRequestFunctionalTest extends FunctionalTestBase {
                 fresh.id().toString())).isEqualTo(1);
         assertThat(staff.postJson(decision(fresh.id()), "{\"decision\":\"REJECTED\",\"note\":\"x\"}").statusCode())
                 .as("already decided").isEqualTo(409);
-        assertThat(fresh.browser().delete(PATIENT_PATH).statusCode()).as("too late to cancel").isEqualTo(409);
+        assertThat(fresh.browser().delete(PATIENT_PATH).statusCode()).as("the closed account's session is over")
+                .isEqualTo(401);
+    }
+
+    /**
+     * Request, decision and closure are separate steps; anonymisation and purge are not done. An approval closes the
+     * account: the open session is refused at once, Keycloak no longer lets the patient log in, the patient is told
+     * by mail (nothing medical), the closure time is recorded, and the appointments, the request and the audit trail
+     * stay. Mutation check: without {@code registerWithin} in DeletionReviewService the login still succeeds.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void anApprovalClosesTheAccountRevokesItsSessionsAndKeepsTheRecords() throws Exception {
+        Browser staff = staff();
+        String email = email("deletion-closure");
+        UUID id = console.createUser(email, PASSWORD);
+        jdbc.update("insert into users (id, username, email) values (?, ?, ?) on conflict (id) do nothing", id, email, email);
+        jdbc.update("insert into patients (id, first_name, last_name, birth_date) values (?, 'Nadia', 'Cloture', ?)",
+                id, Date.valueOf("1990-04-12"));
+        Browser patient = new Browser();
+        assertThat(patient.apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+        // A future appointment only: nothing has been consulted yet, so no retention period runs
+        consultation(id, Instant.now().plus(10, ChronoUnit.DAYS).truncatedTo(ChronoUnit.HOURS));
+        assertThat(patient.postJson(PATIENT_PATH, "").statusCode()).isEqualTo(200);
+        int auditBefore = jdbc.queryForObject("select count(*) from audit_entries", Integer.class);
+
+        HttpResponse<String> approved = staff.postJson(decision(id), "{\"decision\":\"APPROVED\"}");
+
+        assertThat(approved.statusCode()).as(approved.body()).isEqualTo(200);
+        assertThat((String) mapper.readValue(approved.body(), Map.class).get("accountClosedAt")).isNotNull();
+        assertThat(patient.call("/api/patients/me").statusCode()).as("open session refused").isEqualTo(401);
+        HttpResponse<String> login = new Browser().apiLogin(email, PASSWORD);
+        assertThat(login.statusCode()).as("login refused: " + login.body()).isNotEqualTo(200);
+        assertThat(console.read("/users/{id}", id)).extracting(user -> ((Map<String, Object>) user).get("enabled"))
+                .isEqualTo(false);
+        assertThat(new Mailbox().to(email, "Votre compte MedLink est clôturé")).hasSize(1);
+        assertThat(jdbc.queryForObject("select account_closed_at is not null from deletion_requests where patient_id = ?",
+                Boolean.class, id)).isTrue();
+        assertThat(jdbc.queryForObject("select count(*) from patients where id = ?", Integer.class, id))
+                .as("no anonymisation, no purge").isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from appointments where patient_id = ?", Integer.class, id))
+                .isEqualTo(1);
+        assertThat(jdbc.queryForObject("select count(*) from audit_entries", Integer.class))
+                .as("the trail only grows").isGreaterThan(auditBefore);
+        assertThat(jdbc.queryForList("select status from account_operations where user_id = ? "
+                + "and action = 'ACCOUNT_DISABLED'", String.class, id)).containsExactly("DONE");
     }
 
     @Test

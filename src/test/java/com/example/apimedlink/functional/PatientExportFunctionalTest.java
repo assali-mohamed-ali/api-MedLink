@@ -73,6 +73,65 @@ class PatientExportFunctionalTest extends FunctionalTestBase {
                 .containsExactly("SUCCESS");
     }
 
+    /**
+     * The export contract retained for US-16 (format medlink-export/2): the consent recorded at sign-up, the notification
+     * preferences, the examination results (opened, an attachment named by its document id, downloaded from the
+     * documents route) and the deletion request. Another patient's result never appears, and exporting does not mark a
+     * result as seen: it stays "new" in the patient's space.
+     */
+    @Test
+    @SuppressWarnings("unchecked")
+    void theExportCarriesResultsConsentPreferencesAndTheDeletionRequestWithoutMarkingResultsSeen() throws Exception {
+        String email = email("export-full");
+        UUID patientId = console.createUser(email, PASSWORD);
+        insertPatient(patientId, email, "Amel", "Ben Salah");
+        jdbc.update("update patients set consent_version = '2026-11-v1', consented_at = now(), "
+                + "notify_exam_results = false where id = ?", patientId);
+        UUID otherId = UUID.randomUUID();
+        insertPatient(otherId, "other-" + otherId + "@example.com", "Youssef", "Autre");
+        String proEmail = email("export-full-pro");
+        UUID proId = console.createUser(proEmail, PASSWORD, "/practitioners");
+        UUID specialty = UUID.randomUUID();
+        jdbc.update("insert into specialties (id, name) values (?, ?)", specialty, "Specialty " + specialty);
+        jdbc.update("insert into users (id, username, email) values (?, ?, ?) on conflict (id) do nothing", proId, proEmail, proEmail);
+        jdbc.update("insert into practitioners (id, first_name, last_name, specialty_id) values (?, 'Leila', 'Ben Ali', ?)",
+                proId, specialty);
+        appointment(proId, patientId, PAST);
+        appointment(proId, otherId, PAST.plus(1, ChronoUnit.HOURS));
+        Browser pro = new Browser().login(proEmail, PASSWORD);
+        String result = "{\"title\": \"Bilan sanguin\", \"examType\": \"Biologie\", \"examDate\": \"2026-01-10\", "
+                + "\"content\": \"Glycémie normale.\"}";
+        assertThat(pro.postJson("/api/patients/" + patientId + "/results", result).statusCode()).isEqualTo(201);
+        assertThat(pro.postJson("/api/patients/" + otherId + "/results", result.replace("Glycémie normale.",
+                "Résultat secret de l'autre.")).statusCode()).isEqualTo(201);
+        Browser patient = new Browser();
+        assertThat(patient.apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+        assertThat(patient.postJson("/api/patients/me/deletion-request", "{}").statusCode()).isIn(200, 201);
+
+        HttpResponse<String> response = patient.call("/api/patients/me/export");
+
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+        assertThat(response.headers().firstValue("Cache-Control").orElse("")).contains("no-store");
+        Map<String, Object> body = mapper.readValue(response.body(), Map.class);
+        assertThat(body).containsEntry("format", "medlink-export/2")
+                .containsEntry("documentDownloadRoute", "/api/patients/{patientId}/documents/{documentId}");
+        assertThat((Map<String, Object>) body.get("consent")).containsEntry("version", "2026-11-v1")
+                .containsKey("acceptedAt");
+        assertThat((Map<String, Object>) body.get("notificationPreferences"))
+                .containsEntry("appointmentReminders", true).containsEntry("examResults", false);
+        List<Map<String, Object>> results = (List<Map<String, Object>>) body.get("results");
+        assertThat(results).singleElement().satisfies(found -> {
+            assertThat(found).containsEntry("title", "Bilan sanguin").containsEntry("content", "Glycémie normale.")
+                    .containsEntry("isNew", true);
+            assertThat((Map<String, Object>) found.get("practitioner")).containsEntry("lastName", "Ben Ali");
+        });
+        assertThat((Map<String, Object>) body.get("deletionRequest")).containsEntry("status", "PENDING")
+                .containsKey("dueAt");
+        assertThat(response.body()).doesNotContain("Résultat secret de l'autre").doesNotContain("Youssef");
+        assertThat(jdbc.queryForObject("select count(*) from exam_results where patient_id = ? and read_at is null",
+                Integer.class, patientId)).as("exporting is not reading the result in the space").isEqualTo(1);
+    }
+
     @Test
     void practitionersStaffAndAnonymousCallersAreRefused() throws Exception {
         String proEmail = email("export-pro2");

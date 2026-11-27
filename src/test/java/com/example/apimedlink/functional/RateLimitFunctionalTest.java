@@ -2,6 +2,7 @@ package com.example.apimedlink.functional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.apimedlink.service.ConsentPolicy;
 import java.net.http.HttpResponse;
 import java.util.ArrayList;
 import java.util.List;
@@ -54,8 +55,9 @@ class RateLimitFunctionalTest extends FunctionalTestBase {
 
     private static String signup(String email) {
         return """
-                {"email":"%s","password":"%s","firstName":"Amel","lastName":"Ben Salah","birthDate":"1990-04-12"}
-                """.formatted(email, PASSWORD);
+                {"email":"%s","password":"%s","firstName":"Amel","lastName":"Ben Salah","birthDate":"1990-04-12",
+                 "consentVersion":"%s"}
+                """.formatted(email, PASSWORD, ConsentPolicy.CURRENT_VERSION);
     }
 
     private static String resend(String email) {

@@ -13,6 +13,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.example.apimedlink.TestcontainersConfiguration;
 import com.example.apimedlink.repository.UserRepository;
+import com.example.apimedlink.service.ConsentPolicy;
 import com.example.apimedlink.service.KeycloakAdminService;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
@@ -70,8 +71,8 @@ class CrossOriginSignupTest {
                 .contentType(MediaType.APPLICATION_JSON)
                 .content("""
                         {"email":"%s","password":"Sel-De-Mer-2026!","firstName":"Amel","lastName":"Ben Salah",
-                         "birthDate":"1990-04-12"}
-                        """.formatted(email));
+                         "birthDate":"1990-04-12","consentVersion":"%s"}
+                        """.formatted(email, ConsentPolicy.CURRENT_VERSION));
     }
 
     @Test

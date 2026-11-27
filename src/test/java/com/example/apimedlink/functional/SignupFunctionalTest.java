@@ -5,6 +5,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import com.example.apimedlink.model.Patient;
 import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.UserRepository;
+import com.example.apimedlink.service.ConsentPolicy;
 import java.net.http.HttpResponse;
 import java.util.List;
 import java.util.Map;
@@ -36,8 +37,9 @@ class SignupFunctionalTest extends FunctionalTestBase {
 
     private static String signup(String email, String firstName) {
         return """
-                {"email":"%s","password":"%s","firstName":"%s","lastName":"Ben Salah","birthDate":"1990-04-12"}
-                """.formatted(email, PASSWORD, firstName);
+                {"email":"%s","password":"%s","firstName":"%s","lastName":"Ben Salah","birthDate":"1990-04-12",
+                 "consentVersion":"%s"}
+                """.formatted(email, PASSWORD, firstName, ConsentPolicy.CURRENT_VERSION);
     }
 
     private List<?> keycloakUsersWith(String email) {

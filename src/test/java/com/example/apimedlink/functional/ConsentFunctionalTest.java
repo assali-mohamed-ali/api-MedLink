@@ -2,7 +2,9 @@ package com.example.apimedlink.functional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import com.example.apimedlink.service.ConsentPolicy;
 import java.net.http.HttpResponse;
+import java.util.List;
 import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -12,14 +14,15 @@ import tools.jackson.databind.json.JsonMapper;
 /**
  * US-04: the consent text is public; a sign-up that accepts the current text records its version and the time with the
  * patient; an old or unknown version is refused (400) and creates nothing. (The "required in production" rule is
- * covered by ConsentPolicyTest: the functional context runs with the dev default, consent optional.) NOT RUN in the
- * session that wrote it (no Docker).
+ * covered by ConsentPolicyTest too.) Consent is required in every profile, so a sign-up without it is refused here as
+ * in production, and the recorded version and time survive later profile changes.
  */
 class ConsentFunctionalTest extends FunctionalTestBase {
 
     static final String PASSWORD = "Consent-Pass-2026!";
 
     final JsonMapper mapper = JsonMapper.builder().build();
+    final KeycloakConsole console = new KeycloakConsole();
 
     @Autowired
     JdbcTemplate jdbc;
@@ -60,6 +63,58 @@ class ConsentFunctionalTest extends FunctionalTestBase {
         assertThat(response.statusCode()).as(response.body()).isEqualTo(400);
         assertThat(response.body()).contains("consentVersion");
         assertThat(jdbc.queryForObject("select count(*) from users where email = ?", Integer.class, email)).isZero();
+    }
+
+    /** Consent is required in every profile (no account without it): a missing or blank version is refused. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void aSignupWithoutConsentIsRefusedAndNothingIsCreated() throws Exception {
+        Browser browser = new Browser();
+        assertThat(mapper.readValue(browser.call("/api/auth/consent").body(), Map.class))
+                .containsEntry("required", true);
+        String missing = uniqueEmail("consent-missing");
+        String blank = uniqueEmail("consent-blank");
+
+        HttpResponse<String> withoutField = browser.postJson("/api/auth/register", """
+                {"email":"%s","password":"%s","firstName":"Amel","lastName":"Ben Salah","birthDate":"1990-04-12"}
+                """.formatted(missing, PASSWORD));
+        HttpResponse<String> blankField = browser.postJson("/api/auth/register", signup(blank, "   "));
+
+        for (HttpResponse<String> refused : List.of(withoutField, blankField)) {
+            assertThat(refused.statusCode()).as(refused.body()).isEqualTo(400);
+            assertThat((Map<String, Object>) mapper.readValue(refused.body(), Map.class).get("details"))
+                    .containsKey("consentVersion");
+        }
+        for (String email : List.of(missing, blank)) {
+            assertThat(jdbc.queryForObject("select count(*) from users where email = ?", Integer.class, email)).isZero();
+            assertThat(console.read("/users?email={email}&exact=true", email)).asList().isEmpty();
+        }
+    }
+
+    /** The version and time recorded at sign-up are kept: a contact or preference change never rewrites them. */
+    @Test
+    @SuppressWarnings("unchecked")
+    void theRecordedConsentSurvivesProfileAndPreferenceChanges() throws Exception {
+        String email = uniqueEmail("consent-kept");
+        Browser browser = new Browser();
+        assertThat(browser.postJson("/api/auth/register", signup(email, ConsentPolicy.CURRENT_VERSION)).statusCode())
+                .isEqualTo(201);
+        Map<String, Object> before = jdbc.queryForMap("select p.id, p.consent_version, p.consented_at from patients p "
+                + "join users u on u.id = p.id where u.email = ?", email);
+        assertThat(browser.postJson("/api/auth/verify-email",
+                "{\"token\":\"" + new Mailbox().verificationToken(email) + "\"}").statusCode()).isEqualTo(204);
+        Browser patient = new Browser();
+        assertThat(patient.apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+
+        assertThat(patient.putJson("/api/patients/me", "{\"phone\": \"+216 20 000 000\", \"address\": \"Sfax\"}")
+                .statusCode()).isEqualTo(200);
+        assertThat(patient.putJson("/api/patients/me/notification-preferences",
+                "{\"appointmentReminders\": false, \"examResults\": false}").statusCode()).isEqualTo(200);
+
+        Map<String, Object> after = jdbc.queryForMap("select consent_version, consented_at from patients where id = ?",
+                before.get("id"));
+        assertThat(after.get("consent_version")).isEqualTo(before.get("consent_version"));
+        assertThat(after.get("consented_at")).isEqualTo(before.get("consented_at"));
     }
 
     private static String signup(String email, String consentVersion) {

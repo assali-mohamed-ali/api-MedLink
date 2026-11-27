@@ -130,6 +130,63 @@ class PatientProfileFunctionalTest extends FunctionalTestBase {
         assertThat(new Browser().call("/api/patients/me").statusCode()).isEqualTo(401);
     }
 
+    /** US-15: both notifications are on by default; the patient turns them off and the choice is kept and audited. */
+    @Test
+    void aPatientReadsAndChangesTheirNotificationPreferences() throws Exception {
+        Patient patient = patient(null, null);
+        String path = "/api/patients/me/notification-preferences";
+
+        assertThat(map(patient.browser().call(path))).containsOnly(
+                Map.entry("appointmentReminders", true), Map.entry("examResults", true));
+        HttpResponse<String> changed = patient.browser().putJson(path,
+                "{\"appointmentReminders\": false, \"examResults\": true}");
+
+        assertThat(changed.statusCode()).as(changed.body()).isEqualTo(200);
+        assertThat(map(changed)).containsOnly(Map.entry("appointmentReminders", false), Map.entry("examResults", true));
+        assertThat(map(patient.browser().call(path))).containsEntry("appointmentReminders", false);
+        assertThat(jdbc.queryForMap("select notify_appointment_reminders, notify_exam_results from patients where id = ?",
+                patient.id())).containsEntry("notify_appointment_reminders", false)
+                .containsEntry("notify_exam_results", true);
+        assertThat(jdbc.queryForList("select outcome from audit_entries where action = 'ACCOUNT_UPDATED' "
+                + "and resource_type = 'PATIENT_NOTIFICATIONS' and resource_id = ?", String.class, patient.id().toString()))
+                .containsExactly("SUCCESS");
+        assertThat(map(patient.browser().call("/api/patients/me")))
+                .as("the contact details are a separate resource").doesNotContainKey("appointmentReminders");
+    }
+
+    @Test
+    void aPreferenceChangeNeedsBothValuesAndTheCsrfHeader() throws Exception {
+        Patient patient = patient(null, null);
+        String path = "/api/patients/me/notification-preferences";
+
+        HttpResponse<String> partial = patient.browser().putJson(path, "{\"appointmentReminders\": false}");
+        HttpResponse<String> noCsrf = patient.browser().post(path, "{\"appointmentReminders\": false, "
+                + "\"examResults\": false}", false);
+
+        assertThat(partial.statusCode()).as(partial.body()).isEqualTo(400);
+        assertThat(partial.body()).contains("examResults");
+        assertThat(noCsrf.statusCode()).isIn(403, 405);
+        assertThat(jdbc.queryForMap("select notify_appointment_reminders, notify_exam_results from patients where id = ?",
+                patient.id())).containsEntry("notify_appointment_reminders", true)
+                .containsEntry("notify_exam_results", true);
+    }
+
+    @Test
+    void staffPractitionersAndAnonymousCallersCannotReadOrChangePreferences() throws Exception {
+        String path = "/api/patients/me/notification-preferences";
+        String staffEmail = email("prefs-staff");
+        console.createUser(staffEmail, PASSWORD, "/administrative-staff");
+        String proEmail = email("prefs-pro");
+        console.createUser(proEmail, PASSWORD, "/practitioners");
+
+        for (Browser other : List.of(new Browser().login(staffEmail, PASSWORD), new Browser().login(proEmail, PASSWORD))) {
+            assertThat(other.call(path).statusCode()).isEqualTo(403);
+            assertThat(other.putJson(path, "{\"appointmentReminders\": false, \"examResults\": false}").statusCode())
+                    .isEqualTo(403);
+        }
+        assertThat(new Browser().call(path).statusCode()).isEqualTo(401);
+    }
+
     @SuppressWarnings("unchecked")
     private Map<String, Object> map(HttpResponse<String> response) {
         return mapper.readValue(response.body(), Map.class);
