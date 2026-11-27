@@ -1,0 +1,16 @@
+# Security review of backlog integration
+
+The review focused on authorization, existing read guards, data retention, atomic updates, after-commit delivery and browser session behavior. It covered the new route families through the access-matrix test and relevant existing controllers. This review is limited to the integrated diff and targeted application behavior.
+
+| Boundary | Change and checks | Remaining risk |
+| --- | --- | --- |
+| Registration | Consent is verified before provisioning. The production policy gate rejects registration without approved wording. | Confirm policy approval, hosting facts and production activation configuration. |
+| Recovery | API-mediated reset uses expiring, single-use tokens and revokes server sessions. | Review distributed abuse protections and behavior after an identity-provider failure. |
+| Export and deletion | Scope comes from CurrentUser. Interactive login freshness gates export and submission. Export is an authenticated no-store response. Staff sees workflow metadata. | Approving a request does not perform closure or purge. Retention approval and the complete export contract remain pending. |
+| Results | Patient reads use caller scope. Practitioner publication checks the record relationship and same-patient attachment ownership. Content is encrypted with the existing cipher and access is audited. | Bounded listing, practitioner uploads, durable publishing idempotency and unseen-marker semantics need further coverage. |
+| Scheduling | Database appointment uniqueness remains the final booking guard. Schedule locks serialize clinic assignment, absence declaration and new or reopened availability. Closing free slots uses a conditional update. | A patient cancelling during an absence and durability of confirmation mail require additional review. |
+| Roles | Route allowlists preserve existing patient access and give staff a dedicated read-only slot-search route. No additional portal administrator role was introduced. | Verify the product’s administrator-versus-staff distinctions for US-33 to US-36 independently. |
+| Statistics | Existing k-anonymity and access checks remain in place. | Repeated or overlapping filter exports may enable differencing. Validate the approved rule. |
+| Infrastructure | Existing HTTPS, Vault, backup and deployment paths are inherited from the baseline. | Environment-specific config and deployment verification remain release checks. |
+
+Use synthetic identities and Mailpit for acceptance. Keep exam content, recovery tokens and personal data out of test transcripts, incident logs and audit details.

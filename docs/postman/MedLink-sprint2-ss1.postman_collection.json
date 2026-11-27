@@ -8431,6 +8431,114 @@
           ]
         }
       ]
+    },
+    {
+      "name": "14 · Backlog public identity contracts",
+      "item": [
+        {
+          "name": "Bootstrap the CSRF cookie for this folder",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/csrf"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 204\", () => pm.response.to.have.status(204));",
+                  "pm.collectionVariables.set(\"xsrf\", pm.cookies.get(\"XSRF-TOKEN\"));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Read the current registration policy",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": "{{baseUrl}}/api/auth/consent"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 200\", () => pm.response.to.have.status(200));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Request password recovery for a synthetic unknown account",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/password/forgot",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"email\": \"never-registered.{{email}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 202\", () => pm.response.to.have.status(202));"
+                ]
+              }
+            }
+          ]
+        },
+        {
+          "name": "Reject an unknown recovery token",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              },
+              {
+                "key": "X-XSRF-TOKEN",
+                "value": "{{xsrf}}"
+              }
+            ],
+            "url": "{{baseUrl}}/api/auth/password/reset",
+            "body": {
+              "mode": "raw",
+              "raw": "{\"token\": \"synthetic-invalid-token\", \"newPassword\": \"{{changedPassword}}\"}"
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "type": "text/javascript",
+                "exec": [
+                  "pm.test(\"status 400\", () => pm.response.to.have.status(400));"
+                ]
+              }
+            }
+          ]
+        }
+      ]
     }
   ],
   "variable": [
