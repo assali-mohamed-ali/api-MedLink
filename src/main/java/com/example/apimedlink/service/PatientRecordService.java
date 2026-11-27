@@ -43,7 +43,8 @@ public class PatientRecordService {
      */
     public PatientRecord read(UUID practitionerId, UUID patientId) {
         PatientRecord record = readOnly.execute(status -> {
-            if (!appointments.existsByPractitionerAndPatient(practitionerId, patientId)) {
+            // US-22: any link counts (appointment, report or document), not only a BOOKED appointment
+            if (!patients.isLinkedTo(patientId, practitionerId).orElse(false)) {
                 throw notAttached();
             }
             Patient patient = patients.findById(patientId).orElseThrow(PatientRecordService::notAttached);
