@@ -80,6 +80,24 @@ class ManagementPortIntegrationTest {
             assertThat(response.body()).contains("jvm_memory");
         }
 
+        /**
+         * MLink-175: what the Grafana dashboard and the alert rules read. The p95 latency (panel and HighLatencyP95)
+         * needs the request histogram's buckets, which Micrometer publishes only when asked to.
+         */
+        @Test
+        void prometheusHasWhatTheDashboardsAndAlertsUse() throws Exception {
+            assertThat(get(port, "/api/auth/csrf").statusCode()).as("one request to measure").isEqualTo(204);
+            String metrics = get(managementPort, "/actuator/prometheus").body();
+
+            assertThat(metrics).contains(
+                    "http_server_requests_seconds_count{",
+                    "http_server_requests_seconds_bucket{",
+                    "jvm_memory_used_bytes{area=\"heap\"",
+                    "jvm_memory_max_bytes{area=\"heap\"",
+                    "hikaricp_connections_active{",
+                    "hikaricp_connections_max{");
+        }
+
         @Test
         void readyzAnswersOnTheMainPort() throws Exception {
             assertUp(get(port, "/readyz"));
