@@ -376,6 +376,13 @@ public class MailService {
         return "<appointment-reminder-" + appointmentId + "@medlink.local>";
     }
 
+    public void sendEmailChangeCode(String to, String code) {
+        String text = "Votre code de confirmation MedLink : " + code
+                + "\nCe code expire dans 30 minutes. Saisissez-le dans votre profil connecté. "
+                + "Ne le communiquez à personne.";
+        send(to, "Confirmez votre nouvelle adresse MedLink", text, "<pre>" + HtmlUtils.htmlEscape(text) + "</pre>");
+    }
+
     void sendSecurityAlert(String to, String text) {
         send(to, "Alerte de sécurité MedLink", text, "<pre>" + HtmlUtils.htmlEscape(text) + "</pre>");
     }

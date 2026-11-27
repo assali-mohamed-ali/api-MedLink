@@ -52,6 +52,9 @@ public interface KeycloakAdminService {
     /** Enables or disables the account in Keycloak. A disabled user cannot log in. Idempotent. */
     void setEnabled(UUID id, boolean enabled);
 
+    /** Changes both login and verified email after proof of ownership of the new mailbox. */
+    void changeVerifiedEmail(UUID id, String email);
+
     /** Changes the displayed first and last name only. 404 when the account is unknown. */
     void updateUser(UUID id, String firstName, String lastName);
 }

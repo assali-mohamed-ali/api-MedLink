@@ -134,6 +134,23 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
     }
 
     @Override
+    public void changeVerifiedEmail(UUID id, String email) {
+        UserRepresentation body = new UserRepresentation(null, email, email, null, null, null, true, null);
+        call("change verified email", bearer -> http.put().uri(users + "/{id}", id)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange((request, response) -> {
+                    if (response.getStatusCode().value() == 409) {
+                        throw new EmailTakenException();
+                    }
+                    expectFound(response.getStatusCode(), id);
+                    expectSuccess(response.getStatusCode(), "change verified email");
+                    return null;
+                }));
+    }
+
+    @Override
     public void updateUser(UUID id, String firstName, String lastName) {
         UserRepresentation body = new UserRepresentation(null, null, null, firstName, lastName, null, null, null);
         call("update user", bearer -> http.put().uri(users + "/{id}", id)
