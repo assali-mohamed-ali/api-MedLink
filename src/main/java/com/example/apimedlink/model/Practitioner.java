@@ -33,6 +33,10 @@ public class Practitioner extends User {
     @Column(nullable = false, length = 100)
     private String lastName;
 
+    /** Local scheduling gate, changed by the durable Keycloak account operation. */
+    @Column(nullable = false)
+    private boolean bookingEnabled = true;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "specialty_id", nullable = false)
     private Specialty specialty;

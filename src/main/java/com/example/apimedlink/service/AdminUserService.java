@@ -219,8 +219,10 @@ public class AdminUserService {
             }
             Set<UUID> ids = new HashSet<>();
             profile.clinics().forEach(clinic -> ids.add(clinic.getId()));
-            profileChange = () -> profiles.create(id, account.firstName(), account.lastName(),
-                    profile.specialty().getId(), ids);
+            profileChange = () -> {
+                profiles.create(id, account.firstName(), account.lastName(), profile.specialty().getId(), ids);
+                practitioners.setBookingEnabled(id, account.enabled());
+            };
             demotion = false;
         } else if (!Roles.PRACTITIONER.equals(role) && hasProfile) {
             if (profiles.hasSlots(id)) {
@@ -286,10 +288,15 @@ public class AdminUserService {
     private void applyEnabled(UUID id, boolean enabled) {
         if (!enabled) {
             revocations.revoke(id);
+            // Fail closed for scheduling while the durable operation waits for Keycloak.
+            tx.executeWithoutResult(status -> practitioners.setBookingEnabled(id, false));
         }
         keycloak.setEnabled(id, enabled);
         if (!enabled) {
             keycloak.endSessions(id);
+        } else {
+            // Never offer availability before Keycloak confirms the account is enabled.
+            tx.executeWithoutResult(status -> practitioners.setBookingEnabled(id, true));
         }
     }
 

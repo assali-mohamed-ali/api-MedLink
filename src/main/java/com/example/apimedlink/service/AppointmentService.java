@@ -227,6 +227,7 @@ public class AppointmentService {
     /** As above, with who booked it (the patient, or a staff member for US-30). */
     private Appointment bookLocked(Slot slot, UUID patientId, UUID bookedBy, Instant now) {
         if (slot.getStatus() != SlotStatus.FREE || !slot.getStartsAt().isAfter(now)
+                || !slot.getPractitioner().isBookingEnabled()
                 || absences.covers(slot.getPractitioner().getId(), slot.getStartsAt(), slot.getEndsAt())) {
             throw new ApiException(HttpStatus.CONFLICT, "SLOT_TAKEN", SLOT_TAKEN);
         }
