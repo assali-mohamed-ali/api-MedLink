@@ -10,7 +10,7 @@ Updated by every sub-sprint PR. Newest information first inside each section.
 | MLink-35 | Staff can list clinics and request `GET /api/admin/clinics/{clinicId}/activity?from=&to=` for counts of booked and cancelled appointments. Counts use slot starts in the half-open period. Each dashboard clinic card loads and retries independently above the practitioner agenda. |
 | MLink-20 | Staff can change first and last names via the account dialog and `PUT /api/admin/users/{id}/name`. The API updates Keycloak and the local patient or practitioner profile where present. The API records attempts and outcomes as `ACCOUNT_UPDATED`. |
 | MLink-24 and MLink-39 | The deploy renderer verifies that the required document encryption key is read from the environment's Vault API bundle. Audit-based security email can be activated with `APP_SECURITY_ALERTS_RECIPIENT`. |
-| MLink-34 and MLink-175 | The repository contains the Caddy/Coraza build, the Prometheus/Grafana/Alertmanager stack, node exporter configuration and operational instructions. |
+| MLink-34 and MLink-175 | The repository contains the Caddy/Coraza build, the Prometheus/Grafana/Alertmanager stack, node exporter configuration and operational instructions. MLink-175 follow-up (`chore/MLink-175-monitoring-gaps`): memory limits on every monitoring container, Grafana anonymous access and call-home off, node_exporter read-only with no capabilities, JVM heap and Hikari panels plus a per-host dashboard (CPU, memory, disk, network), checked by `monitoring-config.test.sh` and `ManagementPortIntegrationTest` (red first; broken on purpose twice: red each time). |
 
 ### Role-based access verification
 

@@ -17,6 +17,35 @@ and host metrics. Disk alerts cover ext, XFS and Btrfs filesystems.
 Run `bash deploy/test/monitoring-config.test.sh` to validate the Compose files,
 scrape configuration and alert routing with fixture targets.
 
+### Limits, hardening and dashboards (MLink-175)
+
+The monitoring host also runs staging, and node_exporter runs on the 0.9 GB front and Vault hosts, so every
+container is bounded: Prometheus 512 MB, Grafana 256 MB, Alertmanager 64 MB, node_exporter 64 MB. Grafana has no
+anonymous viewer and no sign-up, and its usage reporting, update checks and news feed are off. node_exporter shares
+the host's pid and network, so it runs with a read-only file system, no capabilities and `no-new-privileges`, and
+mounts the host's `/` read-only.
+
+Grafana provisions two dashboards in the **MedLink** folder:
+
+| Dashboard | Panels |
+|---|---|
+| **MedLink API and hosts** (`spring-boot.json`) | API and host availability, request rate, 5xx rate, p95 latency, filesystem used, JVM heap used and max, database pool (Hikari: active, pending, max) |
+| **MedLink hosts** (`hosts.json`) | per host: up, uptime, root disk, CPU, memory, disk space, disk I/O, network |
+
+The hosts dashboard filters on an `env` label when the target files give one, for example
+`- targets: ['172.31.40.60:9100']` followed by `  labels: { env: prod }`; without it, "All" shows every host.
+
+Reach Grafana through an SSH tunnel to the monitoring host: `ssh -L 3000:127.0.0.1:3000 ubuntu@<monitoring host>`,
+then http://localhost:3000.
+
+`monitoring-config.test.sh` also checks these rules on the files as `docker compose` renders them: images pinned, the
+memory limits, only Grafana published and on `127.0.0.1`, Grafana's settings, node_exporter's hardening and that it
+refuses to start without `NODE_EXPORTER_BIND_ADDRESS`, and that the dashboards hold the requests, p95, JVM heap,
+Hikari, CPU, memory, disk and network panels on the provisioned data source. From Git Bash on Windows, run it with
+`MSYS2_ARG_CONV_EXCL='/bin/;/etc/;/work/'` so the paths inside the containers are not rewritten.
+`ManagementPortIntegrationTest.prometheusHasWhatTheDashboardsAndAlertsUse` proves the API publishes the request
+histogram buckets (the p95 panel and `HighLatencyP95`), JVM heap and Hikari series.
+
 ## Application security email
 
 Set `APP_SECURITY_ALERTS_RECIPIENT` on the API to activate security email. It
