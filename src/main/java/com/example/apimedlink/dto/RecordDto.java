@@ -11,5 +11,7 @@ import java.util.UUID;
  */
 public record RecordDto(PatientIdentity patient, List<Object> reports, boolean canWriteReport) {
 
-    public record PatientIdentity(UUID id, String firstName, String lastName, LocalDate birthDate, String phone) {}
+    /** {@code recordNumber}: US-22, as {@code MED-000042}. */
+    public record PatientIdentity(UUID id, String firstName, String lastName, LocalDate birthDate, String phone,
+            String recordNumber) {}
 }

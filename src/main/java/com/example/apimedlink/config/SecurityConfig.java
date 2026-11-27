@@ -116,9 +116,12 @@ public class SecurityConfig {
                         .hasRole(Roles.PATIENT)
                         // MLink-123/125: staff upload; staff or the owner patient list and download.
                         // The controller repeats the rule with @PreAuthorize, and the service checks ownership.
+                        // US-25: an attached practitioner uploads and lists too (the service checks the link)
                         .requestMatchers(HttpMethod.POST, "/api/patients/*/documents")
-                        .hasRole(Roles.ADMINISTRATIVE_STAFF)
-                        .requestMatchers(HttpMethod.GET, "/api/patients/*/documents", "/api/patients/*/documents/*")
+                        .hasAnyRole(Roles.ADMINISTRATIVE_STAFF, Roles.PRACTITIONER)
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/documents")
+                        .hasAnyRole(Roles.PATIENT, Roles.ADMINISTRATIVE_STAFF, Roles.PRACTITIONER)
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/documents/*")
                         .hasAnyRole(Roles.PATIENT, Roles.ADMINISTRATIVE_STAFF)
                         // US-16: the patient's own deletion request, patients only, before anything is read
                         .requestMatchers("/api/patients/me/deletion-request")

@@ -1,9 +1,9 @@
 package com.example.apimedlink.repository;
 
 import com.example.apimedlink.model.Patient;
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
@@ -36,12 +36,16 @@ public interface PatientRepository extends JpaRepository<Patient, UUID> {
     Optional<Boolean> isLinkedTo(@Param("patientId") UUID patientId, @Param("practitionerId") UUID practitionerId);
 
     /**
-     * US-22: the practitioner's linked patients whose first or last name contains {@code pattern} (already lower-case
-     * and escaped with a backslash), by name.
+     * US-22: the practitioner's linked patients (the rule of {@link #isLinkedTo}, so every one listed can be opened)
+     * whose first name, last name, or "first last" / "last first" contains {@code pattern} (already lower-case and
+     * escaped with a backslash), or whose record number is {@code number} (null: none typed), by name.
      */
-    @Query("""
+    @Query(value = """
             select p from Patient p
-            where (lower(p.firstName) like :pattern escape '\\' or lower(p.lastName) like :pattern escape '\\')
+            where (lower(p.firstName) like :pattern escape '\\' or lower(p.lastName) like :pattern escape '\\'
+                   or lower(concat(p.firstName, ' ', p.lastName)) like :pattern escape '\\'
+                   or lower(concat(p.lastName, ' ', p.firstName)) like :pattern escape '\\'
+                   or p.recordNumber = :number)
               and (exists (select 1 from Appointment a where a.slot.practitioner.id = :practitionerId
                            and a.patientId = p.id
                            and a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED)
@@ -49,7 +53,20 @@ public interface PatientRepository extends JpaRepository<Patient, UUID> {
                            and r.patientId = p.id)
                 or exists (select 1 from PatientDocument d where d.uploadedBy = :practitionerId
                            and d.patientId = p.id))
-            order by p.lastName, p.firstName, p.id""")
-    List<Patient> searchLinked(@Param("practitionerId") UUID practitionerId, @Param("pattern") String pattern,
-            Pageable page);
+            order by p.lastName, p.firstName, p.id""",
+            countQuery = """
+            select count(p) from Patient p
+            where (lower(p.firstName) like :pattern escape '\\' or lower(p.lastName) like :pattern escape '\\'
+                   or lower(concat(p.firstName, ' ', p.lastName)) like :pattern escape '\\'
+                   or lower(concat(p.lastName, ' ', p.firstName)) like :pattern escape '\\'
+                   or p.recordNumber = :number)
+              and (exists (select 1 from Appointment a where a.slot.practitioner.id = :practitionerId
+                           and a.patientId = p.id
+                           and a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED)
+                or exists (select 1 from ConsultationReport r where r.practitionerId = :practitionerId
+                           and r.patientId = p.id)
+                or exists (select 1 from PatientDocument d where d.uploadedBy = :practitionerId
+                           and d.patientId = p.id))""")
+    Page<Patient> searchLinked(@Param("practitionerId") UUID practitionerId, @Param("pattern") String pattern,
+            @Param("number") Long number, Pageable page);
 }

@@ -44,6 +44,10 @@ public class Patient extends User {
 
     private Instant consentedAt;
 
+    /** US-22: the record number (V31), given by the database at insert; shown by {@link RecordNumbers#label}. */
+    @Column(insertable = false, updatable = false)
+    private Long recordNumber;
+
     /** US-15: the reminder mail before an appointment (US-12). On unless the patient turns it off. */
     @Column(nullable = false)
     private boolean notifyAppointmentReminders = true;

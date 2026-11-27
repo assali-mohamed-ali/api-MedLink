@@ -59,12 +59,20 @@ public class ExamResult implements Persistable<UUID> {
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
 
+    /** US-25: the id the practitioner's form generated; a repeated submission with it returns this result. */
+    @Column(updatable = false)
+    private UUID requestId;
+
+    /** US-25: when the "new result" notice was settled (sent, or not wanted); set by a native update only. */
+    @Column(insertable = false, updatable = false)
+    private Instant noticeSentAt;
+
     @Transient
     @Getter(AccessLevel.NONE)
     private boolean fresh = true;
 
     public ExamResult(UUID id, UUID patientId, UUID practitionerId, String titleEncrypted, String typeEncrypted,
-            String contentEncrypted, LocalDate examDate, UUID documentId) {
+            String contentEncrypted, LocalDate examDate, UUID documentId, UUID requestId) {
         this.id = id;
         this.patientId = patientId;
         this.practitionerId = practitionerId;
@@ -73,6 +81,7 @@ public class ExamResult implements Persistable<UUID> {
         this.contentEncrypted = contentEncrypted;
         this.examDate = examDate;
         this.documentId = documentId;
+        this.requestId = requestId;
     }
 
     @Override
