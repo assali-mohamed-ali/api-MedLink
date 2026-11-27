@@ -10,16 +10,16 @@ import org.springframework.stereotype.Component;
 @Component
 public class ConsentPolicy {
 
-    public static final String CURRENT_VERSION = "2026-11-v1";
+    public static final String CURRENT_VERSION = "2026-11-v2";
 
-    public static final String TEXT = "Je consens expressément à ce que MedLink traite mes données personnelles et de santé "
-            + "pour gérer mes rendez-vous et mon dossier médical, conformément à la loi organique n° 2004-63 relative à "
-            + "la protection des données à caractère personnel. Mes données de santé ne sont accessibles qu'aux "
-            + "professionnels de santé qui me suivent et aux personnes tenues au secret professionnel, et elles sont "
-            + "hébergées en Tunisie. Elles sont conservées pendant 20 ans à compter de ma dernière consultation, puis "
-            + "détruites. Je peux demander l'accès à mes données, leur rectification, leur export ou leur suppression "
-            + "depuis mon profil, et je peux saisir l'Instance nationale de protection des données personnelles (INPDP) "
-            + "en cas de désaccord.";
+    public static final String TEXT = "Je consens expressément au traitement de mes données personnelles et de santé "
+            + "par MedLink et les professionnels habilités de ma clinique, pour gérer mes rendez-vous et mon dossier "
+            + "médical, conformément à la loi organique n° 2004-63. L'accès est limité selon les fonctions et le secret "
+            + "professionnel. Les données sont conservées selon les obligations légales et les conditions fixées "
+            + "par l'INPDP, notamment les délais applicables au dossier médical. Je peux demander l'accès, la "
+            + "rectification, une copie ou l'effacement de mes données, dans les limites de ces obligations, et "
+            + "retirer mon consentement auprès de ma clinique. Je peux saisir l'Instance nationale de protection "
+            + "des données personnelles (INPDP). L'inscription nécessite mon accord explicite.";
 
     private final boolean required;
     private final boolean available;

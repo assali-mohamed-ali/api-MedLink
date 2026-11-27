@@ -76,6 +76,9 @@ public class DeletionReviewService {
         this.accounts = accounts;
         this.mail = mail;
         this.transaction = new TransactionTemplate(transactionManager);
+        if (retentionYears < 20) {
+            throw new IllegalArgumentException("Medical retention must be at least 20 years under the MedLink policy");
+        }
         this.retentionYears = retentionYears;
     }
 
@@ -153,7 +156,10 @@ public class DeletionReviewService {
         Instant lastAppointment = requests.lastAppointmentStart(patient.getId(), now);
         Instant lastReport = requests.lastReportAt(patient.getId());
         Instant last = latest(lastAppointment, lastReport);
-        return new DeletionReview(request, patient, patientSide.dueAt(request), last, retainedUntil(patient, last));
+        Instant retentionAnchor = latest(last, latest(requests.lastExamAt(patient.getId()),
+                requests.lastDocumentAt(patient.getId())));
+        return new DeletionReview(request, patient, patientSide.dueAt(request), last,
+                retainedUntil(patient, retentionAnchor));
     }
 
     private Instant retainedUntil(Patient patient, Instant lastConsultation) {

@@ -18,8 +18,8 @@ import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
- * MLink-32 follow-up: (1) a practitioner writes a report only once a consultation with the patient has started (a
- * BOOKED appointment whose slot has begun), never before; the record says whether it is possible. (2) The patient reads
+ * MLink-32 follow-up: (1) a practitioner writes a report only once a consultation with the patient has ended (a
+ * BOOKED appointment whose slot has ended), never before; the record says whether it is possible. (2) The patient reads
  * their own reports, newest first, with the practitioner who wrote each one, and nobody else's. The access rules over
  * HTTP are in ConsultationReportFunctionalTest and MyReportsFunctionalTest.
  */
@@ -48,9 +48,9 @@ class ReportAfterConsultationTest {
         assertThatThrownBy(() -> reports.create(pro, patient, "Écrit trop tôt."))
                 .isInstanceOfSatisfying(ApiException.class, refused -> {
                     assertThat(refused.getStatus()).isEqualTo(HttpStatus.CONFLICT);
-                    assertThat(refused.getCode()).isEqualTo("CONSULTATION_NOT_STARTED");
+                    assertThat(refused.getCode()).isEqualTo("CONSULTATION_NOT_COMPLETED");
                     assertThat(refused.getMessage())
-                            .isEqualTo("Vous pourrez écrire le compte-rendu une fois la consultation commencée.");
+                            .isEqualTo("Vous pourrez écrire le compte-rendu une fois la consultation terminée.");
                 });
 
         assertThat(count("select count(*) from consultation_reports where patient_id = ?", patient)).isZero();
@@ -58,12 +58,25 @@ class ReportAfterConsultationTest {
     }
 
     @Test
-    void onceTheConsultationHasStartedTheReportIsSaved() {
+    void anOngoingConsultationCannotBeFinalised() {
         UUID pro = practitioner("Sami", "Dev");
         UUID patient = patient();
         appointment(pro, patient, Instant.now().minus(5, ChronoUnit.MINUTES), "BOOKED");
 
-        assertThat(reports.create(pro, patient, "Consultation en cours.").content()).isEqualTo("Consultation en cours.");
+        assertThat(records.read(pro, patient).canWriteReport()).isFalse();
+        assertThatThrownBy(() -> reports.create(pro, patient, "Consultation en cours."))
+                .isInstanceOfSatisfying(ApiException.class,
+                        refused -> assertThat(refused.getCode()).isEqualTo("CONSULTATION_NOT_COMPLETED"));
+        assertThat(count("select count(*) from consultation_reports where patient_id = ?", patient)).isZero();
+    }
+
+    @Test
+    void anEndedConsultationAllowsFinalisation() {
+        UUID pro = practitioner("Sami", "Dev");
+        UUID patient = patient();
+        appointment(pro, patient, PAST, "BOOKED");
+
+        assertThat(reports.create(pro, patient, "Consultation terminée.").content()).isEqualTo("Consultation terminée.");
     }
 
     /** A past appointment that was cancelled is no consultation: with only an upcoming one, still too early. */
@@ -76,7 +89,7 @@ class ReportAfterConsultationTest {
 
         assertThatThrownBy(() -> reports.create(pro, patient, "Écrit trop tôt."))
                 .isInstanceOfSatisfying(ApiException.class,
-                        refused -> assertThat(refused.getCode()).isEqualTo("CONSULTATION_NOT_STARTED"));
+                        refused -> assertThat(refused.getCode()).isEqualTo("CONSULTATION_NOT_COMPLETED"));
     }
 
     @Test

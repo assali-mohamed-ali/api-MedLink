@@ -11,6 +11,15 @@ import org.junit.jupiter.api.Test;
 class ConsentPolicyTest {
 
     @Test
+    void productionAvailabilityIsAnIndependentGateAndOldVersionsRemainInvalid() {
+        assertThatThrownBy(() -> new ConsentPolicy(true, false).check(ConsentPolicy.CURRENT_VERSION))
+                .isInstanceOfSatisfying(ApiException.class,
+                        e -> assertThat(e.getCode()).isEqualTo("CONSENT_UNAVAILABLE"));
+        assertThatThrownBy(() -> new ConsentPolicy(true, true).check("2026-11-v1"))
+                .isInstanceOf(ApiException.class);
+    }
+
+    @Test
     void whenRequiredAMissingConsentIsRefusedNamingTheField() {
         ConsentPolicy policy = new ConsentPolicy(true, true);
 

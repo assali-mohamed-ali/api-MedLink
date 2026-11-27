@@ -49,7 +49,7 @@ public class PatientRecordService {
             }
             Patient patient = patients.findById(patientId).orElseThrow(PatientRecordService::notAttached);
             return new PatientRecord(patient,
-                    appointments.existsStartedByPractitionerAndPatient(practitionerId, patientId, Instant.now()));
+                    appointments.existsCompletedByPractitionerAndPatient(practitionerId, patientId, Instant.now()));
         });
         // Written before the record leaves: a read that cannot be traced is not answered
         audit.record(AuditAction.RECORD_VIEWED, RESOURCE, patientId.toString(), AuditOutcome.SUCCESS);

@@ -21,6 +21,13 @@ public interface DeletionRequestRepository extends JpaRepository<DeletionRequest
               and s.startsAt <= :now""")
     Instant lastAppointmentStart(@Param("patientId") UUID patientId, @Param("now") Instant now);
 
+    /** Retention must also cover results/documents even without a prior consultation. */
+    @Query("select max(r.createdAt) from ExamResult r where r.patientId = :patientId")
+    Instant lastExamAt(@Param("patientId") UUID patientId);
+
+    @Query("select max(d.createdAt) from PatientDocument d where d.patientId = :patientId")
+    Instant lastDocumentAt(@Param("patientId") UUID patientId);
+
     /** When the latest consultation report about the patient was written, or null. */
     @Query("select max(r.createdAt) from ConsultationReport r where r.patientId = :patientId")
     Instant lastReportAt(@Param("patientId") UUID patientId);
