@@ -381,6 +381,7 @@ actuator exposes only `health,info,prometheus`: don't open more without a securi
 | [docs/sprints/sprint-2/README.md](docs/sprints/sprint-2/README.md) | how a working session runs |
 | [docs/sprints/sprint-2/plan.md](docs/sprints/sprint-2/plan.md) | design and endpoint contracts |
 | [docs/features/patient-documents.md](docs/features/patient-documents.md) | patient documents: contracts, encryption, MinIO, audit, errors, tests |
+| [Backlog coverage](docs/backlog-coverage.md), [implementation report](docs/implementation-report.md), [manual acceptance](docs/manual-testing.md) | Story traceability, test results, and role workflows |
 | [docs/decisions/](docs/decisions/) | decision records (0002 covers patient documents) |
 | [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md), [security/threat-model.md](security/threat-model.md) | architecture, trust boundaries, threats and controls mapped to code and tests |
 | [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) | staging/production host, GitHub Environment secrets, rollout, rollback and recovery |

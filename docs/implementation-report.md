@@ -41,18 +41,30 @@ See the [manual acceptance instructions](manual-testing.md). The complete releas
 
 | Check | Command or evidence | Result |
 | --- | --- | --- |
+| API clean verification | ./mvnw -o -B clean verify | Exit 0, 1,216 passed, 0 failed, 0 skipped. Surefire ended an idle fork after the tests had reported. |
+| Dashboard clean dependency install | npm ci in a fresh scratch directory with the committed lockfile | Exit 0, 172 installed packages |
 | Dashboard baseline | npm test at a240f63 | Exit 0, 543 passed |
 | Dashboard implementation | npm test | Exit 0, 559 passed in 78 files, 0 failed, 0 skipped |
 | Dashboard quality | npm run lint, npm run build, npm run check:budget, npm run check:contrast | Exit 0 for each. Two pre-existing React lint warnings in the documents feature. JavaScript 106.8 kB gzip and fonts 48.4 kB. All 26 contrast checks passed. |
-| Dependency advisory check | npm audit --omit=dev --json | Exit 0, no production dependency advisories |
+| Dependency advisory check | npm audit --audit-level=high --json and npm audit --omit=dev --json | Exit 0 for both, no advisories |
 | Secret scan | Gitleaks git /repo --redact --log-opts master..HEAD in each repository | No leaks found in inspected feature commits |
 | Compose | docker compose -f compose.yaml config --quiet and docker compose --env-file .env.example -f docker-compose.yml config --quiet | Exit 0 |
 | SCA policy | bash scripts/ci/sca-policy.test.sh | Exit 0, 18 policy test cases passed |
 | Migration upgrade | Isolated PostgreSQL, Flyway target 23, synthetic patient insertion, migrate and validate to 29 | Six migrations applied. Existing patient preserved, consent history nullable for pre-existing rows. |
+| Cross-role Chromium smoke | Local production build and API with real Keycloak, Mailpit, PostgreSQL and MinIO | Staff MFA and booking, patient history, staff audit actor, practitioner MFA and agenda, exam publication, patient attachment download passed |
+| Reverse-order Maven | ./mvnw -o -B test -Dsurefire.runOrder=reversealphabetical | Started after clean verification. See /tmp/medlink-backlog-reverse.log for the result. |
+| Backend SCA | OWASP Dependency-Check with the repository CVSS threshold | Offline execution requires online mode. The online run timed out while resolving scanner dependencies. |
+| OWASP ZAP | Passive baseline image requested | The image pull was still pending at handoff. No scan result recorded. |
 | Public identity collection | Newman 6.2.1, folder 14, against local standalone API | Exit 0, four requests and assertions passed |
 | Browser patient smoke | Chromium against the production dashboard build and local API, test Keycloak and Mailpit | Registration rejected without consent; consent/activation, login, refresh, contact persistence, export, deletion request and withdrawal, recovery and revoked session passed |
 
 The first combined API verification found profile whitespace validation, PostgreSQL timestamp precision, missing matrix coverage and a configuration test failure. A concurrent compilation invalidated that run’s classpath during alert tests. A separate clean run executed 1,216 tests with three matrix failures. The two staff slot endpoints still had a patient-only method check and the matrix expected an unrelated practitioner to reach exam validation. The feature branch corrects the route guards and the expectation for a random unrelated patient ID. Logs are retained under /tmp/medlink-backlog-*.log.
+
+## Git
+
+- Consolidated source for the API was d47deea8fe50d611f65ee2386232a5a3ece2ecb2.
+- Dashboard integration is 613bc586bc6177a1b6d3510103fa372de6f98b33 on feat/backlog-us01-us32. Its API dependency is this branch through the V29 migrations and staff slot routes.
+- The feature branches are local. Production release remains gated by the coverage matrix.
 
 ## AI disclosure
 
