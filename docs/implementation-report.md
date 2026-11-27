@@ -10,6 +10,16 @@ compilé, aucun test n'a été lancé.** Chaque branche doit passer `./mvnw -B v
 `./mvnw -B test -Dsurefire.runOrder=reversealphabetical` (Docker démarré) avant toute fusion. Aucune affirmation de
 réussite n'est faite ici. Le frontend (`medlink-dashboard`) n'a pas pu être modifié : l'accès GitHub était refusé.
 
+## Où tout se trouve : une seule branche
+
+**`feat/backlog-us01-us32`** regroupe tout le travail ci-dessous (fusion de toutes les branches, conflit de `MailService`
+résolu, réservation par le personnel reliée à l'e-mail de confirmation). C'est la branche à reprendre. Les branches par
+story restent en place pour relire story par story ; aucune n'a été supprimée.
+
+Seule vérification faite : une **analyse syntaxique** de tout le code fusionné avec `javac` (elle a trouvé et permis de
+corriger une accolade perdue à la fusion de `MailService`). Ce n'est pas une compilation : les dépendances n'étaient pas
+disponibles, donc les erreurs de types ou d'appels ne sont pas détectées.
+
 ## Branches livrées
 
 | Story | Branche | Contenu | Migration |
@@ -23,6 +33,9 @@ réussite n'est faite ici. Le frontend (`medlink-dashboard`) n'a pas pu être mo
 | US-16 export | `feat/patient-export` | `GET /api/patients/me/export` (JSON) | aucune |
 | US-16 demande de suppression | `feat/patient-deletion-request` | côté patient : `POST`/`GET`/`DELETE /api/patients/me/deletion-request` ; côté **personnel administratif** : `GET /api/admin/deletion-requests` et `POST /api/admin/deletion-requests/{patientId}/decision` (approbation bloquée tant que la conservation court, refus motivé) ; **ne supprime rien** | V26 |
 | US-21 absences | `feat/practitioner-absences` | `POST /api/practitioner/absences` (ferme les créneaux libres, liste les rendez-vous réservés à traiter) ; `POST /api/practitioner/appointments/{id}/absence-decision` : annuler, ou reporter à la même heure la semaine suivante (même clinique, créneau libre requis) ; le patient reçoit un e-mail | V27 |
+| US-30 rendez-vous pris par le personnel | `feat/staff-booking` | `POST /api/admin/appointments` `{patientId, slotId}` : mêmes règles et verrous que la réservation du patient ; le rendez-vous est au patient, `booked_by` = le membre du personnel (audit) ; e-mail de confirmation sur la branche regroupée | aucune |
+| US-13 / US-25 résultats d'examens | `feat/exam-results` | praticien : `POST`/`GET /api/patients/{id}/results` (titre, type, date d'examen, résultat, document du patient en option) ; patient : `GET /api/results/me` (nouveau / vu) ; titre, type et résultat chiffrés | V28 |
+| US-29 réaffectation (**inachevée**) | `feat/appointment-reassignment` | seulement le schéma, l'entité et le dépôt ; ni service, ni contrôleurs, ni test | V29 |
 | Décisions produit | `docs/product-decisions` | les six décisions de l'équipe | — |
 | Audit initial | `docs/backlog-coverage` | matrice de couverture US-01 à US-32 | — |
 
@@ -36,7 +49,8 @@ US-05 (liste des praticiens) : déjà couverte (filtres de recherche de créneau
   identique) : la fusion du second ne devrait pas poser de conflit.
 - `MailService` : `feat/booking-confirmation-mail`, `feat/forgot-password` et `feat/practitioner-absences` ajoutent chacune des méthodes
   au même endroit : conflit de fusion attendu, à résoudre en gardant les trois blocs. Migrations : V24 (consentement), V25 (mot de passe
-  oublié), V26 (suppression), V27 (absences).
+  oublié), V26 (suppression), V27 (absences), V28 (résultats), V29 (réaffectation). Sur la branche regroupée, tout est déjà dans
+  le bon ordre.
 - `SecurityConfig` : chaque branche ajoute sa règle à un endroit différent ; vérifier tout de même la fusion.
 
 ## Non fait
@@ -45,7 +59,16 @@ US-05 (liste des praticiens) : déjà couverte (filtres de recherche de créneau
   ne s'applique, mais rien n'est supprimé : une purge touche aussi les documents chiffrés du stockage objet.
 - **US-29 réaffectation** des rendez-vous futurs vers un autre praticien avec double confirmation (décidée, non codée).
 - **US-21** : un créneau ouvert plus tard pendant une absence n'est pas encore bloqué.
-- **US-13 / US-25** résultats d'examens, **US-30** réservation par le personnel : non codées.
+- **US-29 réaffectation** : seuls le schéma (V29), l'entité `Reassignment` et son dépôt existent. Il reste : la proposition par
+  le personnel (`POST /api/admin/appointments/{id}/reassignments` avec un créneau libre d'un autre praticien de la même
+  clinique), l'acceptation ou le refus du patient (`/api/reassignments/**`, règle `SecurityConfig` à ajouter) et du praticien
+  repreneur (`/api/practitioner/reassignments`), puis le déplacement quand les deux ont accepté (même logique de verrous que
+  le report d'un patient), les e-mails et le test. Le retrait d'une clinique reste refusé (409) tant que le praticien y a des
+  créneaux, même passés : la clé étrangère de V13 l'impose. Le permettre avec un historique demande une décision de schéma
+  (par exemple un lien clinique « inactif »).
+- **US-13 / US-25** : pas d'envoi de fichier par le praticien (il rattache un document déjà déposé par le personnel) ; pas de
+  pagination de la liste.
+- **US-30** : pas de vérification que le compte du patient est actif.
 - **Frontend** : aucune page (profil, consentement, mot de passe oublié `/reinitialiser-mot-de-passe`, export, demande de
   suppression, recherche de patients) ; le front doit envoyer `consentVersion` à l'inscription.
 - **Postman** : collection non mise à jour pour les nouveaux endpoints (le consentement est facultatif en dev, donc les

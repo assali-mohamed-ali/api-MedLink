@@ -40,7 +40,14 @@ public class ExamResultController {
     @ResponseStatus(HttpStatus.CREATED)
     public ExamResultDto publish(@PathVariable String id, @RequestBody PublishResultRequest request) {
         return ExamResultMapper.toPublished(service.publish(currentUser.id(), patientId(id), request.title(),
-                request.content()));
+                request.examType(), request.examDate(), request.content(), request.documentId()));
+    }
+
+    @Operation(summary = "The results the caller published for a patient attached to them, newest first")
+    @GetMapping("/api/patients/{id}/results")
+    @PreAuthorize("hasRole('" + Roles.PRACTITIONER + "')")
+    public List<ExamResultDto> publishedForPatient(@PathVariable String id) {
+        return service.publishedBy(currentUser.id(), patientId(id)).stream().map(ExamResultMapper::toDto).toList();
     }
 
     @Operation(summary = "The caller's own examination results, newest first")

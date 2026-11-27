@@ -10,12 +10,15 @@ public final class ExamResultMapper {
     private ExamResultMapper() {}
 
     public static ExamResultDto toDto(PatientResult result) {
-        return new ExamResultDto(result.id(), result.createdAt(), result.title(), result.content(),
-                new ExamResultDto.Author(result.practitionerFirstName(), result.practitionerLastName()));
+        ExamResultDto.Author author = result.practitionerFirstName() == null && result.practitionerLastName() == null
+                ? null : new ExamResultDto.Author(result.practitionerFirstName(), result.practitionerLastName());
+        return new ExamResultDto(result.id(), result.publishedAt(), result.examDate(), result.title(), result.examType(),
+                result.content(), result.documentId(), result.isNew(), author);
     }
 
-    /** The answer to a publish: what was saved, without repeating the text (the practitioner just wrote it). */
+    /** The answer to a publish: what was saved, without repeating the texts (the practitioner just wrote them). */
     public static ExamResultDto toPublished(ExamResult result) {
-        return new ExamResultDto(result.getId(), result.getCreatedAt(), null, null, null);
+        return new ExamResultDto(result.getId(), result.getCreatedAt(), result.getExamDate(), null, null, null,
+                result.getDocumentId(), false, null);
     }
 }
