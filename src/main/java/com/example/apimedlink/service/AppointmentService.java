@@ -41,11 +41,12 @@ public class AppointmentService {
     private final OwnershipGuard ownership;
     private final AuditService audit;
     private final AlertService alerts;
+    private final AppointmentConfirmation confirmation;
     /** H-03: no cancel less than this before the start (app.appointments.cancel-deadline-hours). */
     private final Duration cancelDeadline;
 
     public AppointmentService(AppointmentRepository appointments, SlotRepository slots, PatientRepository patients,
-            OwnershipGuard ownership, AuditService audit, AlertService alerts,
+            OwnershipGuard ownership, AuditService audit, AlertService alerts, AppointmentConfirmation confirmation,
             @Value("${app.appointments.cancel-deadline-hours}") long cancelDeadlineHours) {
         this.appointments = appointments;
         this.slots = slots;
@@ -53,6 +54,7 @@ public class AppointmentService {
         this.ownership = ownership;
         this.audit = audit;
         this.alerts = alerts;
+        this.confirmation = confirmation;
         this.cancelDeadline = Duration.ofHours(cancelDeadlineHours);
     }
 
@@ -129,6 +131,7 @@ public class AppointmentService {
                 AuditOutcome.SUCCESS);
         // MLink-37: the practitioner of the old slot is told it was moved ("reporté"), and to which date
         alerts.onAppointmentMoved(old, moved);
+        confirmation.onBooked(moved);
         return moved;
     }
 
@@ -173,6 +176,7 @@ public class AppointmentService {
         // Ids only (the caller is taken from the session by AuditService)
         audit.recordWithin(AuditAction.APPOINTMENT_BOOKED, "APPOINTMENT", appointment.getId().toString(),
                 AuditOutcome.SUCCESS);
+        confirmation.onBooked(appointment);
         return appointment;
     }
 

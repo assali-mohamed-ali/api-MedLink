@@ -223,6 +223,39 @@ public class MailService {
         send(to, "Rappel de votre rendez-vous MedLink", text, html, reminderMessageId(appointmentId));
     }
 
+    /**
+     * US-08: the confirmation of a booking or of a move, sent to the patient once it is committed. Same content as the
+     * reminder; the Message-ID is the appointment's (one confirmation per appointment, the same at every try).
+     */
+    public void sendAppointmentConfirmation(String to, String firstName, String clinic, String practitioner,
+            Instant startsAt, UUID appointmentId) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl).path("/patient/rendez-vous").build().toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        ZonedDateTime local = startsAt.atZone(CLINICS_ZONE);
+        String day = local.format(DAY);
+        String time = local.format(TIME);
+        String text = hello + "\n\n"
+                + "Votre rendez-vous est confirmé :\n\n"
+                + "Date : " + day + "\n"
+                + "Heure : " + time + " (heure de Tunisie)\n"
+                + "Praticien : " + practitioner + "\n"
+                + "Clinique : " + clinic + "\n\n"
+                + "Vous pouvez l'annuler ou le reporter depuis votre espace :\n\n"
+                + link + "\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Votre rendez-vous est confirmé :</p>"
+                + "<p>Date : <strong>" + HtmlUtils.htmlEscape(day) + "</strong><br>"
+                + "Heure : <strong>" + HtmlUtils.htmlEscape(time) + "</strong> (heure de Tunisie)<br>"
+                + "Praticien : " + HtmlUtils.htmlEscape(practitioner) + "<br>"
+                + "Clinique : " + HtmlUtils.htmlEscape(clinic) + "</p>"
+                + "<p>Vous pouvez l'annuler ou le reporter depuis votre espace :</p>"
+                + "<p><a href=\"" + HtmlUtils.htmlEscape(link) + "\">Voir mes rendez-vous</a></p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Confirmation de votre rendez-vous MedLink", text, html,
+                "<appointment-confirmation-" + appointmentId + "@medlink.local>");
+    }
+
     /** The Message-ID of an appointment's reminder: one per appointment, whatever the try. */
     public static String reminderMessageId(UUID appointmentId) {
         return "<appointment-reminder-" + appointmentId + "@medlink.local>";
