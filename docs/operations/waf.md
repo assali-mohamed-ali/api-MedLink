@@ -14,6 +14,12 @@ Caddyfile and image reference for rollback. The staging API binds to the host
 loopback interface. A replacement Caddy container needs host networking to
 reach that upstream at its existing address.
 
+The container runs as UID and GID 10001. Ensure any existing mounts at
+`/config` and `/data` are writable by that user and mounted Caddyfiles are
+readable. The Caddy binary carries `CAP_NET_BIND_SERVICE` for ports 80 and
+443. Keep that capability in the container's bounding set when using those
+ports.
+
 Before enabling the WAF on staging, run Caddy validation against the complete
 staging config. Check login, CSRF, appointment booking and document upload at
 the size limit. Review any blocked legitimate traffic before changing rules.
