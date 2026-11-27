@@ -153,6 +153,63 @@ class PractitionerAbsenceFunctionalTest extends FunctionalTestBase {
         assertThat(new Browser().call("/api/practitioner/absences").statusCode()).isEqualTo(401);
     }
 
+    @Test
+    void aPatientCancellingDuringAnAbsenceCannotReopenTheSlot() throws Exception {
+        Pro pro = practitioner();
+        UUID original = slot(pro, DAY, "FREE");
+        Browser patient = bookablePatient();
+        String appointment = book(patient, original);
+        HttpResponse<String> declared = pro.browser().postJson("/api/practitioner/absences",
+                absence(DAY.minus(1, ChronoUnit.HOURS), DAY.plus(2, ChronoUnit.HOURS)));
+        assertThat(declared.statusCode()).as(declared.body()).isEqualTo(201);
+
+        HttpResponse<String> cancelled = patient.postJson("/api/appointments/" + appointment + "/cancel", "");
+
+        assertThat(cancelled.statusCode()).as(cancelled.body()).isEqualTo(204);
+        assertThat(status(original)).isEqualTo("CLOSED");
+        assertThat(jdbc.queryForObject("select status from appointments where id = ?::uuid",
+                String.class, appointment)).isEqualTo("CANCELLED");
+        assertThat(bookablePatient().postJson("/api/appointments", "{\"slotId\":\"" + original + "\"}")
+                .statusCode()).isEqualTo(409);
+    }
+
+    @Test
+    void aPatientMovingOutOfAnAbsenceKeepsTheOldSlotClosed() throws Exception {
+        Pro pro = practitioner();
+        UUID original = slot(pro, DAY, "FREE");
+        UUID replacement = slot(pro, DAY.plus(3, ChronoUnit.DAYS), "FREE");
+        Browser patient = bookablePatient();
+        String appointment = book(patient, original);
+        HttpResponse<String> declared = pro.browser().postJson("/api/practitioner/absences",
+                absence(DAY.minus(1, ChronoUnit.HOURS), DAY.plus(2, ChronoUnit.HOURS)));
+        assertThat(declared.statusCode()).as(declared.body()).isEqualTo(201);
+
+        HttpResponse<String> moved = patient.postJson("/api/appointments/" + appointment + "/reschedule",
+                "{\"newSlotId\":\"" + replacement + "\"}");
+
+        assertThat(moved.statusCode()).as(moved.body()).isEqualTo(200);
+        assertThat(status(original)).isEqualTo("CLOSED");
+        assertThat(status(replacement)).isEqualTo("BOOKED");
+        assertThat(jdbc.queryForObject("select status from appointments where id = ?::uuid",
+                String.class, appointment)).isEqualTo("CANCELLED");
+    }
+
+    private Browser bookablePatient() throws Exception {
+        String email = email("absence-bookable");
+        UUID id = console.createUser(email, PASSWORD);
+        Browser browser = new Browser();
+        assertThat(browser.apiLogin(email, PASSWORD).statusCode()).isEqualTo(200);
+        jdbc.update("insert into patients (id, first_name, last_name, birth_date) values (?, 'Amel', 'Ben Salah', ?)",
+                id, Date.valueOf("1990-04-12"));
+        return browser;
+    }
+
+    private String book(Browser browser, UUID slotId) throws Exception {
+        HttpResponse<String> response = browser.postJson("/api/appointments", "{\"slotId\":\"" + slotId + "\"}");
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(201);
+        return mapper.readTree(response.body()).get("id").asText();
+    }
+
     private static String absence(Instant from, Instant to) {
         return "{\"startsAt\":\"" + from + "\",\"endsAt\":\"" + to + "\",\"reason\":\"Congrès\"}";
     }
