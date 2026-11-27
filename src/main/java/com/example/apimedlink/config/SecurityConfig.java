@@ -88,6 +88,9 @@ public class SecurityConfig {
                         // @PreAuthorize as well.
                         .requestMatchers(HttpMethod.POST, "/api/appointments", "/api/appointments/**")
                         .hasRole(Roles.PATIENT)
+                        // US-16: the patient's own export, patients only
+                        .requestMatchers(HttpMethod.GET, "/api/patients/me/export")
+                        .hasRole(Roles.PATIENT)
                         // The role before anything reads the request: Spring converts query dates and the JSON body before
                         // @PreAuthorize, so without this rule a patient would get 400, not 403 (MLink-26, review on #116)
                         .requestMatchers("/api/practitioner/**")
