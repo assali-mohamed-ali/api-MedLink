@@ -47,9 +47,9 @@ services:
       CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,http://localhost:4200}
       # Staging/prod: the reverse proxy's address, as a regex (GitHub #51). Never empty: empty trusts everyone.
       TRUSTED_PROXIES: '${TRUSTED_PROXIES:-127\.0\.0\.1|0:0:0:0:0:0:0:1}'
-      # US-04: sign-ups open only where the consent text is approved. Closed unless the environment says true
-      # (docs/product-decisions.md §3); every profile reads it, so .env sets it for a local stack.
-      APP_CONSENT_AVAILABLE: ${APP_CONSENT_AVAILABLE:-false}
+      # US-04: whether sign-ups are open. No default: every environment says it (.env.example and staging true,
+      # production false until the consent text is approved, docs/product-decisions.md §3).
+      APP_CONSENT_AVAILABLE: ${APP_CONSENT_AVAILABLE:?APP_CONSENT_AVAILABLE must be set}
       APP_MFA_ENCRYPTION_KEY: ${APP_MFA_ENCRYPTION_KEY:?APP_MFA_ENCRYPTION_KEY must be set}
       APP_REPORT_ENCRYPTION_KEY: ${APP_REPORT_ENCRYPTION_KEY:?APP_REPORT_ENCRYPTION_KEY must be set}
       # Patient documents (MLink-9): the local MinIO service below by default. A deployment with an
