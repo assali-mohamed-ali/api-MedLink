@@ -92,6 +92,15 @@ to work.
 
 ## Change a secret
 
+The staging and production API deployments use `medlink/staging/api` and
+`medlink/prod/api` for `APP_DOCUMENTS_ENCRYPTION_KEY`. The deploy action reads
+the environment's API bundle with its OIDC role. The renderer requires the
+document key and preserves the base64 value when it writes the Compose
+environment. `deploy/test/render-env.test.sh` verifies that path with fixture
+values. Rotation requires loading a new version alongside every version still
+referenced by documents or retained backups before changing the active version.
+See [Patient documents](../features/patient-documents.md#configuration).
+
 `seed-env.sh` never overwrites a value. To change one, with a token allowed to write (a fresh setup token):
 
 ```sh

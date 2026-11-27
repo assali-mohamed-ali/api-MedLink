@@ -9,14 +9,14 @@ groups:
         annotations:
           summary: 'api-MedLink down ({{ $labels.job }})'
       - alert: HighErrorRate
-        expr: sum(rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / sum(rate(http_server_requests_seconds_count[5m])) > 0.05
+        expr: sum by (job, instance) (rate(http_server_requests_seconds_count{status=~"5.."}[5m])) / sum by (job, instance) (rate(http_server_requests_seconds_count[5m])) > 0.05
         for: 5m
         labels:
           severity: warning
         annotations:
           summary: 'Taux 5xx > 5% sur 5m'
       - alert: HighLatencyP95
-        expr: histogram_quantile(0.95, sum(rate(http_server_requests_seconds_bucket[5m])) by (le)) > 1
+        expr: histogram_quantile(0.95, sum by (job, instance, le) (rate(http_server_requests_seconds_bucket[5m]))) > 1
         for: 10m
         labels:
           severity: warning
@@ -29,3 +29,17 @@ groups:
           severity: warning
         annotations:
           summary: 'Heap JVM > 90%'
+      - alert: HostDown
+        expr: up{job="node"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: 'Node exporter unreachable ({{ $labels.instance }})'
+      - alert: DiskUsageHigh
+        expr: 1 - node_filesystem_avail_bytes{job="node",fstype=~"ext[234]|xfs|btrfs"} / node_filesystem_size_bytes{job="node",fstype=~"ext[234]|xfs|btrfs"} > 0.85
+        for: 10m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'Disk usage above 85% ({{ $labels.instance }} {{ $labels.mountpoint }})'

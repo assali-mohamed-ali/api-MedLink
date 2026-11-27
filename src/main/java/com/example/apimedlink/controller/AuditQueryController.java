@@ -39,6 +39,7 @@ public class AuditQueryController {
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant from,
             @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) Instant to,
             @RequestParam(required = false) UUID userId,
+            @RequestParam(required = false) UUID patientId,
             @RequestParam(required = false) String action,
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "" + DEFAULT_PAGE_SIZE) int size) {
@@ -53,7 +54,7 @@ public class AuditQueryController {
         }
 
         AuditAction filter = parseAction(action);
-        Page<AuditEntryDto> results = queries.search(from, to, userId, filter, page, size)
+        Page<AuditEntryDto> results = queries.search(from, to, userId, patientId, filter, page, size)
                 .map(AuditEntryMapper::toDto);
         return new AuditPageDto(
                 results.getContent(),

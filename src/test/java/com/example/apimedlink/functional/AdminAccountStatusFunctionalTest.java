@@ -3,9 +3,11 @@ package com.example.apimedlink.functional;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import com.example.apimedlink.service.AdminUserService;
+import com.example.apimedlink.service.KeycloakAdminService;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jdbc.core.JdbcTemplate;
 
 /**
  * MLink-70: a disabled account is out at once and cannot log in again; enabled again, it can. Real Keycloak,
@@ -19,6 +21,32 @@ class AdminAccountStatusFunctionalTest extends FunctionalTestBase {
 
     @Autowired
     AdminUserService admin;
+
+    @Autowired
+    KeycloakAdminService keycloak;
+
+    @Autowired
+    JdbcTemplate db;
+
+    @Test
+    void editingAccountNamesPreservesTheLoginEmail() throws Exception {
+        String email = uniqueEmail("renamed");
+        UUID id = console.createUser(email, PASSWORD);
+        db.update("insert into users (id, username, email) values (?, ?, ?)", id, email, email);
+        db.update("""
+                insert into patients (id, first_name, last_name, birth_date)
+                values (?, 'Ancien', 'Nom', DATE '1990-04-12')
+                """, id);
+
+        admin.updateNames(id, " Amel ", " Ben Salem ");
+
+        var account = keycloak.getUser(id);
+        assertThat(account.firstName()).isEqualTo("Amel");
+        assertThat(account.lastName()).isEqualTo("Ben Salem");
+        assertThat(account.email()).isEqualTo(email);
+        assertThat(db.queryForObject("select first_name || ' ' || last_name from patients where id = ?",
+                String.class, id)).isEqualTo("Amel Ben Salem");
+    }
 
     @Test
     void aDisabledAccountIsOutAtOnceAndCannotLogInUntilEnabledAgain() throws Exception {

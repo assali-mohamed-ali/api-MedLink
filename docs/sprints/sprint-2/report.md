@@ -2,6 +2,69 @@
 
 Updated by every sub-sprint PR. Newest information first inside each section.
 
+## YouTrack gap closure, 2026-11-27
+
+| Ticket | Working-tree implementation |
+|---|---|
+| MLink-17 and MLink-33 | `GET /api/admin/audit-entries?patientId=…` combines the patient filter with the existing actor, action and period filters. The dashboard can find the patient by name or email. Lists are recorded as `DOCUMENT_LIST` before results are returned. Migration V23 indexes the resource ID and timestamp. |
+| MLink-35 | Staff can list clinics and request `GET /api/admin/clinics/{clinicId}/activity?from=&to=` for counts of booked and cancelled appointments. Counts use slot starts in the half-open period. Each dashboard clinic card loads and retries independently above the practitioner agenda. |
+| MLink-20 | Staff can change first and last names via the account dialog and `PUT /api/admin/users/{id}/name`. The API updates Keycloak and the local patient or practitioner profile where present. The API records attempts and outcomes as `ACCOUNT_UPDATED`. |
+| MLink-24 and MLink-39 | The deploy renderer verifies that the required document encryption key is read from the environment's Vault API bundle. Audit-based security email can be activated with `APP_SECURITY_ALERTS_RECIPIENT`. |
+| MLink-34 and MLink-175 | The repository contains the Caddy/Coraza build, the Prometheus/Grafana/Alertmanager stack, node exporter configuration and operational instructions. |
+
+### Role-based access verification
+
+The local API matrix passed all 189 checks, covering every API route across
+anonymous, patient, practitioner and administrative staff sessions. The
+functional suites additionally exercised patient document ownership, patient
+audit filtering and appointment counts scoped by clinic and period.
+
+| Area | Anonymous | Patient | Practitioner | Administrative staff |
+|---|---|---|---|---|
+| Patient documents | 401 | Own listing and downloads permitted. Other patients' documents and uploads refused. | 403 | Listing, upload and download permitted. |
+| Audit journal and patient filter | 401 | 403 | 403 | 200 with filtered entries. |
+| Clinic list and activity | 401 | 403 | 403 | 200 for valid requests. Invalid periods return 400 and unknown clinics return 404. |
+| Account name | 401 | 403 | 403 | Staff can edit first and last names. The login email is preserved. |
+
+The dashboard has regression tests for patient selection in the audit journal,
+saving account names and retrying a failed clinic card independently. The
+Sprint 2 Postman collection includes requests for clinic counts, account name
+editing and patient audit filtering. The updated collection passed JSON
+validation and awaits a Newman run.
+
+### Local verification
+
+- API Maven `verify` in reverse alphabetical test order passed all 1,076 tests.
+- A focused follow-up run verified that a name edit reconciles Keycloak and
+  the local patient profile while preserving the login email.
+- Dashboard lint and production build passed. All 511 dashboard tests passed.
+- The dashboard's first-visit JavaScript budget passed at 109.3 kB gzip
+  against a 110 kB limit.
+- The Vault deploy renderer and the Prometheus and Alertmanager config tests
+  passed with fixture credentials and targets.
+- The pinned Caddy and Coraza image built and validated the local WAF configuration.
+
+### Public staging performance and layout
+
+Lighthouse 13.6 lab measurements on the deployed staging build, taken on
+2026-11-27. The acceptance target is Largest Contentful Paint under two seconds.
+The mobile homepage measurement was repeated after the first trace failed.
+
+| Page | Mobile LCP | Desktop LCP | Mobile / desktop performance score |
+|---|---:|---:|---:|
+| Home | 1.18 s | 0.71 s | 96 / 96 |
+| Sign in | 1.81 s | 1.29 s | 93 / 84 |
+| Sign up | 1.74 s | 1.55 s | 88 / 87 |
+
+All three pages stayed within the viewport width at 360, 768 and 1440 CSS
+pixels. These measurements cover the public routes on the currently deployed
+build. [Staging dashboard](https://staging.med-l.ink/)
+
+Staging verification remains open for WAF behavior, private scrape targets,
+live Vault access, SMTP delivery and authenticated browser QA. The changes are
+local to the integration worktrees. YouTrack rollout status depends on
+deployed evidence.
+
 ## MLink-26 — Agenda multi-sites (back-end)
 
 **Tickets:** MLink-133, 134, 135, 136, 137, 138, 141. Front (MLink-139, 140) in `web-MedLink`.

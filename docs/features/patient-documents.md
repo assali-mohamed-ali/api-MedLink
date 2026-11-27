@@ -223,10 +223,11 @@ The audit trail is the shared `audit_entries` table written by `AuditService`.
 |---|---|---|
 | Upload | `DOCUMENT_UPLOAD` / `PATIENT_DOCUMENT` / `SUCCESS` | `recordInCurrentTransaction` (`MANDATORY`): the metadata and the audit entry commit together. An audit failure raises `503 AUDIT_UNAVAILABLE`, rolls the metadata back, and deletes the stored object. |
 | Download | `DOCUMENT_READ` / `PATIENT_DOCUMENT` / `SUCCESS` | `record` (`REQUIRES_NEW`) after decryption and checksum verification, before the bytes are returned. An audit failure raises `503 AUDIT_UNAVAILABLE` and no document bytes are returned. |
+| List | `DOCUMENT_LIST` / `PATIENT` / `SUCCESS` | The list is audited before it is returned. An audit failure raises `503 AUDIT_UNAVAILABLE`. |
 | Refused call | `ACCESS_DENIED` / `REQUEST` / `DENIED` | Written by `JsonAccessDeniedHandler` for a `403`, including a missing CSRF token; the refusal stands even if the audit write fails. |
 
-The audit resource id is the document UUID. The trail never contains the title, filename or document
-content. Listing is not audited; only upload, download and refusals are.
+Upload and download entries use the document UUID. List entries use the patient UUID.
+The trail omits titles, filenames and document content.
 
 ## Delete and retention semantics
 
@@ -320,7 +321,7 @@ All errors use the shared shape `{timestamp, status, error, code, message, detai
 | `415` | `UNSUPPORTED_MEDIA_TYPE` | upload body is not `multipart/form-data` |
 | `500` | `INTERNAL_ERROR` | stored object no longer decrypts, AAD/key version mismatch, SHA-256 mismatch, database failure |
 | `503` | `STORAGE_UNAVAILABLE` | MinIO unreachable, missing bucket with `create-bucket=false`, missing object |
-| `503` | `AUDIT_UNAVAILABLE` | upload or download audit entry could not be written; the operation is not treated as successful |
+| `503` | `AUDIT_UNAVAILABLE` | the upload, list or download audit entry could not be written |
 | `503` | `SERVICE_UNAVAILABLE` | container-level error path for other unavailable infrastructure |
 
 The `413` can be produced before the controller runs, while the multipart request is parsed;

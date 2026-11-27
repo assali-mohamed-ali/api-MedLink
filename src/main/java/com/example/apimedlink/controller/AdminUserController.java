@@ -5,6 +5,7 @@ import com.example.apimedlink.dto.AdminUserPageDto;
 import com.example.apimedlink.dto.ChangeRoleRequest;
 import com.example.apimedlink.dto.ChangeStatusRequest;
 import com.example.apimedlink.dto.CreateUserRequest;
+import com.example.apimedlink.dto.UpdateNameRequest;
 import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.mapper.AdminUserMapper;
 import com.example.apimedlink.security.CurrentUser;
@@ -76,6 +77,14 @@ public class AdminUserController {
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void changeStatus(@PathVariable UUID id, @Valid @RequestBody ChangeStatusRequest body) {
         admin.setEnabled(id, body.enabled(), currentUser.id());
+    }
+
+    /** MLink-20: change the displayed first and last name only, never the email. */
+    @PutMapping("/{id}/name")
+    @PreAuthorize("hasRole('" + Roles.ADMINISTRATIVE_STAFF + "')")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void updateName(@PathVariable UUID id, @Valid @RequestBody UpdateNameRequest body) {
+        admin.updateNames(id, body.firstName(), body.lastName());
     }
 
     private static ApiException invalid(String field, String message) {

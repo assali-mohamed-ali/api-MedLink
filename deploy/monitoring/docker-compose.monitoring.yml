@@ -1,0 +1,41 @@
+services:
+  prometheus:
+    image: prom/prometheus:v3.15.0
+    restart: unless-stopped
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ${MONITORING_TARGETS_DIR:?Set MONITORING_TARGETS_DIR}:/etc/prometheus/targets:ro
+      - ../../monitoring/alerts/alert-rules.yml:/etc/prometheus/alert-rules.yml:ro
+      - prometheus-data:/prometheus
+
+  alertmanager:
+    image: prom/alertmanager:v0.35.1
+    restart: unless-stopped
+    volumes:
+      - ${ALERTMANAGER_CONFIG:?Set ALERTMANAGER_CONFIG}:/etc/alertmanager/alertmanager.yml:ro
+      - alertmanager-data:/alertmanager
+    secrets: [smtp_password]
+
+  grafana:
+    image: grafana/grafana:13.3.2
+    restart: unless-stopped
+    ports: ['127.0.0.1:3000:3000']
+    environment:
+      GF_SECURITY_ADMIN_PASSWORD__FILE: /run/secrets/grafana_password
+      GF_USERS_ALLOW_SIGN_UP: 'false'
+    volumes:
+      - ../../monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ../../monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - grafana-data:/var/lib/grafana
+    secrets: [grafana_password]
+
+secrets:
+  smtp_password:
+    file: ${ALERTMANAGER_SMTP_PASSWORD_FILE:?Set ALERTMANAGER_SMTP_PASSWORD_FILE}
+  grafana_password:
+    file: ${GRAFANA_PASSWORD_FILE:?Set GRAFANA_PASSWORD_FILE}
+
+volumes:
+  prometheus-data:
+  alertmanager-data:
+  grafana-data:

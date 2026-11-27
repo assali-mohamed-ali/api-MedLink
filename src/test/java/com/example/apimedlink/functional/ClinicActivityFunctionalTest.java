@@ -33,6 +33,31 @@ class ClinicActivityFunctionalTest extends FunctionalTestBase {
     JdbcTemplate jdbc;
 
     @Test
+    void staffCanReadCountsForOneClinicAndPeriod() throws Exception {
+        UUID clinic = UUID.randomUUID();
+        jdbc.update("insert into clinics (id, name, city) values (?, ?, ?)", clinic, "Clinique activité", "Tunis");
+        UUID practitioner = insertPractitioner("Ines", "Indicateurs", insertSpecialty("Indicateurs"), clinic, TUNIS);
+        UUID patient = insertPatient("Ines", "Activité");
+        Instant end = DAY.plus(4, ChronoUnit.HOURS);
+        insertAppointment(insertSlot(practitioner, clinic, DAY, "BOOKED"), patient);
+        insertAppointment(insertSlot(practitioner, clinic, end, "BOOKED"), patient);
+        insertAppointment(insertSlot(practitioner, TUNIS, DAY.plus(2, ChronoUnit.HOURS), "BOOKED"), patient);
+
+        Browser staff = staff();
+        assertThat(list(staff.call("/api/admin/clinics")))
+                .anySatisfy(item -> assertThat(item).containsEntry("id", clinic.toString()));
+        HttpResponse<String> response = staff.call(activity(clinic, DAY, end));
+        assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
+        assertThat(Browser.json(response)).isEqualTo(Map.of("BOOKED", 1, "CANCELLED", 0));
+        assertThat(staff.call(activity(UUID.randomUUID(), DAY, end)).statusCode()).isEqualTo(404);
+        assertThat(staff.call(activity(clinic, end, DAY)).statusCode()).isEqualTo(400);
+    }
+
+    private static String activity(UUID clinic, Instant from, Instant to) {
+        return "/api/admin/clinics/" + clinic + "/activity?from=" + from + "&to=" + to;
+    }
+
+    @Test
     void staffListThePractitionersWithTheirSpecialtyAndClinics() throws Exception {
         UUID specialty = insertSpecialty("Angiologie (activité)");
         UUID practitioner = insertPractitioner("Lina", "Activité", specialty, SOUSSE, TUNIS);
@@ -109,7 +134,8 @@ class ClinicActivityFunctionalTest extends FunctionalTestBase {
         Browser patient = new Browser().login("patient.dev@medlink.local", DEV_USERS_PASSWORD);
         String agenda = agenda(UUID.randomUUID(), DAY, DAY.plus(1, ChronoUnit.DAYS));
 
-        for (String path : List.of("/api/admin/practitioners", agenda)) {
+        for (String path : List.of("/api/admin/practitioners", agenda, "/api/admin/clinics",
+                activity(SOUSSE, DAY, DAY.plus(1, ChronoUnit.DAYS)))) {
             assertThat(practitioner.call(path).statusCode()).as("practitioner " + path).isEqualTo(403);
             assertThat(patient.call(path).statusCode()).as("patient " + path).isEqualTo(403);
             assertThat(new Browser().call(path).statusCode()).as("anonymous " + path).isEqualTo(401);

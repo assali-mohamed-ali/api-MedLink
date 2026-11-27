@@ -176,7 +176,13 @@ public class DocumentService {
         }
         Pageable pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
-        return documents.findByPatientId(patientId, pageable);
+        Page<PatientDocument> result = documents.findByPatientId(patientId, pageable);
+        audit.record(
+                AuditAction.DOCUMENT_LIST,
+                AuditResourceType.PATIENT.name(),
+                patientId.toString(),
+                AuditOutcome.SUCCESS);
+        return result;
     }
 
     /**

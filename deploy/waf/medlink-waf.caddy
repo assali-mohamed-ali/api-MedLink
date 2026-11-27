@@ -1,0 +1,16 @@
+(medlink_waf) {
+	route {
+		coraza_waf {
+			load_owasp_crs
+			directives `
+				Include @coraza.conf-recommended
+				Include @crs-setup.conf.example
+				Include @owasp_crs/*.conf
+				SecRuleEngine On
+				SecRequestBodyLimit 12582912
+				SecAuditEngine Off
+			`
+		}
+		reverse_proxy {args[0]}
+	}
+}

@@ -54,8 +54,11 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             new Rule("GET",    "/api/admin/users",              L, F, F, O),
             new Rule("POST",   "/api/admin/users",              L, F, F, O),
             new Rule("PUT",    "/api/admin/users/{id}/role",    L, F, F, O),
+            new Rule("PUT",    "/api/admin/users/{id}/name",    L, F, F, O),
             new Rule("GET",    "/api/admin/practitioners",      L, F, F, O), // MLink-35: staff supervise, read only
             new Rule("GET",    "/api/admin/agenda",             L, F, F, O), // MLink-35: no practitionerId is a 400
+            new Rule("GET",    "/api/admin/clinics",            L, F, F, O),
+            new Rule("GET",    "/api/admin/clinics/{clinicId}/activity", L, F, F, O),
             new Rule("GET",    "/api/admin/profile-choices",    L, F, F, O), // MLink-69: a practitioner profile's lists
             new Rule("GET",    "/api/admin/audit-entries",      L, F, F, O),
             new Rule("GET",    "/api/admin/stats/export",       L, F, F, O), // MLink-95: staff only; no dates is a 400
@@ -169,6 +172,7 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             browser.call("/api/auth/csrf");
         }
         String resolved = path.replace("{id}", UUID.randomUUID().toString())
+                .replace("{clinicId}", UUID.randomUUID().toString())
                 .replace("{patientId}", UUID.randomUUID().toString())
                 .replace("{documentId}", UUID.randomUUID().toString());
         if (method.equals("POST") && path.endsWith("/documents")) {

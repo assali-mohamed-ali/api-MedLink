@@ -1,0 +1,11 @@
+services:
+  node-exporter:
+    image: prom/node-exporter:v1.10.2
+    restart: unless-stopped
+    network_mode: host
+    pid: host
+    command:
+      - --path.rootfs=/host
+      - --web.listen-address=${NODE_EXPORTER_BIND_ADDRESS:?Set NODE_EXPORTER_BIND_ADDRESS}:9100
+    volumes:
+      - /:/host:ro,rslave
