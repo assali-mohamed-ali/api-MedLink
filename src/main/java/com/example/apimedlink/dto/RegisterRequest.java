@@ -39,7 +39,10 @@ public record RegisterRequest(
         String phone,
 
         @Size(max = 255, message = "L'adresse est trop longue (255 caractères au plus).")
-        String address) {
+        String address,
+
+        @Size(max = 30, message = "La version du consentement est trop longue.")
+        String consentVersion) {
 
     /** Spaces around a pasted email are not an error. Runs before validation. */
     public RegisterRequest {
@@ -50,6 +53,6 @@ public record RegisterRequest(
     @Override
     public String toString() {
         return "RegisterRequest[email=" + email + ", password=***, firstName=" + firstName + ", lastName=" + lastName
-                + ", birthDate=" + birthDate + ", phone=" + phone + ", address=" + address + "]";
+                + ", birthDate=" + birthDate + ", phone=" + phone + ", address=" + address + ", consentVersion=" + consentVersion + "]";
     }
 }
