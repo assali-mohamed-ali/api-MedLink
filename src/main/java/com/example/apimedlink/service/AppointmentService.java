@@ -127,6 +127,10 @@ public class AppointmentService {
         }
         Instant now = Instant.now();
         checkCancelDeadline(oldSlot, now);
+        if (!oldSlot.getPractitioner().getId().equals(newSlot.getPractitioner().getId())) {
+            throw new ApiException(HttpStatus.CONFLICT, "DIFFERENT_PRACTITIONER",
+                    "Choisissez un nouveau créneau chez le même praticien.");
+        }
         old.setStatus(AppointmentStatus.CANCELLED);
         old.setCancelledAt(now);
         release(oldSlot);
