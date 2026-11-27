@@ -8,4 +8,4 @@ import java.util.UUID;
  * to answer, the latest consultation and the end of the retention period it starts ({@code retainedUntil} null: none).
  */
 public record DeletionReviewDto(UUID patientId, String firstName, String lastName, String status, Instant requestedAt,
-        Instant dueAt, Instant lastConsultationAt, Instant retainedUntil, String decisionNote) {}
+        Instant dueAt, Instant lastConsultationAt, Instant retainedUntil, String decisionNote, Instant accountClosedAt) {}

@@ -24,7 +24,7 @@ public class ConsentPolicy {
     private final boolean required;
     private final boolean available;
 
-    public ConsentPolicy(@Value("${app.consent.required:false}") boolean required,
+    public ConsentPolicy(@Value("${app.consent.required:true}") boolean required,
             @Value("${app.consent.available:true}") boolean available) {
         this.required = required;
         this.available = available;
@@ -44,7 +44,7 @@ public class ConsentPolicy {
     /** Throws a 400 naming {@code consentVersion} when the consent is missing (and required) or is an old text. */
     public void check(String providedVersion) {
         requireAvailable();
-        if (providedVersion == null) {
+        if (providedVersion == null || providedVersion.isBlank()) {
             if (required) {
                 throw refused("Vous devez accepter le consentement pour créer un compte.");
             }

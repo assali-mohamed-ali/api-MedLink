@@ -95,6 +95,31 @@ public class AccountOperationRunner {
         execute(leased, executor, now);
     }
 
+    /**
+     * US-16: registers the operation inside the caller's transaction (record and ATTEMPTED entry), so it commits or rolls
+     * back with the change that needs it (an approved deletion request closing the account). Run it after the commit
+     * with {@link #runRegistered}; if that never happens, the worker takes it like any other pending operation.
+     *
+     * @throws ApiException 409 {@code OPERATION_PENDING} when another change of this account is pending
+     */
+    public UUID registerWithin(AccountOperation request) {
+        AccountOperation mine = request.requestedBy(currentUser.idOrNull(), clientIp());
+        return tx.execute(status -> register(mine, Instant.now()));
+    }
+
+    /**
+     * Carries out an operation registered by {@link #registerWithin}, once its transaction has committed. Does nothing
+     * when the worker holds it already. Its error goes on to the caller; the operation then stays pending or is closed
+     * as FAILED, as for {@link #submit}.
+     */
+    public void runRegistered(UUID operationId, Consumer<AccountOperation> executor) {
+        Instant now = Instant.now();
+        Optional<AccountOperation> leased = store.lease(operationId, now, leaseSeconds);
+        if (leased.isPresent()) {
+            execute(leased.get(), executor, now);
+        }
+    }
+
     /** The record and the ATTEMPTED entry, together; the operation already pending for this account if it is the same. */
     private UUID register(AccountOperation mine, Instant now) {
         Optional<AccountOperation> pending = store.findPendingFor(mine.userId());

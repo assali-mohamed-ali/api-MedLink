@@ -18,15 +18,16 @@ public final class DeletionRequestMapper {
     public static DeletionRequestDto toDto(Optional<DeletionRequest> request, Instant dueAt) {
         return request
                 .map(found -> new DeletionRequestDto(true, found.getStatus().name(), found.getRequestedAt(), dueAt,
-                        found.getDecisionNote()))
-                .orElseGet(() -> new DeletionRequestDto(false, null, null, null, null));
+                        found.getDecisionNote(), found.getDecidedAt(), found.getAccountClosedAt()))
+                .orElseGet(() -> new DeletionRequestDto(false, null, null, null, null, null, null));
     }
 
     public static DeletionReviewDto toDto(DeletionReview review) {
         DeletionRequest request = review.request();
         return new DeletionReviewDto(review.patient().getId(), review.patient().getFirstName(),
                 review.patient().getLastName(), request.getStatus().name(), request.getRequestedAt(), review.dueAt(),
-                review.lastConsultationAt(), review.retainedUntil(), request.getDecisionNote());
+                review.lastConsultationAt(), review.retainedUntil(), request.getDecisionNote(),
+                request.getAccountClosedAt());
     }
 
     public static DeletionStatus toStatus(DecideDeletionRequest.Decision decision) {

@@ -1,5 +1,6 @@
 package com.example.apimedlink.mapper;
 
+import com.example.apimedlink.dto.NotificationPreferencesDto;
 import com.example.apimedlink.dto.PatientProfileDto;
 import com.example.apimedlink.model.Patient;
 
@@ -10,6 +11,10 @@ public final class PatientProfileMapper {
 
     public static PatientProfileDto toDto(Patient patient) {
         return new PatientProfileDto(patient.getPhone(), patient.getAddress());
+    }
+
+    public static NotificationPreferencesDto toPreferences(Patient patient) {
+        return new NotificationPreferencesDto(patient.isNotifyAppointmentReminders(), patient.isNotifyExamResults());
     }
 
     /** A blank value means "clear it"; anything else is trimmed. */

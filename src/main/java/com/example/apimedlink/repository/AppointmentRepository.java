@@ -51,12 +51,14 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
     /**
      * MLink-110: the ids of the appointments still to remind, those in {@code status} that start after {@code from}
      * and no later than {@code until}. Only candidates: each one is locked and checked again before its mail
-     * (MLink-111, review on #120), since it can be cancelled while the job runs.
+     * (MLink-111, review on #120), since it can be cancelled while the job runs. US-15: a patient who turned reminders
+     * off is not a candidate.
      */
     @Query("""
             select a.id from Appointment a
             where a.status = :status and a.reminderSentAt is null
               and a.slot.startsAt > :from and a.slot.startsAt <= :until
+              and exists (select 1 from Patient p where p.id = a.patientId and p.notifyAppointmentReminders = true)
             order by a.slot.startsAt""")
     List<UUID> findRemindersDue(@Param("status") AppointmentStatus status, @Param("from") Instant from,
             @Param("until") Instant until);

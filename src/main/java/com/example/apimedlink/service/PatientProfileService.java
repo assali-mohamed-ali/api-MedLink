@@ -19,6 +19,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class PatientProfileService {
 
     static final String RESOURCE = "PATIENT";
+    static final String RESOURCE_PREFERENCES = "PATIENT_NOTIFICATIONS";
 
     private final PatientRepository patients;
     private final AuditService audit;
@@ -41,6 +42,17 @@ public class PatientProfileService {
         patient.setAddress(address);
         Patient saved = patients.save(patient);
         audit.recordWithin(AuditAction.ACCOUNT_UPDATED, RESOURCE, patientId.toString(), AuditOutcome.SUCCESS);
+        return saved;
+    }
+
+    /** US-15: replaces both notification preferences, audited in the same transaction (no value in the entry). */
+    @Transactional
+    public Patient updatePreferences(UUID patientId, boolean appointmentReminders, boolean examResults) {
+        Patient patient = patients.findById(patientId).orElseThrow(PatientProfileService::notFound);
+        patient.setNotifyAppointmentReminders(appointmentReminders);
+        patient.setNotifyExamResults(examResults);
+        Patient saved = patients.save(patient);
+        audit.recordWithin(AuditAction.ACCOUNT_UPDATED, RESOURCE_PREFERENCES, patientId.toString(), AuditOutcome.SUCCESS);
         return saved;
     }
 

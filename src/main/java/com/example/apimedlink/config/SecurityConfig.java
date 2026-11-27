@@ -101,7 +101,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/practitioner/**")
                         .hasRole(Roles.PRACTITIONER)
                         // US-15: own profile, patients only, decided before the body is read (as the rules above)
-                        .requestMatchers("/api/patients/me")
+                        .requestMatchers("/api/patients/me", "/api/patients/me/notification-preferences")
                         .hasRole(Roles.PATIENT)
                         // The role before Spring reads the request, so a patient never gets a 400 (MLink-31, as #116)
                         .requestMatchers(HttpMethod.GET, "/api/patients/*/record")

@@ -111,18 +111,18 @@ public class ExamResultService {
 
     /** The patient's own results, newest first, opened; the unseen ones are marked new, then seen. Traced after. */
     public List<PatientResult> mine(UUID patientId) {
-        List<PatientResult> found = readOnly.execute(status -> {
-            List<ExamResult> published = results.findByPatientIdOrderByCreatedAtDesc(patientId);
-            Map<UUID, Practitioner> authors = practitioners
-                    .findAllById(published.stream().map(ExamResult::getPractitionerId).distinct().toList())
-                    .stream().collect(Collectors.toMap(Practitioner::getId, Function.identity()));
-            return published.stream().map(result -> {
-                Practitioner author = authors.get(result.getPractitionerId());
-                return open(result, result.getReadAt() == null,
-                        author == null ? null : author.getFirstName(), author == null ? null : author.getLastName());
-            }).toList();
-        });
+        List<PatientResult> found = readOnly.execute(status -> openOwn(patientId));
         transaction.executeWithoutResult(status -> results.markRead(patientId, Instant.now()));
+        audit.record(AuditAction.REPORT_VIEWED, RESOURCE_PATIENT_RESULTS, patientId.toString(), AuditOutcome.SUCCESS);
+        return found;
+    }
+
+    /**
+     * US-16: the patient's own results for their export, newest first, opened. Unlike {@link #mine} it does not mark
+     * them seen: downloading an archive is not reading the results in the space, and the "new" marker stays. Traced.
+     */
+    public List<PatientResult> forExport(UUID patientId) {
+        List<PatientResult> found = readOnly.execute(status -> openOwn(patientId));
         audit.record(AuditAction.REPORT_VIEWED, RESOURCE_PATIENT_RESULTS, patientId.toString(), AuditOutcome.SUCCESS);
         return found;
     }
@@ -136,6 +136,19 @@ public class ExamResultService {
         });
         audit.record(AuditAction.REPORT_VIEWED, RESOURCE_PATIENT_RESULTS, patientId.toString(), AuditOutcome.SUCCESS);
         return found;
+    }
+
+    /** The patient's results, newest first, opened with their authors; the unseen ones are marked new. */
+    private List<PatientResult> openOwn(UUID patientId) {
+        List<ExamResult> published = results.findByPatientIdOrderByCreatedAtDesc(patientId);
+        Map<UUID, Practitioner> authors = practitioners
+                .findAllById(published.stream().map(ExamResult::getPractitionerId).distinct().toList())
+                .stream().collect(Collectors.toMap(Practitioner::getId, Function.identity()));
+        return published.stream().map(result -> {
+            Practitioner author = authors.get(result.getPractitionerId());
+            return open(result, result.getReadAt() == null,
+                    author == null ? null : author.getFirstName(), author == null ? null : author.getLastName());
+        }).toList();
     }
 
     private PatientResult open(ExamResult result, boolean isNew, String firstName, String lastName) {

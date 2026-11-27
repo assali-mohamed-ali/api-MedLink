@@ -44,6 +44,14 @@ public class Patient extends User {
 
     private Instant consentedAt;
 
+    /** US-15: the reminder mail before an appointment (US-12). On unless the patient turns it off. */
+    @Column(nullable = false)
+    private boolean notifyAppointmentReminders = true;
+
+    /** US-15: the "new result in your space" mail (US-25). On unless the patient turns it off. */
+    @Column(nullable = false)
+    private boolean notifyExamResults = true;
+
     /** The profile of a sign-up; id, username and email are set once Keycloak has the account. */
     public Patient(String firstName, String lastName, LocalDate birthDate, String phone, String address) {
         this.firstName = firstName;

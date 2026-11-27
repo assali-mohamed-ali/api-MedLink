@@ -1,6 +1,8 @@
 package com.example.apimedlink.controller;
 
+import com.example.apimedlink.dto.NotificationPreferencesDto;
 import com.example.apimedlink.dto.PatientProfileDto;
+import com.example.apimedlink.dto.UpdateNotificationPreferencesRequest;
 import com.example.apimedlink.dto.UpdatePatientProfileRequest;
 import com.example.apimedlink.mapper.PatientProfileMapper;
 import com.example.apimedlink.security.CurrentUser;
@@ -42,5 +44,18 @@ public class PatientProfileController {
                 currentUser.id(),
                 PatientProfileMapper.clean(request.phone()),
                 PatientProfileMapper.clean(request.address())));
+    }
+
+    @Operation(summary = "The caller's notification preferences (reminders, new results)")
+    @GetMapping("/notification-preferences")
+    public NotificationPreferencesDto preferences() {
+        return PatientProfileMapper.toPreferences(service.get(currentUser.id()));
+    }
+
+    @Operation(summary = "Replace the caller's notification preferences; both values are required")
+    @PutMapping("/notification-preferences")
+    public NotificationPreferencesDto updatePreferences(@Valid @RequestBody UpdateNotificationPreferencesRequest request) {
+        return PatientProfileMapper.toPreferences(service.updatePreferences(currentUser.id(),
+                request.appointmentReminders(), request.examResults()));
     }
 }

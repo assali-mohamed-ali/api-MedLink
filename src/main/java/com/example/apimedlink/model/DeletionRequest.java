@@ -36,6 +36,9 @@ public class DeletionRequest {
     @Column(length = 500)
     private String decisionNote;
 
+    /** When an approved request closed the account (sessions revoked, login disabled). Null otherwise. */
+    private Instant accountClosedAt;
+
     public DeletionRequest(UUID patientId, Instant requestedAt) {
         this.patientId = patientId;
         this.requestedAt = requestedAt;
@@ -47,5 +50,13 @@ public class DeletionRequest {
         this.decidedBy = staffId;
         this.decidedAt = at;
         this.decisionNote = note;
+    }
+
+    /** An approved request closes the account; anonymisation and purge are separate, irreversible steps not done here. */
+    public void closeAccount(Instant at) {
+        if (status != DeletionStatus.APPROVED) {
+            throw new IllegalStateException("Only an approved request closes the account");
+        }
+        this.accountClosedAt = at;
     }
 }

@@ -321,6 +321,56 @@ public class MailService {
         send(to, subject, text.toString(), html.toString());
     }
 
+    /**
+     * US-16: staff approved the patient's deletion request and the account is closed: the patient can no longer log in.
+     * Says what was done and what was not (the record is kept for the legal retention period). No medical content.
+     */
+    public void sendAccountClosedAfterDeletionRequest(String to, String firstName) {
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        List<String> lines = List.of(
+                "Votre demande de suppression de données a été approuvée par le personnel administratif de MedLink.",
+                "Votre compte est clôturé : vous ne pouvez plus vous connecter et vos sessions ouvertes ont été fermées.",
+                "Votre dossier médical et le journal des accès sont conservés pendant la durée légale de conservation, "
+                        + "puis détruits.",
+                "Pour toute question, contactez l'accueil de votre clinique.");
+        StringBuilder text = new StringBuilder(hello).append("\n\n");
+        StringBuilder html = new StringBuilder("<p>").append(HtmlUtils.htmlEscape(hello)).append("</p>");
+        for (String line : lines) {
+            text.append(line).append("\n");
+            html.append("<p>").append(HtmlUtils.htmlEscape(line)).append("</p>");
+        }
+        text.append("\nL'équipe MedLink");
+        html.append("<p>L'équipe MedLink</p>");
+        send(to, "Votre compte MedLink est clôturé", text.toString(), html.toString());
+    }
+
+    /**
+     * US-25: a new examination result is in the patient's space. Never the title, type, content or author: only that
+     * something new is waiting, behind the login. One Message-ID per result, so a retried notice is seen once.
+     */
+    public void sendNewExamResult(String to, String firstName, UUID resultId) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl).path("/patient/resultats").build().toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        String text = hello + "\n\n"
+                + "Un nouveau résultat d'examen a été ajouté à votre dossier MedLink.\n"
+                + "Pour le consulter, connectez-vous à votre espace :\n\n"
+                + link + "\n\n"
+                + "Pour ne plus recevoir ces messages, modifiez vos préférences de notification dans votre profil.\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Un nouveau résultat d'examen a été ajouté à votre dossier MedLink.</p>"
+                + "<p><a href=\"" + HtmlUtils.htmlEscape(link) + "\">Voir mes résultats</a></p>"
+                + "<p>Pour ne plus recevoir ces messages, modifiez vos préférences de notification dans votre "
+                + "profil.</p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Nouveau résultat dans votre dossier MedLink", text, html, examResultMessageId(resultId));
+    }
+
+    /** The Message-ID of a result's notice: one per result, whatever the try. */
+    public static String examResultMessageId(UUID resultId) {
+        return "<exam-result-" + resultId + "@medlink.local>";
+    }
+
     /** The Message-ID of an appointment's reminder: one per appointment, whatever the try. */
     public static String reminderMessageId(UUID appointmentId) {
         return "<appointment-reminder-" + appointmentId + "@medlink.local>";
