@@ -9,6 +9,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import jakarta.persistence.Transient;
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.temporal.ChronoUnit;
 import java.util.UUID;
 import lombok.AccessLevel;
@@ -38,7 +39,22 @@ public class ExamResult implements Persistable<UUID> {
     private String titleEncrypted;
 
     @Column(nullable = false, updatable = false, columnDefinition = "text")
+    private String typeEncrypted;
+
+    @Column(nullable = false, updatable = false, columnDefinition = "text")
     private String contentEncrypted;
+
+    /** The day the examination took place (not the publication). */
+    @Column(nullable = false, updatable = false)
+    private LocalDate examDate;
+
+    /** One of the patient's documents, or null. */
+    @Column(updatable = false)
+    private UUID documentId;
+
+    /** When the patient first saw it; set by a native update only (the entity is immutable). Null: new. */
+    @Column(insertable = false, updatable = false)
+    private Instant readAt;
 
     @Column(nullable = false, updatable = false)
     private Instant createdAt;
@@ -47,12 +63,16 @@ public class ExamResult implements Persistable<UUID> {
     @Getter(AccessLevel.NONE)
     private boolean fresh = true;
 
-    public ExamResult(UUID id, UUID patientId, UUID practitionerId, String titleEncrypted, String contentEncrypted) {
+    public ExamResult(UUID id, UUID patientId, UUID practitionerId, String titleEncrypted, String typeEncrypted,
+            String contentEncrypted, LocalDate examDate, UUID documentId) {
         this.id = id;
         this.patientId = patientId;
         this.practitionerId = practitionerId;
         this.titleEncrypted = titleEncrypted;
+        this.typeEncrypted = typeEncrypted;
         this.contentEncrypted = contentEncrypted;
+        this.examDate = examDate;
+        this.documentId = documentId;
     }
 
     @Override

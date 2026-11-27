@@ -1,8 +1,12 @@
 package com.example.apimedlink.service;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.UUID;
 
-/** US-13: an examination result as its patient reads it: opened, with who published it. */
-public record PatientResult(UUID id, Instant createdAt, String title, String content, String practitionerFirstName,
-        String practitionerLastName) {}
+/**
+ * US-13 / US-25: an examination result opened for its reader. {@code isNew}: the patient had not seen it before (false
+ * for the practitioner's view). Practitioner names are null in the practitioner's own view.
+ */
+public record PatientResult(UUID id, Instant publishedAt, LocalDate examDate, String title, String examType,
+        String content, UUID documentId, boolean isNew, String practitionerFirstName, String practitionerLastName) {}
