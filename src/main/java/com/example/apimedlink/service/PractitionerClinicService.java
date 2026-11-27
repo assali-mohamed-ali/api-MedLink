@@ -8,6 +8,8 @@ import com.example.apimedlink.model.Practitioner;
 import com.example.apimedlink.repository.ClinicRepository;
 import com.example.apimedlink.repository.PractitionerRepository;
 import com.example.apimedlink.repository.SlotRepository;
+import jakarta.persistence.EntityManager;
+import java.time.Instant;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
@@ -30,13 +32,15 @@ public class PractitionerClinicService {
     private final ClinicRepository clinics;
     private final SlotRepository slots;
     private final AuditService audit;
+    private final EntityManager entities;
 
     public PractitionerClinicService(PractitionerRepository practitioners, ClinicRepository clinics,
-            SlotRepository slots, AuditService audit) {
+            SlotRepository slots, AuditService audit, EntityManager entities) {
         this.practitioners = practitioners;
         this.clinics = clinics;
         this.slots = slots;
         this.audit = audit;
+        this.entities = entities;
     }
 
     /** Replaces the practitioner's clinics by {@code clinicIds}; returns the practitioner with the new list. */
@@ -49,16 +53,30 @@ public class PractitionerClinicService {
         if (found.size() != wanted.size()) {
             throw new ApiException(HttpStatus.NOT_FOUND, "CLINIC_NOT_FOUND", "Une des cliniques n'existe pas.");
         }
-        for (Clinic current : Set.copyOf(practitioner.getClinics())) {
-            if (!wanted.contains(current.getId()) && slots.holdsSlotsIn(practitionerId, current.getId())) {
+        Instant now = Instant.now();
+        Set<Clinic> removed = new HashSet<>(practitioner.getClinics());
+        removed.removeIf(clinic -> wanted.contains(clinic.getId()));
+        for (Clinic current : removed) {
+            if (slots.hasFutureOpenSlots(practitionerId, current.getId(), now)) {
                 throw new ApiException(HttpStatus.CONFLICT, "CLINIC_HAS_SLOTS",
-                        "Ce praticien a encore des créneaux dans la clinique " + current.getName()
-                                + " : elle ne peut pas lui être retirée.");
+                        "Ce praticien a encore des créneaux ouverts ou des rendez-vous à réaffecter dans la clinique "
+                                + current.getName() + ".");
             }
         }
-        practitioner.getClinics().clear();
-        practitioner.getClinics().addAll(found);
-        Practitioner saved = practitioners.saveAndFlush(practitioner);
+        // Do not delete the FK target of an historical slot. Keep it inactive and hide it from new schedules.
+        for (Clinic current : removed) {
+            if (slots.holdsSlotsIn(practitionerId, current.getId())) {
+                practitioners.deactivateClinic(practitionerId, current.getId());
+            } else {
+                practitioners.removeUnusedClinic(practitionerId, current.getId());
+            }
+        }
+        for (UUID clinicId : wanted) {
+            practitioners.activateClinic(practitionerId, clinicId);
+        }
+        entities.clear();
+        Practitioner saved = practitioners.findById(practitionerId).orElseThrow();
+        saved.getClinics().size();
         audit.recordWithin(AuditAction.ACCOUNT_UPDATED, RESOURCE, practitionerId.toString(), AuditOutcome.SUCCESS);
         // open-in-view is off and the mapper runs after the transaction: load what it reads
         saved.getSpecialty().getName();

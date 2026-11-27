@@ -6,6 +6,8 @@ import jakarta.persistence.LockModeType;
 import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Lock;
 import org.springframework.data.jpa.repository.Query;
@@ -22,6 +24,12 @@ public interface ReassignmentRepository extends JpaRepository<Reassignment, UUID
     boolean existsByAppointmentIdAndStatus(UUID appointmentId, ReassignmentStatus status);
 
     List<Reassignment> findByStatusOrderByCreatedAtAsc(ReassignmentStatus status);
+
+    @Query("select r from Reassignment r, Appointment a where a.id = r.appointmentId and a.patientId = :patientId")
+    Page<Reassignment> forPatient(@Param("patientId") UUID patientId, Pageable page);
+
+    @Query("select r from Reassignment r, Slot s where s.id = r.targetSlotId and s.practitioner.id = :practitionerId")
+    Page<Reassignment> forPractitioner(@Param("practitionerId") UUID practitionerId, Pageable page);
 
     /** The open proposals about the patient's appointments, oldest first. */
     @Query("""

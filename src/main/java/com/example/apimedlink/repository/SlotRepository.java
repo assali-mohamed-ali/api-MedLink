@@ -33,6 +33,27 @@ public interface SlotRepository extends JpaRepository<Slot, UUID>, JpaSpecificat
     @Query("select count(s) > 0 from Slot s where s.practitioner.id = :practitionerId and s.clinic.id = :clinicId")
     boolean holdsSlotsIn(@Param("practitionerId") UUID practitionerId, @Param("clinicId") UUID clinicId);
 
+    @Query("select count(s) > 0 from Slot s where s.practitioner.id = :practitionerId "
+            + "and s.clinic.id = :clinicId and s.startsAt > :now "
+            + "and s.status <> com.example.apimedlink.model.SlotStatus.CLOSED")
+    boolean hasFutureOpenSlots(@Param("practitionerId") UUID practitionerId, @Param("clinicId") UUID clinicId,
+            @Param("now") Instant now);
+
+    @EntityGraph(attributePaths = {"practitioner", "practitioner.specialty", "clinic"})
+    @Query("""
+            select s from Slot s where s.clinic.id = :clinicId and s.practitioner.id <> :sourcePractitioner
+              and s.practitioner.bookingEnabled = true and s.startsAt > :now
+              and s.status = com.example.apimedlink.model.SlotStatus.FREE
+              and not exists (select 1 from Absence x where x.practitionerId = s.practitioner.id
+                              and x.startsAt < s.endsAt and x.endsAt > s.startsAt)
+              and not exists (select 1 from Appointment a where a.patientId = :patientId and a.id <> :sourceAppointment
+                              and a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED
+                              and a.slot.startsAt < s.endsAt and a.slot.endsAt > s.startsAt)
+            """)
+    Page<Slot> reassignmentTargets(@Param("clinicId") UUID clinicId, @Param("sourcePractitioner") UUID sourcePractitioner,
+            @Param("patientId") UUID patientId, @Param("sourceAppointment") UUID sourceAppointment,
+            @Param("now") Instant now, Pageable page);
+
     /** A practitioner's slots starting in {@code [from, to)}, whatever their status or clinic, earliest first. */
     @EntityGraph(attributePaths = {"clinic"})
     @Query("""

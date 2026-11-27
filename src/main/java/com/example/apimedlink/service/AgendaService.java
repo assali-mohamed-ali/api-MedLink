@@ -204,6 +204,9 @@ public class AgendaService {
                     "Ce créneau est déjà commencé ou passé : il ne peut plus être rouvert.");
         }
         requireNoAbsence(practitionerId, slot.getStartsAt(), slot.getEndsAt());
+        if (!practitioners.clinicActive(practitionerId, slot.getClinic().getId())) {
+            throw clinicNotTheirs();
+        }
         if (slots.reopenIfClosed(slot.getId(), practitionerId, now) == 1) {
             audit.recordWithin(AuditAction.SLOT_OPENED, RESOURCE_SLOT, slot.getId().toString(), AuditOutcome.SUCCESS);
             return new SlotChange(findOwn(practitionerId, slot.getId()), Change.OPENED);

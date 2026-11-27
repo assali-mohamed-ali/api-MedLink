@@ -40,6 +40,18 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
     @Query("select a from Appointment a where a.id = :id")
     Optional<Appointment> findForChangeById(@Param("id") UUID id);
 
+    @EntityGraph(attributePaths = {"slot", "slot.clinic", "slot.practitioner"})
+    @Query("select a from Appointment a where a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED "
+            + "and a.slot.practitioner.id = :practitionerId and a.slot.clinic.id = :clinicId and a.slot.startsAt > :now")
+    Page<Appointment> futureInClinic(@Param("practitionerId") UUID practitionerId, @Param("clinicId") UUID clinicId,
+            @Param("now") Instant now, Pageable page);
+
+    @Query("select count(a) > 0 from Appointment a where a.patientId = :patientId and a.id <> :excluded "
+            + "and a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED "
+            + "and a.slot.startsAt < :end and a.slot.endsAt > :start")
+    boolean overlapsOther(@Param("patientId") UUID patientId, @Param("excluded") UUID excluded,
+            @Param("start") Instant start, @Param("end") Instant end);
+
     /** MLink-167: whether the patient holds an appointment in {@code status} that overlaps [start, end). */
     @Query("""
             select count(a) > 0 from Appointment a
