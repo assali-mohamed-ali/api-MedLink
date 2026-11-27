@@ -61,6 +61,9 @@ class RuntimeRoleGrantsTest {
 
     @ParameterizedTest
     @ValueSource(strings = {
+            "UPDATE monthly_stats_releases SET csv = NULL",
+            "DELETE FROM monthly_stats_releases",
+            "TRUNCATE monthly_stats_releases",
             "UPDATE audit_entries SET outcome = 'REWRITTEN'",
             "DELETE FROM audit_entries",
             "TRUNCATE audit_entries",

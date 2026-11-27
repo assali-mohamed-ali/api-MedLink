@@ -1,5 +1,19 @@
 # Décisions produit pour les stories US-03 à US-32
 
+## Mise à jour du 28 novembre 2026 — arbitrage du code owner
+
+Cette section prévaut sur les décisions antérieures en conflit. Le code owner a autorisé les arbitrages techniques restants.
+
+- US-04 : ConsentPolicy version 2026-11-v2, sans promesse non vérifiée d'hébergement ou de destruction. La mise en production nécessite encore les formalités applicables et la validation juridique du texte exact. APP_CONSENT_AVAILABLE reste fermé par défaut.
+- US-05 : réconciliation périodique Keycloak et vérification directe avant réservation/réaffectation en staging et production. Les résultats de recherche peuvent refléter l'état du dernier cycle.
+- US-15 : confirmation du mot de passe et de la nouvelle boîte, code unique à durée limitée, avertissement à l'ancienne adresse, révocation des sessions, reprise durable (V35).
+- US-16 : minimum 20 ans après la dernière activité médicale connue (consultation, compte-rendu, résultat ou document), avec protection des mineurs. La clôture est distincte de la destruction. Le script scripts/retention-readiness.sql est un inventaire en lecture seule, jamais une autorisation de purge. Vérifier l'état réel Keycloak, les obligations et litiges, les décès, les sauvegardes et objets, puis organiser la destruction supervisée et documentée conformément aux formalités applicables, notamment l'article 45 de la loi 2004-63. Aucune purge automatique ni affaiblissement des journaux immuables.
+- US-24 : finalisation après la fin du créneau, pas son début ; cela ne prouve pas à lui seul que le patient s'est présenté.
+- US-32 : mois civil terminé, un seul indicateur pour chaque mois, résultat (y compris suppression) figé globalement (V36). Seuil de groupe maintenu ; limitation des attaques par différence, pas de garantie formelle de confidentialité différentielle.
+- Recette : tests fonctionnels et composants ajoutés, test de migration V23 vers le dernier schéma avec PostgreSQL réel, tests de privilèges du rôle applicatif. CI en attente ; Newman et recette navigateur sur la pile intégrée restent à exécuter avant de déclarer la couverture validée.
+
+## Historique du 27 novembre (supplanté sur les points ci-dessus)
+
 Date : 27 novembre 2026. Source : réponses données par l'équipe aux six questions ouvertes de
 `docs/backlog-coverage.md`. Les points marqués **(proposition)** sont des textes ou des durées rédigés
 par l'assistant IA pour avancer : ils doivent être validés par Md. Assali avant toute mise en production.
