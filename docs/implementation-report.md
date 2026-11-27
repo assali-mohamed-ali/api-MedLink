@@ -21,7 +21,7 @@ réussite n'est faite ici. Le frontend (`medlink-dashboard`) n'a pas pu être mo
 | US-04 consentement | `feat/consent` | version + date du consentement, `GET /api/auth/consent` ; obligatoire en staging et production | V24 |
 | US-03 mot de passe oublié | `feat/forgot-password` | `POST /api/auth/password/forgot` et `/reset` | V25 |
 | US-16 export | `feat/patient-export` | `GET /api/patients/me/export` (JSON) | aucune |
-| US-16 demande de suppression | `feat/patient-deletion-request` | `POST`/`GET`/`DELETE /api/patients/me/deletion-request` ; **ne supprime rien** | V26 |
+| US-16 demande de suppression | `feat/patient-deletion-request` | côté patient : `POST`/`GET`/`DELETE /api/patients/me/deletion-request` ; côté **personnel administratif** : `GET /api/admin/deletion-requests` et `POST /api/admin/deletion-requests/{patientId}/decision` (approbation bloquée tant que la conservation court, refus motivé) ; **ne supprime rien** | V26 |
 | Décisions produit | `docs/product-decisions` | les six décisions de l'équipe | — |
 | Audit initial | `docs/backlog-coverage` | matrice de couverture US-01 à US-32 | — |
 
@@ -37,9 +37,8 @@ US-05 (liste des praticiens) : déjà couverte (filtres de recherche de créneau
 
 ## Non fait
 
-- **US-16 suppression définitive** : volontairement non implémentée. La durée de conservation des données médicales reste à
-  confirmer par Md. Assali, et une purge touche aussi les documents chiffrés du stockage objet. Seule la demande est
-  enregistrée (rien n'est supprimé).
+- **US-16 purge définitive** : volontairement non implémentée. Le personnel peut approuver une demande quand aucune conservation
+  ne s'applique, mais rien n'est supprimé : une purge touche aussi les documents chiffrés du stockage objet.
 - **US-29 réaffectation** des rendez-vous futurs vers un autre praticien avec double confirmation (décidée, non codée).
 - **US-21** absences avec report à la semaine suivante ou annulation par le praticien (décidée, non codée).
 - **US-13 / US-25** résultats d'examens, **US-30** réservation par le personnel : non codées.
@@ -51,10 +50,14 @@ US-05 (liste des praticiens) : déjà couverte (filtres de recherche de créneau
 
 ## Points à valider par Md. Assali
 
-- Le texte de consentement (version `2026-11-v1`) et « hébergées en Tunisie ».
-- La durée de conservation des données médicales et le délai de réflexion de 30 jours.
-- Le fait que la demande de suppression laisse le compte actif (pour pouvoir l'annuler), contrairement à l'idée initiale de
-  désactiver tout de suite.
+- Le texte de consentement (version `2026-11-v1`), maintenant aligné sur la loi organique 2004-63 et le guide de l'INPDP : à
+  faire relire par un juriste (la loi n'a pas pu être lue en entier).
+- La conservation de 20 ans après la dernière consultation (jusqu'à 28 ans pour un mineur) : recommandation de l'INPDP, pas un
+  texte de loi lu directement.
+- La demande de suppression laisse le compte actif (pour pouvoir l'annuler) ; c'est le personnel qui décide.
+- La déclaration et l'autorisation préalable de l'INPDP pour les données de santé, et l'hébergement réel en Tunisie.
+
+Sources et détails : `docs/product-decisions.md`.
 
 ## Déclaration IA
 
