@@ -120,8 +120,16 @@ public class AdminUserService {
                 specialties.findAll().stream().sorted(Comparator.comparing(Specialty::getName, french)).toList());
     }
 
-    public KeycloakUserPage list(String search, int page, int size) {
-        return keycloak.searchUsers(search, page, size);
+    public record ListedAccounts(KeycloakUserPage accounts, Set<UUID> patientProfileIds) {}
+
+    public ListedAccounts list(String search, int page, int size) {
+        KeycloakUserPage accounts = keycloak.searchUsers(search, page, size);
+        String patientGroup = RoleGroups.pathOf(Roles.PATIENT);
+        var candidates = accounts.items().stream()
+                .filter(entry -> entry.groupPaths().contains(patientGroup))
+                .map(entry -> entry.user().id()).toList();
+        Set<UUID> profileIds = candidates.isEmpty() ? Set.of() : Set.copyOf(patients.findProfileIds(candidates));
+        return new ListedAccounts(accounts, profileIds);
     }
 
     /**
