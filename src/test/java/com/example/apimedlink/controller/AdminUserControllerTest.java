@@ -17,6 +17,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.example.apimedlink.TestcontainersConfiguration;
 import com.example.apimedlink.exception.EmailTakenException;
+import com.example.apimedlink.model.Patient;
+import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.service.KeycloakAdminService;
 import com.example.apimedlink.service.KeycloakUser;
@@ -24,6 +26,7 @@ import com.example.apimedlink.service.KeycloakUserPage;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
 import jakarta.persistence.EntityNotFoundException;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,6 +50,9 @@ class AdminUserControllerTest {
 
     @Autowired
     MockMvc mvc;
+
+    @Autowired
+    PatientRepository patients;
 
     @MockitoBean
     KeycloakAdminService keycloak;
@@ -95,6 +101,27 @@ class AdminUserControllerTest {
                 .andExpect(jsonPath("$.items[0].enabled").value(true))
                 .andExpect(jsonPath("$.items[0].emailVerified").value(true))
                 .andExpect(jsonPath("$.items[0].ambiguousRole").value(false));
+    }
+
+    @Test
+    void listDistinguishesRegisteredPatientsFromIdentityOnlyAccounts() throws Exception {
+        Patient registered = new Patient("Patient", "Synthétique", LocalDate.of(1990, 1, 1), null, null);
+        registered.setId(keycloakId);
+        registered.setEmail(email);
+        registered.setUsername(email);
+        patients.saveAndFlush(registered);
+
+        KeycloakUser withProfile = new KeycloakUser(keycloakId, email, "Patient", "Synthétique", true, true);
+        KeycloakUser identityOnly = new KeycloakUser(UUID.randomUUID(), "other-" + email, "Patient", "Dev", true, true);
+        when(keycloak.searchUsers("patient", 0, 20)).thenReturn(new KeycloakUserPage(List.of(
+                new KeycloakUserPage.Entry(withProfile, "/patients"),
+                new KeycloakUserPage.Entry(identityOnly, "/patients")), 2));
+
+        asStaff(get("/api/admin/users").param("search", "patient"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.total").value(2))
+                .andExpect(jsonPath("$.items[0].hasPatientProfile").value(true))
+                .andExpect(jsonPath("$.items[1].hasPatientProfile").value(false));
     }
 
     @Test

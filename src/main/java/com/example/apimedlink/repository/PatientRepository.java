@@ -1,6 +1,8 @@
 package com.example.apimedlink.repository;
 
 import com.example.apimedlink.model.Patient;
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.domain.Page;
@@ -11,6 +13,9 @@ import org.springframework.data.repository.query.Param;
 
 /** The patient of a user is {@code findById(userId)}: both share the Keycloak id. */
 public interface PatientRepository extends JpaRepository<Patient, UUID> {
+
+    @Query("select p.id from Patient p where p.id in :ids")
+    List<UUID> findProfileIds(@Param("ids") Collection<UUID> ids);
 
     /**
      * MLink-167: the patient's row locked until the transaction ends, empty when the user has no patient profile.
