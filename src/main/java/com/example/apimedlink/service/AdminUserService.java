@@ -6,6 +6,7 @@ import com.example.apimedlink.model.AuditAction;
 import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Clinic;
 import com.example.apimedlink.model.EmailToken.Purpose;
+import com.example.apimedlink.model.Patient;
 import com.example.apimedlink.model.Practitioner;
 import com.example.apimedlink.model.Specialty;
 import com.example.apimedlink.model.User;
@@ -83,13 +84,14 @@ public class AdminUserService {
     private final AuditService audit;
     private final AccountOperationRunner operations;
     private final TransactionTemplate tx;
+    private final StaffAccessGuard staffAccess;
 
     public AdminUserService(KeycloakAdminService keycloak, UserRepository users, PatientRepository patients,
                             PractitionerRepository practitioners, SpecialtyRepository specialties,
                             ClinicRepository clinics, PractitionerProfiles profiles,
                             SessionRevocationStore revocations, EmailTokenService tokens,
                             MailService mail, AuditService audit, AccountOperationRunner operations,
-                            TransactionTemplate tx) {
+                            TransactionTemplate tx, StaffAccessGuard staffAccess) {
         this.keycloak = keycloak;
         this.users = users;
         this.patients = patients;
@@ -103,6 +105,7 @@ public class AdminUserService {
         this.audit = audit;
         this.operations = operations;
         this.tx = tx;
+        this.staffAccess = staffAccess;
     }
 
     /**
@@ -218,8 +221,10 @@ public class AdminUserService {
             }
             Set<UUID> ids = new HashSet<>();
             profile.clinics().forEach(clinic -> ids.add(clinic.getId()));
-            profileChange = () -> profiles.create(id, account.firstName(), account.lastName(),
-                    profile.specialty().getId(), ids);
+            profileChange = () -> {
+                profiles.create(id, account.firstName(), account.lastName(), profile.specialty().getId(), ids);
+                practitioners.setBookingEnabled(id, account.enabled());
+            };
             demotion = false;
         } else if (!Roles.PRACTITIONER.equals(role) && hasProfile) {
             if (profiles.hasSlots(id)) {
@@ -275,9 +280,17 @@ public class AdminUserService {
      */
     public void execute(AccountOperation op) {
         switch (op.action()) {
-            case ROLE_CHANGED -> applyRoleChange(op.userId(),
-                    checkRoleChange(op.userId(), op.targetRole(), op.specialtyId(), op.clinicIds()));
-            case ACCOUNT_ENABLED, ACCOUNT_DISABLED -> applyEnabled(op.userId(), Boolean.TRUE.equals(op.enabled()));
+            case ROLE_CHANGED -> {
+                Runnable change = () -> applyRoleChange(op.userId(),
+                        checkRoleChange(op.userId(), op.targetRole(), op.specialtyId(), op.clinicIds()));
+                if (Roles.PRACTITIONER.equals(op.targetRole())) {
+                    staffAccess.protect(op.userId(), change);
+                } else {
+                    change.run();
+                }
+            }
+            case ACCOUNT_ENABLED -> applyEnabled(op.userId(), true);
+            case ACCOUNT_DISABLED -> staffAccess.protect(op.userId(), () -> applyEnabled(op.userId(), false));
             default -> throw new IllegalArgumentException("Not an account operation: " + op.action());
         }
     }
@@ -285,10 +298,54 @@ public class AdminUserService {
     private void applyEnabled(UUID id, boolean enabled) {
         if (!enabled) {
             revocations.revoke(id);
+            // Fail closed for scheduling while the durable operation waits for Keycloak.
+            tx.executeWithoutResult(status -> practitioners.setBookingEnabled(id, false));
         }
         keycloak.setEnabled(id, enabled);
         if (!enabled) {
             keycloak.endSessions(id);
+        } else {
+            // Never offer availability before Keycloak confirms the account is enabled.
+            tx.executeWithoutResult(status -> practitioners.setBookingEnabled(id, true));
+        }
+    }
+
+    /**
+     * MLink-20: updates Keycloak and the name fields of any local patient or practitioner profile.
+     *
+     * @throws EntityNotFoundException when the account is unknown (404)
+     * @throws ApiException 400 VALIDATION_FAILED for blank or overlong names
+     */
+    public void updateNames(UUID id, String firstName, String lastName) {
+        String cleanFirst = firstName == null ? null : firstName.trim();
+        String cleanLast = lastName == null ? null : lastName.trim();
+        if (cleanFirst == null || cleanFirst.isEmpty() || cleanFirst.length() > 100) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED",
+                    "Certains champs sont invalides.", Map.of("firstName", "Le prénom est obligatoire (100 caractères au maximum)."));
+        }
+        if (cleanLast == null || cleanLast.isEmpty() || cleanLast.length() > 100) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "VALIDATION_FAILED",
+                    "Certains champs sont invalides.", Map.of("lastName", "Le nom est obligatoire (100 caractères au maximum)."));
+        }
+        String resourceId = id.toString();
+        audit.record(AuditAction.ACCOUNT_UPDATED, RESOURCE, resourceId, AuditOutcome.ATTEMPTED);
+        try {
+            tx.executeWithoutResult(status -> {
+                users.lockLocalAccount(id).flatMap(users::findById).ifPresent(user -> {
+                    if (user instanceof Patient patient) {
+                        patient.setFirstName(cleanFirst);
+                        patient.setLastName(cleanLast);
+                    } else if (user instanceof Practitioner practitioner) {
+                        practitioner.setFirstName(cleanFirst);
+                        practitioner.setLastName(cleanLast);
+                    }
+                });
+                audit.recordInCurrentTransaction(AuditAction.ACCOUNT_UPDATED, RESOURCE, resourceId, AuditOutcome.SUCCESS);
+                keycloak.updateUser(id, cleanFirst, cleanLast);
+            });
+        } catch (RuntimeException failure) {
+            recordFailure(AuditAction.ACCOUNT_UPDATED, resourceId, failure);
+            throw failure;
         }
     }
 

@@ -6,7 +6,6 @@ import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 
 import com.example.apimedlink.TestcontainersConfiguration;
 import com.example.apimedlink.exception.ApiException;
@@ -67,7 +66,9 @@ class AdminUserStatusServiceTest {
                 .hasMessageContaining("database down");
 
         // Fail closed: nothing was disabled and no session was ended, so staff send the request again
-        verifyNoInteractions(keycloak);
+        verify(keycloak).isLastActiveStaff(id); // read-only eligibility check
+        verify(keycloak, never()).setEnabled(id, false);
+        verify(keycloak, never()).endSessions(id);
     }
 
     @Test

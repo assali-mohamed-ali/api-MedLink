@@ -43,6 +43,13 @@ keycloak:
     client-secret: ${KEYCLOAK_ADMIN_CLIENT_SECRET}
 
 app:
+  practitioner-identity:
+    enabled: true
+  consent:
+    required: true
+    # US-04: sign-ups stay closed (503 CONSENT_UNAVAILABLE) until the code owner and a lawyer approve the exact text
+    # and version of ConsentPolicy; then set APP_CONSENT_AVAILABLE=true in the production environment only.
+    available: ${APP_CONSENT_AVAILABLE:false}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:https://medlink.example.com}
   documents:

@@ -4,6 +4,7 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.PrimaryKeyJoinColumn;
 import jakarta.persistence.Table;
+import java.time.Instant;
 import java.time.LocalDate;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
@@ -36,6 +37,24 @@ public class Patient extends User {
 
     @Column(length = 255)
     private String address;
+
+    /** US-04: the version of the consent text the patient accepted at sign-up, and when. Null when none was given. */
+    @Column(length = 30)
+    private String consentVersion;
+
+    private Instant consentedAt;
+
+    /** US-22: the record number (V31), given by the database at insert; shown by {@link RecordNumbers#label}. */
+    @Column(insertable = false, updatable = false)
+    private Long recordNumber;
+
+    /** US-15: the reminder mail before an appointment (US-12). On unless the patient turns it off. */
+    @Column(nullable = false)
+    private boolean notifyAppointmentReminders = true;
+
+    /** US-15: the "new result in your space" mail (US-25). On unless the patient turns it off. */
+    @Column(nullable = false)
+    private boolean notifyExamResults = true;
 
     /** The profile of a sign-up; id, username and email are set once Keycloak has the account. */
     public Patient(String firstName, String lastName, LocalDate birthDate, String phone, String address) {

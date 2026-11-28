@@ -5,6 +5,7 @@ import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Patient;
 import com.example.apimedlink.repository.AppointmentRepository;
 import com.example.apimedlink.repository.PatientRepository;
+import java.time.Instant;
 import java.util.UUID;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
@@ -42,11 +43,13 @@ public class PatientRecordService {
      */
     public PatientRecord read(UUID practitionerId, UUID patientId) {
         PatientRecord record = readOnly.execute(status -> {
-            if (!appointments.existsByPractitionerAndPatient(practitionerId, patientId)) {
+            // US-22: any link counts (appointment, report or document), not only a BOOKED appointment
+            if (!patients.isLinkedTo(patientId, practitionerId).orElse(false)) {
                 throw notAttached();
             }
             Patient patient = patients.findById(patientId).orElseThrow(PatientRecordService::notAttached);
-            return new PatientRecord(patient);
+            return new PatientRecord(patient,
+                    appointments.existsCompletedByPractitionerAndPatient(practitionerId, patientId, Instant.now()));
         });
         // Written before the record leaves: a read that cannot be traced is not answered
         audit.record(AuditAction.RECORD_VIEWED, RESOURCE, patientId.toString(), AuditOutcome.SUCCESS);

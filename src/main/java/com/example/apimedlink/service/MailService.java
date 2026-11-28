@@ -6,6 +6,7 @@ import java.time.Instant;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Locale;
 import java.util.UUID;
 import org.springframework.beans.factory.annotation.Value;
@@ -59,6 +60,29 @@ public class MailService {
                 + "Si vous n'avez pas créé de compte MedLink, ignorez ce message.</p>"
                 + "<p>L'équipe MedLink</p>";
         send(to, "Confirmez votre adresse e-mail MedLink", text, html);
+    }
+
+    /** US-03: the link to choose a new password. Throws like {@link #sendEmailVerification}. */
+    public void sendPasswordReset(String to, String firstName, String token) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl)
+                .path("/reinitialiser-mot-de-passe")
+                .queryParam("token", token)
+                .build()
+                .toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        String text = hello + "\n\n"
+                + "Vous avez demandé à réinitialiser votre mot de passe MedLink. Ouvrez ce lien pour en choisir un nouveau :\n\n"
+                + link + "\n\n"
+                + "Ce lien est valable 1 heure et ne peut servir qu'une fois.\n"
+                + "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe ne change pas.\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Vous avez demandé à réinitialiser votre mot de passe MedLink.</p>"
+                + "<p><a href=\"" + HtmlUtils.htmlEscape(link) + "\">Choisir un nouveau mot de passe</a></p>"
+                + "<p>Ce lien est valable 1 heure et ne peut servir qu'une fois.<br>"
+                + "Si vous n'êtes pas à l'origine de cette demande, ignorez ce message : votre mot de passe ne change pas.</p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Réinitialisation de votre mot de passe MedLink", text, html);
     }
 
     /**
@@ -223,9 +247,144 @@ public class MailService {
         send(to, "Rappel de votre rendez-vous MedLink", text, html, reminderMessageId(appointmentId));
     }
 
+    /**
+     * US-08: the confirmation of a booking or of a move, sent to the patient once it is committed. Same content as the
+     * reminder; the Message-ID is the appointment's (one confirmation per appointment, the same at every try).
+     */
+    public void sendAppointmentConfirmation(String to, String firstName, String clinic, String practitioner,
+            Instant startsAt, UUID appointmentId) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl).path("/patient/rendez-vous").build().toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        ZonedDateTime local = startsAt.atZone(CLINICS_ZONE);
+        String day = local.format(DAY);
+        String time = local.format(TIME);
+        String text = hello + "\n\n"
+                + "Votre rendez-vous est confirmé :\n\n"
+                + "Date : " + day + "\n"
+                + "Heure : " + time + " (heure de Tunisie)\n"
+                + "Praticien : " + practitioner + "\n"
+                + "Clinique : " + clinic + "\n\n"
+                + "Vous pouvez l'annuler ou le reporter depuis votre espace :\n\n"
+                + link + "\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Votre rendez-vous est confirmé :</p>"
+                + "<p>Date : <strong>" + HtmlUtils.htmlEscape(day) + "</strong><br>"
+                + "Heure : <strong>" + HtmlUtils.htmlEscape(time) + "</strong> (heure de Tunisie)<br>"
+                + "Praticien : " + HtmlUtils.htmlEscape(practitioner) + "<br>"
+                + "Clinique : " + HtmlUtils.htmlEscape(clinic) + "</p>"
+                + "<p>Vous pouvez l'annuler ou le reporter depuis votre espace :</p>"
+                + "<p><a href=\"" + HtmlUtils.htmlEscape(link) + "\">Voir mes rendez-vous</a></p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Confirmation de votre rendez-vous MedLink", text, html,
+                "<appointment-confirmation-" + appointmentId + "@medlink.local>");
+    }
+
+    /** US-21: the practitioner is absent and cancelled the appointment. Throws like {@link #sendEmailVerification}. */
+    public void sendAppointmentCancelledByPractitioner(String to, String firstName, String practitioner, String clinic,
+            Instant startsAt) {
+        ZonedDateTime local = startsAt.atZone(CLINICS_ZONE);
+        sendNotice(to, firstName, "Votre rendez-vous MedLink est annulé", List.of(
+                "Votre praticien est absent : votre rendez-vous est annulé.",
+                "Date : " + local.format(DAY) + " à " + local.format(TIME) + " (heure de Tunisie)",
+                "Praticien : " + practitioner,
+                "Clinique : " + clinic,
+                "Vous pouvez réserver un autre créneau depuis votre espace."));
+    }
+
+    /** US-21: the practitioner is absent and moved the appointment to the same time next week. */
+    public void sendAppointmentPostponedByPractitioner(String to, String firstName, String practitioner, String clinic,
+            Instant oldStart, Instant newStart) {
+        ZonedDateTime from = oldStart.atZone(CLINICS_ZONE);
+        ZonedDateTime to2 = newStart.atZone(CLINICS_ZONE);
+        sendNotice(to, firstName, "Votre rendez-vous MedLink est reporté", List.of(
+                "Votre praticien est absent : votre rendez-vous est reporté à la semaine suivante.",
+                "Ancienne date : " + from.format(DAY) + " à " + from.format(TIME) + " (heure de Tunisie)",
+                "Nouvelle date : " + to2.format(DAY) + " à " + to2.format(TIME) + " (heure de Tunisie)",
+                "Praticien : " + practitioner,
+                "Clinique : " + clinic,
+                "Si cette date ne vous convient pas, annulez ou reportez le rendez-vous depuis votre espace."));
+    }
+
+    private void sendNotice(String to, String firstName, String subject, List<String> lines) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl).path("/patient/rendez-vous").build().toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        StringBuilder text = new StringBuilder(hello).append("\n\n");
+        StringBuilder html = new StringBuilder("<p>").append(HtmlUtils.htmlEscape(hello)).append("</p>");
+        for (String line : lines) {
+            text.append(line).append("\n");
+            html.append("<p>").append(HtmlUtils.htmlEscape(line)).append("</p>");
+        }
+        text.append("\n").append(link).append("\n\nL'équipe MedLink");
+        html.append("<p><a href=\"").append(HtmlUtils.htmlEscape(link)).append("\">Voir mes rendez-vous</a></p>")
+                .append("<p>L'équipe MedLink</p>");
+        send(to, subject, text.toString(), html.toString());
+    }
+
+    /**
+     * US-16: staff approved the patient's deletion request and the account is closed: the patient can no longer log in.
+     * Says what was done and what was not (the record is kept for the legal retention period). No medical content.
+     */
+    public void sendAccountClosedAfterDeletionRequest(String to, String firstName) {
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        List<String> lines = List.of(
+                "Votre demande de suppression de données a été approuvée par le personnel administratif de MedLink.",
+                "Votre compte est clôturé : vous ne pouvez plus vous connecter et vos sessions ouvertes ont été fermées.",
+                "Votre dossier médical et le journal des accès sont conservés pendant la durée légale de conservation, "
+                        + "puis détruits.",
+                "Pour toute question, contactez l'accueil de votre clinique.");
+        StringBuilder text = new StringBuilder(hello).append("\n\n");
+        StringBuilder html = new StringBuilder("<p>").append(HtmlUtils.htmlEscape(hello)).append("</p>");
+        for (String line : lines) {
+            text.append(line).append("\n");
+            html.append("<p>").append(HtmlUtils.htmlEscape(line)).append("</p>");
+        }
+        text.append("\nL'équipe MedLink");
+        html.append("<p>L'équipe MedLink</p>");
+        send(to, "Votre compte MedLink est clôturé", text.toString(), html.toString());
+    }
+
+    /**
+     * US-25: a new examination result is in the patient's space. Never the title, type, content or author: only that
+     * something new is waiting, behind the login. One Message-ID per result, so a retried notice is seen once.
+     */
+    public void sendNewExamResult(String to, String firstName, UUID resultId) {
+        String link = UriComponentsBuilder.fromUriString(frontendUrl).path("/patient/resultats").build().toUriString();
+        String hello = firstName == null || firstName.isBlank() ? "Bonjour," : "Bonjour " + firstName + ",";
+        String text = hello + "\n\n"
+                + "Un nouveau résultat d'examen a été ajouté à votre dossier MedLink.\n"
+                + "Pour le consulter, connectez-vous à votre espace :\n\n"
+                + link + "\n\n"
+                + "Pour ne plus recevoir ces messages, modifiez vos préférences de notification dans votre profil.\n\n"
+                + "L'équipe MedLink";
+        String html = "<p>" + HtmlUtils.htmlEscape(hello) + "</p>"
+                + "<p>Un nouveau résultat d'examen a été ajouté à votre dossier MedLink.</p>"
+                + "<p><a href=\"" + HtmlUtils.htmlEscape(link) + "\">Voir mes résultats</a></p>"
+                + "<p>Pour ne plus recevoir ces messages, modifiez vos préférences de notification dans votre "
+                + "profil.</p>"
+                + "<p>L'équipe MedLink</p>";
+        send(to, "Nouveau résultat dans votre dossier MedLink", text, html, examResultMessageId(resultId));
+    }
+
+    /** The Message-ID of a result's notice: one per result, whatever the try. */
+    public static String examResultMessageId(UUID resultId) {
+        return "<exam-result-" + resultId + "@medlink.local>";
+    }
+
     /** The Message-ID of an appointment's reminder: one per appointment, whatever the try. */
     public static String reminderMessageId(UUID appointmentId) {
         return "<appointment-reminder-" + appointmentId + "@medlink.local>";
+    }
+
+    public void sendEmailChangeCode(String to, String code) {
+        String text = "Votre code de confirmation MedLink : " + code
+                + "\nCe code expire dans 30 minutes. Saisissez-le dans votre profil connecté. "
+                + "Ne le communiquez à personne.";
+        send(to, "Confirmez votre nouvelle adresse MedLink", text, "<pre>" + HtmlUtils.htmlEscape(text) + "</pre>");
+    }
+
+    void sendSecurityAlert(String to, String text) {
+        send(to, "Alerte de sécurité MedLink", text, "<pre>" + HtmlUtils.htmlEscape(text) + "</pre>");
     }
 
     private void send(String to, String subject, String text, String html) {

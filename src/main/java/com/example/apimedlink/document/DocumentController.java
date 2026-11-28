@@ -20,7 +20,10 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-/** MLink-123/125: upload, list and download a patient's documents. */
+/**
+ * MLink-123/125: upload, list and download a patient's documents. US-25: a practitioner attached to the patient may
+ * upload and list (to pick a result's attachment); downloads stay with the patient and staff.
+ */
 @RestController
 @RequestMapping("/api/patients/{patientId}/documents")
 @Validated
@@ -33,7 +36,7 @@ public class DocumentController {
     }
 
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
-    @PreAuthorize("hasRole('" + Roles.ADMINISTRATIVE_STAFF + "')")
+    @PreAuthorize("hasAnyRole('" + Roles.ADMINISTRATIVE_STAFF + "', '" + Roles.PRACTITIONER + "')")
     public ResponseEntity<DocumentDto> upload(
             @PathVariable UUID patientId,
             @RequestParam("title") String title,
@@ -44,7 +47,7 @@ public class DocumentController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('" + Roles.PATIENT + "', '" + Roles.ADMINISTRATIVE_STAFF + "')")
+    @PreAuthorize("hasAnyRole('" + Roles.PATIENT + "', '" + Roles.ADMINISTRATIVE_STAFF + "', '" + Roles.PRACTITIONER + "')")
     public DocumentPageDto list(
             @PathVariable UUID patientId,
             @RequestParam(defaultValue = "0") @Min(0) int page,

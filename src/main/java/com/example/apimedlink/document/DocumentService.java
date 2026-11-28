@@ -3,6 +3,7 @@ package com.example.apimedlink.document;
 import com.example.apimedlink.model.AuditAction;
 import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.AuditResourceType;
+import com.example.apimedlink.repository.AppointmentRepository;
 import com.example.apimedlink.repository.PatientDocumentRepository;
 import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.security.CurrentUser;
@@ -23,6 +24,7 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
@@ -57,6 +59,7 @@ public class DocumentService {
     private final CurrentUser currentUser;
     private final OwnershipGuard ownership;
     private final TransactionTemplate transactions;
+    private final AppointmentRepository appointments;
 
     public DocumentService(
             PatientRepository patients,
@@ -67,7 +70,8 @@ public class DocumentService {
             AuditService audit,
             CurrentUser currentUser,
             OwnershipGuard ownership,
-            TransactionTemplate transactions) {
+            TransactionTemplate transactions,
+            AppointmentRepository appointments) {
         this.patients = patients;
         this.documents = documents;
         this.storage = storage;
@@ -77,17 +81,24 @@ public class DocumentService {
         this.currentUser = currentUser;
         this.ownership = ownership;
         this.transactions = transactions;
+        this.appointments = appointments;
     }
 
     /**
      * Stores the encrypted bytes, then the metadata and the upload audit entry in one transaction.
      *
+     * US-25: a practitioner may upload for a patient attached to them (a BOOKED appointment, the rule of a result's
+     * publication), from the patient's record; the document is then theirs to attach to a result.
+     *
+     * @throws AccessDeniedException when a practitioner is not attached to the
+     *     patient (or the patient does not exist), before the file is read
      * @throws EntityNotFoundException when the patient does not exist (before reading the file)
      * @throws DocumentValidationException for a blank title, an empty file, an unsupported type or a file over 10 MiB
      * @throws StorageException when the object store fails
      * @throws com.example.apimedlink.exception.AuditUnavailableException when the audit entry cannot be written
      */
     public PatientDocument upload(UUID patientId, String title, MultipartFile file) {
+        requireAttachedIfPractitioner(patientId);
         if (!patients.existsById(patientId)) {
             throw new EntityNotFoundException("Patient " + patientId + " not found");
         }
@@ -171,12 +182,21 @@ public class DocumentService {
             if (!patients.existsById(patientId)) {
                 throw new EntityNotFoundException("Patient " + patientId + " not found");
             }
+        } else if (currentUser.hasRole(Roles.PRACTITIONER)) {
+            // US-25: the list a practitioner picks an attachment from; the files stay patient and staff downloads
+            requireAttachedIfPractitioner(patientId);
         } else {
             ownership.check(patientId);
         }
         Pageable pageable = PageRequest.of(page, size,
                 Sort.by(Sort.Order.desc("createdAt"), Sort.Order.desc("id")));
-        return documents.findByPatientId(patientId, pageable);
+        Page<PatientDocument> result = documents.findByPatientId(patientId, pageable);
+        audit.record(
+                AuditAction.DOCUMENT_LIST,
+                AuditResourceType.PATIENT.name(),
+                patientId.toString(),
+                AuditOutcome.SUCCESS);
+        return result;
     }
 
     /**
@@ -208,6 +228,14 @@ public class DocumentService {
                 document.getId().toString(),
                 AuditOutcome.SUCCESS);
         return new DownloadedDocument(plaintext, document.getContentType(), document.getOriginalFilename());
+    }
+
+    /** US-25: a practitioner acts only for a patient attached to them; same 403 for a stranger and an unknown id. */
+    private void requireAttachedIfPractitioner(UUID patientId) {
+        if (currentUser.hasRole(Roles.PRACTITIONER)
+                && !appointments.existsByPractitionerAndPatient(currentUser.id(), patientId)) {
+            throw new AccessDeniedException("Patient not attached to the practitioner");
+        }
     }
 
     private static String validateTitle(String title) {

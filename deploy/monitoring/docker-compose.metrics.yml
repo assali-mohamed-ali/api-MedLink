@@ -1,0 +1,5 @@
+# Add after deploy/docker-compose.server.yml on the two API hosts.
+services:
+  app:
+    ports:
+      - '${API_METRICS_BIND_ADDRESS:?Set API_METRICS_BIND_ADDRESS}:9000:9000'

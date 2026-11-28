@@ -69,7 +69,7 @@ public class SecurityConfig {
                         .requestMatchers(HttpMethod.GET, "/livez", "/readyz")
                         .permitAll()
                         // Public auth endpoints (plan.md §4); CSRF still applies to these POSTs
-                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf")
+                        .requestMatchers(HttpMethod.GET, "/api/auth/csrf", "/api/auth/consent")
                         .permitAll()
                         .requestMatchers(HttpMethod.POST,
                                 "/api/auth/login",
@@ -79,6 +79,9 @@ public class SecurityConfig {
                                 "/api/auth/account/activate",
                                 "/api/auth/account/activate/resend",
                                 "/api/auth/password",
+                                // US-03: forgot my password, then the link from the mail
+                                "/api/auth/password/forgot",
+                                "/api/auth/password/reset",
                                 // Staff code step: the pending step login started is the guard (MLink-62/63)
                                 "/api/auth/mfa/setup",
                                 "/api/auth/mfa/verify")
@@ -86,24 +89,46 @@ public class SecurityConfig {
                         // Patients only, checked before the body is read: a body Spring cannot parse would otherwise
                         // give a non-patient the 400 of the parsing, not 403 (review on #87). The method keeps its
                         // @PreAuthorize as well.
+                        .requestMatchers(HttpMethod.GET, "/api/slots", "/api/slots/filters")
+                        .hasRole(Roles.PATIENT)
                         .requestMatchers(HttpMethod.POST, "/api/appointments", "/api/appointments/**")
+                        .hasRole(Roles.PATIENT)
+                        // US-16: the patient's own export, patients only
+                        .requestMatchers(HttpMethod.GET, "/api/patients/me/export")
                         .hasRole(Roles.PATIENT)
                         // The role before anything reads the request: Spring converts query dates and the JSON body before
                         // @PreAuthorize, so without this rule a patient would get 400, not 403 (MLink-26, review on #116)
                         .requestMatchers("/api/practitioner/**")
                         .hasRole(Roles.PRACTITIONER)
+                        // US-15: own profile, patients only, decided before the body is read (as the rules above)
+                        .requestMatchers("/api/patients/me/reassignments", "/api/patients/me/reassignments/**")
+                        .hasRole(Roles.PATIENT)
+                        .requestMatchers("/api/patients/me", "/api/patients/me/notification-preferences",
+                                "/api/patients/me/email-change", "/api/patients/me/email-change/confirm")
+                        .hasRole(Roles.PATIENT)
                         // The role before Spring reads the request, so a patient never gets a 400 (MLink-31, as #116)
                         .requestMatchers(HttpMethod.GET, "/api/patients/*/record")
                         .hasRole(Roles.PRACTITIONER)
                         // The reports too, before the body is read: a patient sending a bad body gets 403 (MLink-32)
                         .requestMatchers("/api/patients/*/reports")
                         .hasRole(Roles.PRACTITIONER)
+                        // US-25 / US-13: results published by a practitioner, read by their patient
+                        .requestMatchers("/api/patients/*/results")
+                        .hasRole(Roles.PRACTITIONER)
+                        .requestMatchers(HttpMethod.GET, "/api/results/me")
+                        .hasRole(Roles.PATIENT)
                         // MLink-123/125: staff upload; staff or the owner patient list and download.
                         // The controller repeats the rule with @PreAuthorize, and the service checks ownership.
+                        // US-25: an attached practitioner uploads and lists too (the service checks the link)
                         .requestMatchers(HttpMethod.POST, "/api/patients/*/documents")
-                        .hasRole(Roles.ADMINISTRATIVE_STAFF)
-                        .requestMatchers(HttpMethod.GET, "/api/patients/*/documents", "/api/patients/*/documents/*")
+                        .hasAnyRole(Roles.ADMINISTRATIVE_STAFF, Roles.PRACTITIONER)
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/documents")
+                        .hasAnyRole(Roles.PATIENT, Roles.ADMINISTRATIVE_STAFF, Roles.PRACTITIONER)
+                        .requestMatchers(HttpMethod.GET, "/api/patients/*/documents/*")
                         .hasAnyRole(Roles.PATIENT, Roles.ADMINISTRATIVE_STAFF)
+                        // US-16: the patient's own deletion request, patients only, before anything is read
+                        .requestMatchers("/api/patients/me/deletion-request")
+                        .hasRole(Roles.PATIENT)
                         // Staff only, decided before any body is read: a patient sending a bad body gets 403, not 400
                         .requestMatchers("/api/admin/**")
                         .hasRole(Roles.ADMINISTRATIVE_STAFF)

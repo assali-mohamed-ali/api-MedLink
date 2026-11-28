@@ -53,6 +53,7 @@ public class SlotService {
                 clinics.findAll().stream().sorted(Comparator.comparing(Clinic::getName, french)).toList(),
                 specialties.findAll().stream().sorted(Comparator.comparing(Specialty::getName, french)).toList(),
                 practitioners.findAllBy().stream()
+                        .filter(Practitioner::isBookingEnabled)
                         .sorted(Comparator.comparing(Practitioner::getLastName, french)
                                 .thenComparing(Practitioner::getFirstName, french))
                         .toList());
@@ -70,6 +71,7 @@ public class SlotService {
         Specification<Slot> spec = (root, query, cb) -> {
             List<Predicate> rules = new ArrayList<>();
             rules.add(cb.equal(root.get("status"), SlotStatus.FREE));
+            rules.add(cb.isTrue(root.get("practitioner").get("bookingEnabled")));
             rules.add(cb.greaterThanOrEqualTo(root.get("startsAt"), start));
             rules.add(cb.lessThan(root.get("startsAt"), to));
             if (clinicId != null) {

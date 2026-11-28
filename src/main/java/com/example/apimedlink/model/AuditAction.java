@@ -26,6 +26,8 @@ public enum AuditAction {
     DOCUMENT_UPLOAD,
     /** A patient or staff member read a patient document (MLink-123/125): the document id only. */
     DOCUMENT_READ,
+    /** A patient or staff member listed a patient's documents (MLink-17): the patient id only. */
+    DOCUMENT_LIST,
     /** A sign-in attempt; the outcome says whether it worked (MLink-114). */
     LOGIN,
     /** The password is right but must be changed first: no session exists yet (MLink-114). */

@@ -13,4 +13,5 @@ public record AppointmentDto(
         SlotDto.ClinicRef clinic,
         SlotDto.PractitionerRef practitioner,
         Instant startsAt,
-        Instant endsAt) {}
+        Instant endsAt,
+        boolean bookedByStaff) {}
