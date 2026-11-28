@@ -134,6 +134,29 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
     }
 
     @Override
+    public void changeVerifiedEmail(UUID id, String email) {
+        UserRepresentation body = new UserRepresentation(null, email, email, null, null, null, true, null);
+        call("change verified email", bearer -> http.put().uri(users + "/{id}", id)
+                .header(HttpHeaders.AUTHORIZATION, bearer)
+                .contentType(MediaType.APPLICATION_JSON)
+                .body(body)
+                .exchange((request, response) -> {
+                    if (response.getStatusCode().value() == 409) {
+                        throw new EmailTakenException();
+                    }
+                    expectFound(response.getStatusCode(), id);
+                    expectSuccess(response.getStatusCode(), "change verified email");
+                    return null;
+                }));
+        // A 204 alone is insufficient: an identity profile can ignore a read-only attribute.
+        UserRepresentation updated = getUserRepresentation(id);
+        if (!email.equalsIgnoreCase(updated.email()) || !email.equalsIgnoreCase(updated.username())
+                || !Boolean.TRUE.equals(updated.emailVerified())) {
+            throw new KeycloakUnavailableException("change verified email: identity readback mismatch");
+        }
+    }
+
+    @Override
     public void updateUser(UUID id, String firstName, String lastName) {
         UserRepresentation body = new UserRepresentation(null, null, null, firstName, lastName, null, null, null);
         call("update user", bearer -> http.put().uri(users + "/{id}", id)
@@ -149,6 +172,10 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
 
     @Override
     public KeycloakUser getUser(UUID id) {
+        return toUser(id, getUserRepresentation(id));
+    }
+
+    private UserRepresentation getUserRepresentation(UUID id) {
         UserRepresentation user = call("get user", bearer -> http.get().uri(users + "/{id}", id)
                 .header(HttpHeaders.AUTHORIZATION, bearer)
                 .accept(MediaType.APPLICATION_JSON)
@@ -160,7 +187,7 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
         if (user == null) {
             throw new KeycloakUnavailableException("get user: empty body");
         }
-        return toUser(id, user);
+        return user;
     }
 
     @Override
@@ -228,6 +255,57 @@ public class RestKeycloakAdminService implements KeycloakAdminService {
             }
         }
         return new KeycloakUserPage(items, total == null ? 0 : total);
+    }
+
+    @Override
+    public boolean isActivePractitioner(UUID id) {
+        try {
+            KeycloakUser account = getUser(id);
+            return account.enabled() && account.emailVerified()
+                    && groupsOf(id).stream().map(GroupRepresentation::path).toList()
+                            .equals(List.of(RoleGroups.pathOf(com.example.apimedlink.security.Roles.PRACTITIONER)));
+        } catch (jakarta.persistence.EntityNotFoundException missing) {
+            return false;
+        }
+    }
+
+    @Override
+    public boolean isLastActiveStaff(UUID id) {
+        String staffPath = RoleGroups.pathOf(com.example.apimedlink.security.Roles.ADMINISTRATIVE_STAFF);
+        if (groupsOf(id).stream().noneMatch(group -> staffPath.equals(group.path()))) {
+            return false;
+        }
+        KeycloakUser target = getUser(id);
+        if (!target.enabled() || !target.emailVerified()) {
+            return false;
+        }
+        String group = groupId(staffPath);
+        String members = "/admin/realms/" + keycloak.realm() + "/groups/{group}/members?first={first}&max=100";
+        for (int first = 0; ; first += 100) {
+            int offset = first;
+            UserRepresentation[] page = call("list staff members", bearer -> http.get()
+                    .uri(members, group, offset)
+                    .header(HttpHeaders.AUTHORIZATION, bearer)
+                    .accept(MediaType.APPLICATION_JSON)
+                    .exchange((request, response) -> {
+                        expectSuccess(response.getStatusCode(), "list staff members");
+                        return response.bodyTo(UserRepresentation[].class);
+                    }));
+            if (page == null) {
+                throw new KeycloakUnavailableException("list staff members: missing response");
+            }
+            for (UserRepresentation member : page) {
+                UUID other = UUID.fromString(member.id());
+                if (!id.equals(other) && Boolean.TRUE.equals(member.enabled())
+                        && Boolean.TRUE.equals(member.emailVerified())
+                        && groupsOf(other).stream().map(GroupRepresentation::path).toList().equals(List.of(staffPath))) {
+                    return false;
+                }
+            }
+            if (page.length < 100) {
+                return true;
+            }
+        }
     }
 
     @Override

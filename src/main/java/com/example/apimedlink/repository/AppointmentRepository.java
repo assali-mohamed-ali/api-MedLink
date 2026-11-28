@@ -40,6 +40,18 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
     @Query("select a from Appointment a where a.id = :id")
     Optional<Appointment> findForChangeById(@Param("id") UUID id);
 
+    @EntityGraph(attributePaths = {"slot", "slot.clinic", "slot.practitioner"})
+    @Query("select a from Appointment a where a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED "
+            + "and a.slot.practitioner.id = :practitionerId and a.slot.clinic.id = :clinicId and a.slot.startsAt > :now")
+    Page<Appointment> futureInClinic(@Param("practitionerId") UUID practitionerId, @Param("clinicId") UUID clinicId,
+            @Param("now") Instant now, Pageable page);
+
+    @Query("select count(a) > 0 from Appointment a where a.patientId = :patientId and a.id <> :excluded "
+            + "and a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED "
+            + "and a.slot.startsAt < :end and a.slot.endsAt > :start")
+    boolean overlapsOther(@Param("patientId") UUID patientId, @Param("excluded") UUID excluded,
+            @Param("start") Instant start, @Param("end") Instant end);
+
     /** MLink-167: whether the patient holds an appointment in {@code status} that overlaps [start, end). */
     @Query("""
             select count(a) > 0 from Appointment a
@@ -51,15 +63,27 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
     /**
      * MLink-110: the ids of the appointments still to remind, those in {@code status} that start after {@code from}
      * and no later than {@code until}. Only candidates: each one is locked and checked again before its mail
-     * (MLink-111, review on #120), since it can be cancelled while the job runs.
+     * (MLink-111, review on #120), since it can be cancelled while the job runs. US-15: a patient who turned reminders
+     * off is not a candidate.
      */
     @Query("""
             select a.id from Appointment a
             where a.status = :status and a.reminderSentAt is null
               and a.slot.startsAt > :from and a.slot.startsAt <= :until
+              and exists (select 1 from Patient p where p.id = a.patientId and p.notifyAppointmentReminders = true)
             order by a.slot.startsAt""")
     List<UUID> findRemindersDue(@Param("status") AppointmentStatus status, @Param("from") Instant from,
             @Param("until") Instant until);
+
+    /** Pending confirmations for future, still-booked appointments; cancelled bookings are never retried. */
+    @Query(value = "select a.id from appointments a join slots s on s.id = a.slot_id "
+            + "where a.status = 'BOOKED' and a.confirmation_sent_at is null and s.starts_at > :now "
+            + "and a.created_at > :since order by a.created_at, a.id limit 50", nativeQuery = true)
+    List<UUID> findPendingConfirmations(@Param("now") Instant now, @Param("since") Instant since);
+
+    @Query(value = "select id from appointments where id = :id and confirmation_sent_at is null "
+            + "for update skip locked", nativeQuery = true)
+    Optional<UUID> lockPendingConfirmation(@Param("id") UUID id);
 
     boolean existsBySlot_IdAndStatus(UUID slotId, AppointmentStatus status);
 
@@ -99,14 +123,14 @@ public interface AppointmentRepository extends JpaRepository<Appointment, UUID> 
             @Param("practitionerId") UUID practitionerId, @Param("patientId") UUID patientId);
 
     /**
-     * MLink-32 follow-up: a consultation of this practitioner with this patient has started (a BOOKED appointment whose
-     * slot began at or before {@code now}), so a report may be written about it.
+     * MLink-32 follow-up: a consultation of this practitioner with this patient has ended (a BOOKED appointment whose
+     * slot ended at or before {@code now}), so a report may be written about it.
      */
     @Query("""
             select count(a) > 0 from Appointment a
             where a.slot.practitioner.id = :practitionerId and a.patientId = :patientId
               and a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED
-              and a.slot.startsAt <= :now""")
-    boolean existsStartedByPractitionerAndPatient(@Param("practitionerId") UUID practitionerId,
+              and a.slot.endsAt <= :now""")
+    boolean existsCompletedByPractitionerAndPatient(@Param("practitionerId") UUID practitionerId,
             @Param("patientId") UUID patientId, @Param("now") Instant now);
 }

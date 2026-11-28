@@ -576,7 +576,9 @@ $utf8 = New-Object System.Text.UTF8Encoding($false)
 Remove-Item $jar -Force -ErrorAction SilentlyContinue
 & curl.exe -s -o NUL --max-time 10 -c $jar -b $jar "$AppUrl/api/auth/csrf"
 $xsrf = Get-Content $jar | Where-Object { $_ -match "`tXSRF-TOKEN`t" } | ForEach-Object { ($_ -split "`t")[6] } | Select-Object -First 1
-$signup = @{ email = $smokeEmail; password = 'Smoke-Test-2026!'; firstName = 'Smoke'; lastName = 'Test'; birthDate = '1990-01-01' }
+# US-04: no account without the current consent version, read from the API so a new text never breaks this check
+$consentVersion = (Invoke-RestMethod -TimeoutSec 10 -Uri "$AppUrl/api/auth/consent").version
+$signup = @{ email = $smokeEmail; password = 'Smoke-Test-2026!'; firstName = 'Smoke'; lastName = 'Test'; birthDate = '1990-01-01'; consentVersion = $consentVersion }
 [System.IO.File]::WriteAllText($bodyFile, ($signup | ConvertTo-Json -Compress), $utf8)
 $status = [int](& curl.exe -s -o NUL -w '%{http_code}' --max-time 30 -c $jar -b $jar -H "X-XSRF-TOKEN: $xsrf" `
     -H 'Content-Type: application/json' --data-binary "@$bodyFile" "$AppUrl/api/auth/register")

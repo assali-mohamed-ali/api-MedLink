@@ -82,6 +82,33 @@ class AppointmentReminderFunctionalTest extends FunctionalTestBase {
                 appointment)).isEqualTo(firstSent).isNotNull();
     }
 
+    /**
+     * US-15: a patient who turned reminders off gets none and the appointment is not marked as reminded; turning them
+     * back on before the appointment brings the reminder at the next run.
+     */
+    @Test
+    void aPatientWhoTurnedRemindersOffGetsNoneUntilTheyTurnThemBackOn() {
+        Instant start = CLOCK.instant().plus(4, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MINUTES);
+        String email = uniqueEmail("reminder-off");
+        UUID patient = patient(email, "Ines");
+        jdbc.update("update patients set notify_appointment_reminders = false where id = ?", patient);
+        UUID appointment = appointment(patient,
+                slot(practitioner("Sonia", "Trabelsi", "Neurologie (rappel désactivé)"), clinic("Clinique Rappel Gabès"),
+                        start),
+                "BOOKED");
+
+        job.sendDueReminders();
+
+        assertThat(mailbox.to(email, SUBJECT)).isEmpty();
+        assertThat(jdbc.queryForObject("select reminder_sent_at from appointments where id = ?", Timestamp.class,
+                appointment)).isNull();
+
+        jdbc.update("update patients set notify_appointment_reminders = true where id = ?", patient);
+        job.sendDueReminders();
+
+        assertThat(mailbox.to(email, SUBJECT)).hasSize(1);
+    }
+
     @Test
     void aCancelledAppointmentGetsNoReminder() {
         Instant start = CLOCK.instant().plus(3, ChronoUnit.HOURS).truncatedTo(ChronoUnit.MINUTES);

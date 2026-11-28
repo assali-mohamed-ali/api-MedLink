@@ -65,13 +65,13 @@ public class ConsultationReportService {
      * nothing, not even the text rules. The report is saved in one transaction: if it fails, nothing is kept and the
      * caller gets REPORT_SAVE_FAILED, so the front keeps the draft and offers to try again (32.6). The REPORT_CREATED
      * row is part of that transaction (32.4): a report is never kept without its trace. MLink-32 follow-up: only once a
-     * consultation with the patient has started; before, 409 CONSULTATION_NOT_STARTED and nothing is saved.
+     * consultation with the patient has ended; before, 409 CONSULTATION_NOT_COMPLETED and nothing is saved.
      */
     public ReadableReport create(UUID practitionerId, UUID patientId, String content) {
         requireAttached(practitionerId, patientId);
-        if (!consultationStarted(practitionerId, patientId)) {
-            throw new ApiException(HttpStatus.CONFLICT, "CONSULTATION_NOT_STARTED",
-                    "Vous pourrez écrire le compte-rendu une fois la consultation commencée.");
+        if (!consultationCompleted(practitionerId, patientId)) {
+            throw new ApiException(HttpStatus.CONFLICT, "CONSULTATION_NOT_COMPLETED",
+                    "Vous pourrez écrire le compte-rendu une fois la consultation terminée.");
         }
         validate(content);
         UUID id = UUID.randomUUID();
@@ -129,9 +129,9 @@ public class ConsultationReportService {
         return found;
     }
 
-    /** MLink-32 follow-up: a consultation with the patient has started, so a report may be written. */
-    public boolean consultationStarted(UUID practitionerId, UUID patientId) {
-        return appointments.existsStartedByPractitionerAndPatient(practitionerId, patientId, Instant.now());
+    /** MLink-32 follow-up: a consultation with the patient has ended, so a report may be written. */
+    public boolean consultationCompleted(UUID practitionerId, UUID patientId) {
+        return appointments.existsCompletedByPractitionerAndPatient(practitionerId, patientId, Instant.now());
     }
 
     /**

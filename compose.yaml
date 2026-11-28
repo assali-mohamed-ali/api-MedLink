@@ -161,6 +161,8 @@ services:
       - 'KEYCLOAK_ADMIN_CLIENT_SECRET=dev-only-medlink-admin-secret'
       - 'CORS_ALLOWED_ORIGINS=http://localhost:3000,http://localhost:4200'
       - 'TRUSTED_PROXIES=127\.0\.0\.1|0:0:0:0:0:0:0:1'
+      # US-04: sign-ups open on the dev stack (consent still required)
+      - 'APP_CONSENT_AVAILABLE=true'
       - 'APP_MFA_ENCRYPTION_KEY=devOnlyMfaKeyNotForProductionUseLocalOnlyMA=' # gitleaks:allow
       - 'APP_REPORT_ENCRYPTION_KEY=devOnlyReportKeyNotForProductionUseLocalOnA=' # gitleaks:allow
       # Patient documents (MLink-9): local MinIO above, fixed dev-only values.

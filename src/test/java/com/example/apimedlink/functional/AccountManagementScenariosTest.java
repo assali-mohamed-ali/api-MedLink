@@ -194,6 +194,8 @@ class AccountManagementScenariosTest {
         String email = "scenario-" + targetId + "@example.com";
         users.save(User.builder().id(targetId).username(email).email(email).build());
         List<String> received = new ArrayList<>();
+        expectKeycloak(HttpMethod.GET, usersPath() + "/" + targetId + "/groups")
+                .andRespond(withSuccess("[{\"id\":\"patient-group\",\"path\":\"/patients\"}]", MediaType.APPLICATION_JSON));
         expectKeycloak(HttpMethod.PUT, usersPath() + "/" + targetId)
                 .andExpect(content().json("{\"enabled\":false}", JsonCompareMode.LENIENT))
                 .andExpect(req -> received.add("DISABLE"))

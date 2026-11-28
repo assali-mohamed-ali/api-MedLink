@@ -15,6 +15,9 @@ public interface UserRepository extends JpaRepository<User, UUID> {
     @Query(value = "select id from users where id = :id for update", nativeQuery = true)
     Optional<UUID> lockLocalAccount(@Param("id") UUID id);
 
+    @Query(value = "select exists(select 1 from patient_email_changes where patient_id = :id and verified_at is not null)", nativeQuery = true)
+    boolean emailChangeInProgress(@Param("id") UUID id);
+
     boolean existsByUsername(String username);
 
     boolean existsByEmail(String email);

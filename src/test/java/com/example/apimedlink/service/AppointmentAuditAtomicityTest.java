@@ -91,7 +91,7 @@ class AppointmentAuditAtomicityTest {
     void aMoveWhoseAuditCannotBeWrittenKeepsTheOldAppointmentAndLeavesTheNewSlotFree() {
         UUID patient = patient();
         UUID oldSlot = freeSlot();
-        UUID newSlot = freeSlot(1);
+        UUID newSlot = samePractitionerSlot(oldSlot, 1);
         UUID booked = appointments.book(patient, oldSlot).getId();
         auditFailsFor("APPOINTMENT_RESCHEDULED");
         callerIs(patient);
@@ -135,11 +135,12 @@ class AppointmentAuditAtomicityTest {
     void aCancelAndAMoveEachWriteOneAuditRow() {
         UUID patient = patient();
         // One patient, three different hours: a patient holds one appointment at a time (MLink-167)
-        UUID moved = appointments.book(patient, freeSlot()).getId();
+        UUID original = freeSlot();
+        UUID moved = appointments.book(patient, original).getId();
         UUID cancelled = appointments.book(patient, freeSlot(1)).getId();
         callerIs(patient);
 
-        UUID replacement = appointments.reschedule(moved, freeSlot(2)).getId();
+        UUID replacement = appointments.reschedule(moved, samePractitionerSlot(original, 2)).getId();
         appointments.cancel(cancelled);
         appointments.cancel(cancelled);
 
@@ -186,6 +187,15 @@ class AppointmentAuditAtomicityTest {
         jdbc.update("insert into patients (id, first_name, last_name, birth_date) values (?, 'Amel', 'Ben Salah', ?)",
                 id, Date.valueOf("1990-04-12"));
         return id;
+    }
+
+    private UUID samePractitionerSlot(UUID original, int hoursLater) {
+        Instant start = START.plus(hoursLater, ChronoUnit.HOURS);
+        UUID slot = UUID.randomUUID();
+        jdbc.update("insert into slots (id, practitioner_id, clinic_id, starts_at, ends_at, status) "
+                        + "select ?, practitioner_id, clinic_id, ?, ?, 'FREE' from slots where id = ?",
+                slot, Timestamp.from(start), Timestamp.from(start.plus(30, ChronoUnit.MINUTES)), original);
+        return slot;
     }
 
     /** A practitioner of its own, working in Sfax, with one free 30-minute slot there. */

@@ -32,7 +32,7 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
 
     static final String PASSWORD = "Consultation-Report-2026!";
 
-    /** Two days ago: the consultations of these tests have started, so a report may be written (MLink-32 follow-up). */
+    /** Two days ago: the consultations of these tests have ended, so a report may be written (MLink-32 follow-up). */
     static final Instant DAY = Instant.now().truncatedTo(ChronoUnit.DAYS).minus(2, ChronoUnit.DAYS).plus(9, ChronoUnit.HOURS);
 
     static final String TEXT = "Douleur thoracique atypique, ECG normal. Contrôle dans un mois.";
@@ -122,8 +122,8 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
     }
 
     /**
-     * MLink-32 follow-up: before the consultation has started (an upcoming appointment only), the record can be read
-     * but no report written: 409 CONSULTATION_NOT_STARTED, nothing saved, nothing traced as a write.
+     * MLink-32 follow-up: before the consultation has ended (an upcoming appointment only), the record can be read
+     * but no report written: 409 CONSULTATION_NOT_COMPLETED, nothing saved, nothing traced as a write.
      */
     @Test
     void beforeTheConsultationHasStartedAReportIsRefusedAndNothingIsSaved() throws Exception {
@@ -134,9 +134,9 @@ class ConsultationReportFunctionalTest extends FunctionalTestBase {
         HttpResponse<String> refused = pro.browser().postJson(reports(patient), json(TEXT));
 
         assertThat(refused.statusCode()).as(refused.body()).isEqualTo(409);
-        assertThat(Browser.json(refused).get("code")).isEqualTo("CONSULTATION_NOT_STARTED");
+        assertThat(Browser.json(refused).get("code")).isEqualTo("CONSULTATION_NOT_COMPLETED");
         assertThat(Browser.json(refused).get("message"))
-                .isEqualTo("Vous pourrez écrire le compte-rendu une fois la consultation commencée.");
+                .isEqualTo("Vous pourrez écrire le compte-rendu une fois la consultation terminée.");
         assertThat(jdbc.queryForObject("select count(*) from consultation_reports where patient_id = ?", Integer.class, patient))
                 .isZero();
         assertThat(jdbc.queryForObject("select count(*) from audit_entries where action = 'REPORT_CREATED' and user_id = ?",

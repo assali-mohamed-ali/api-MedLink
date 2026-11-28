@@ -33,6 +33,7 @@ public class RegistrationService {
     private final MailService mail;
     private final MailThrottle throttle;
     private final TransactionTemplate tx;
+    private final ConsentPolicy consent;
 
     public RegistrationService(
             KeycloakAdminService keycloak,
@@ -42,7 +43,8 @@ public class RegistrationService {
             EmailVerificationService verification,
             MailService mail,
             MailThrottle throttle,
-            TransactionTemplate tx) {
+            TransactionTemplate tx,
+            ConsentPolicy consent) {
         this.keycloak = keycloak;
         this.users = users;
         this.patients = patients;
@@ -51,6 +53,7 @@ public class RegistrationService {
         this.mail = mail;
         this.throttle = throttle;
         this.tx = tx;
+        this.consent = consent;
     }
 
     /**
@@ -60,6 +63,8 @@ public class RegistrationService {
      * @param profile a new patient without id or email: both come from the Keycloak account created here
      */
     public void register(String email, String password, Patient profile) {
+        // US-04: before anything else, and the same answer whether or not the email has an account
+        consent.check(profile.getConsentVersion());
         String normalized = email.trim().toLowerCase(Locale.ROOT);
         if (users.existsByEmail(normalized) || users.existsByUsername(normalized)) {
             warnOwner(normalized);

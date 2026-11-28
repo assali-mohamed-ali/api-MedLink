@@ -1,6 +1,7 @@
 package com.example.apimedlink.repository;
 
 import com.example.apimedlink.model.Slot;
+import com.example.apimedlink.model.SlotStatus;
 import jakarta.persistence.LockModeType;
 import java.time.Instant;
 import java.util.List;
@@ -24,10 +25,51 @@ import org.springframework.data.repository.query.Param;
  */
 public interface SlotRepository extends JpaRepository<Slot, UUID>, JpaSpecificationExecutor<Slot> {
 
+    interface SlotCount {
+        SlotStatus getStatus();
+        long getTotal();
+    }
+
+    @Query("""
+            select s.status as status, count(s) as total from Slot s
+            where s.clinic.id = :clinicId and s.startsAt >= :from and s.startsAt < :to
+            group by s.status
+            """)
+    List<SlotCount> countClinicCapacity(@Param("clinicId") UUID clinicId,
+            @Param("from") Instant from, @Param("to") Instant to);
+
     /** A page of slots with their practitioner, specialty and clinic loaded in the same query (no N+1). */
     @Override
     @EntityGraph(attributePaths = {"practitioner", "practitioner.specialty", "clinic"})
     Page<Slot> findAll(Specification<Slot> spec, Pageable pageable);
+
+    /** US-29: whether the practitioner still holds a slot, of any status, in the clinic. */
+    @Query("select count(s) > 0 from Slot s where s.practitioner.id = :practitionerId and s.clinic.id = :clinicId")
+    boolean holdsSlotsIn(@Param("practitionerId") UUID practitionerId, @Param("clinicId") UUID clinicId);
+
+    @Query("select count(s) > 0 from Slot s where s.practitioner.id = :practitionerId "
+            + "and s.clinic.id = :clinicId and s.startsAt > :now "
+            + "and s.status <> com.example.apimedlink.model.SlotStatus.CLOSED")
+    boolean hasFutureOpenSlots(@Param("practitionerId") UUID practitionerId, @Param("clinicId") UUID clinicId,
+            @Param("now") Instant now);
+
+    @EntityGraph(attributePaths = {"practitioner", "practitioner.specialty", "clinic"})
+    @Query("""
+            select s from Slot s where s.clinic.id = :clinicId and s.practitioner.id <> :sourcePractitioner
+              and s.practitioner.bookingEnabled = true and s.startsAt > :now
+              and s.status = com.example.apimedlink.model.SlotStatus.FREE
+              and not exists (select 1 from Absence x where x.practitionerId = s.practitioner.id
+                              and x.startsAt < s.endsAt and x.endsAt > s.startsAt)
+              and not exists (select 1 from Appointment a where a.patientId = :patientId and a.id <> :sourceAppointment
+                              and a.status = com.example.apimedlink.model.AppointmentStatus.BOOKED
+                              and a.slot.startsAt < s.endsAt and a.slot.endsAt > s.startsAt)
+            """)
+    Page<Slot> reassignmentTargets(@Param("clinicId") UUID clinicId, @Param("sourcePractitioner") UUID sourcePractitioner,
+            @Param("patientId") UUID patientId, @Param("sourceAppointment") UUID sourceAppointment,
+            @Param("now") Instant now, Pageable page);
+
+    @Query("select s.practitioner.id from Slot s where s.id = :id")
+    Optional<UUID> practitionerOf(@Param("id") UUID id);
 
     /** A practitioner's slots starting in {@code [from, to)}, whatever their status or clinic, earliest first. */
     @EntityGraph(attributePaths = {"clinic"})

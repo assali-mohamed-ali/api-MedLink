@@ -11,6 +11,11 @@ import com.example.apimedlink.repository.SpecialtyRepository;
 import com.example.apimedlink.security.Roles;
 import com.example.apimedlink.service.AdminUserService;
 import java.util.Set;
+import java.util.List;
+import java.util.Map;
+import java.util.ArrayList;
+import com.example.apimedlink.exception.ApiException;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -42,6 +47,42 @@ class AdminRoleChangeFunctionalTest extends FunctionalTestBase {
 
     @Autowired
     ClinicRepository clinics;
+
+    @Test
+    void theLastActiveStaffCannotBeDisabledOrDemoted() throws Exception {
+        String email = uniqueEmail("last-staff");
+        UUID last = console.createUser(email, PASSWORD, "/administrative-staff");
+        new Browser().login(email, PASSWORD);
+        UUID specialtyId = specialties.save(new Specialty("Spec-" + last)).getId();
+        UUID clinicId = clinics.save(new Clinic("Clinic-" + last, "Sousse")).getId();
+        List<UUID> restore = new ArrayList<>();
+        try {
+            Map<?, ?> group = (Map<?, ?>) console.read("/group-by-path/administrative-staff");
+            String groupId = (String) group.get("id");
+            for (int first = 0; ; first += 100) {
+                List<?> members = (List<?>) console.read("/groups/{id}/members?first={first}&max=100", groupId, first);
+                for (Object row : members) {
+                    Map<?, ?> member = (Map<?, ?>) row;
+                    UUID id = UUID.fromString((String) member.get("id"));
+                    if (!id.equals(last) && Boolean.TRUE.equals(member.get("enabled"))) {
+                        console.disable(id);
+                        restore.add(id);
+                    }
+                }
+                if (members.size() < 100) break;
+            }
+            assertThatThrownBy(() -> admin.setEnabled(last, false, UUID.randomUUID()))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("LAST_ACTIVE_STAFF"));
+            assertThatThrownBy(() -> admin.changeRole(last, Roles.PRACTITIONER, specialtyId, Set.of(clinicId)))
+                    .isInstanceOfSatisfying(ApiException.class, e -> assertThat(e.getCode()).isEqualTo("LAST_ACTIVE_STAFF"));
+            assertThat(console.groups(last)).containsExactly("/administrative-staff");
+            assertThat(((Map<?, ?>) console.read("/users/{id}", last)).get("enabled")).isEqualTo(true);
+            assertThat(practitioners.existsById(last)).isFalse();
+        } finally {
+            for (UUID id : restore) console.update(id, Map.of("enabled", true));
+            console.disable(last);
+        }
+    }
 
     @Test
     void aDemotedAdminLosesAdminAccessAtOnceAndLogsInAgainWithTheNewRoleOnly() throws Exception {

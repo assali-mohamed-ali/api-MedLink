@@ -14,6 +14,7 @@ import java.util.Set;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
+import org.hibernate.annotations.SQLJoinTableRestriction;
 
 /**
  * A practitioner is a user with a specialty and the clinics they work in (and only a practitioner: a
@@ -33,6 +34,10 @@ public class Practitioner extends User {
     @Column(nullable = false, length = 100)
     private String lastName;
 
+    /** Local scheduling gate, changed by the durable Keycloak account operation. */
+    @Column(nullable = false)
+    private boolean bookingEnabled = true;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "specialty_id", nullable = false)
     private Specialty specialty;
@@ -41,6 +46,7 @@ public class Practitioner extends User {
     @JoinTable(name = "practitioner_clinics",
             joinColumns = @JoinColumn(name = "practitioner_id"),
             inverseJoinColumns = @JoinColumn(name = "clinic_id"))
+    @SQLJoinTableRestriction("active = true")
     private Set<Clinic> clinics = new HashSet<>();
 
     /** The profile of a practitioner; id, username and email are set once Keycloak has the account. */

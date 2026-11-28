@@ -45,7 +45,12 @@ class PatientRecordFunctionalTest extends FunctionalTestBase {
 
         assertThat(response.statusCode()).as(response.body()).isEqualTo(200);
         Map<?, ?> body = Browser.json(response);
-        assertThat(body.get("patient")).isEqualTo(Map.of("id", patient.toString(), "firstName", "Amel",
+        Map<?, ?> identity = (Map<?, ?>) body.get("patient");
+        // US-22: the record number joins the identity (MED- and six digits); never the address or the e-mail
+        assertThat((String) identity.get("recordNumber")).matches("MED-[0-9]{6,}");
+        Map<Object, Object> rest = new java.util.HashMap<>(identity);
+        rest.remove("recordNumber");
+        assertThat(rest).isEqualTo(Map.of("id", patient.toString(), "firstName", "Amel",
                 "lastName", "Ben Salah", "birthDate", "1990-04-12", "phone", "+21620000000"));
         assertThat(body.get("reports")).isEqualTo(List.of()); // MLink-32 fills it
         // MLink-32 follow-up: the consultation is upcoming, so no report can be written yet

@@ -54,6 +54,11 @@ public class Appointment {
 
     private Instant reminderSentAt;
 
+    private Instant confirmationSentAt;
+
+    @Column(nullable = false)
+    private boolean bookedByStaff;
+
     public Appointment(Slot slot, UUID patientId, UUID bookedBy) {
         this.slot = slot;
         this.patientId = patientId;

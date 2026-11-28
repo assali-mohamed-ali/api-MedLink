@@ -91,6 +91,41 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
             // {id} is nobody's alert, so marking it is refused like another practitioner's
             new Rule("GET",    "/api/practitioner/alerts",      L, F, O, F),
             new Rule("POST",   "/api/practitioner/alerts/{id}/read", L, F, F, F),
+            new Rule("GET", "/api/auth/consent", O, O, O, O),
+            new Rule("POST", "/api/auth/password/forgot", O, O, O, O),
+            new Rule("POST", "/api/auth/password/reset", O, O, O, O),
+            new Rule("GET", "/api/admin/slots", L, F, F, O),
+            new Rule("GET", "/api/admin/slots/filters", L, F, F, O),
+            new Rule("POST", "/api/admin/appointments", L, F, F, O),
+            new Rule("GET", "/api/admin/deletion-requests", L, F, F, O),
+            new Rule("POST", "/api/admin/deletion-requests/{patientId}/decision", L, F, F, O),
+            new Rule("PUT", "/api/admin/practitioners/{practitionerId}/clinics", L, F, F, O),
+            new Rule("GET", "/api/patients/me", L, O, F, F),
+            new Rule("PUT", "/api/patients/me", L, O, F, F),
+            new Rule("GET", "/api/patients/me/notification-preferences", L, O, F, F),
+            new Rule("PUT", "/api/patients/me/notification-preferences", L, O, F, F),
+            new Rule("POST", "/api/patients/me/email-change", L, O, F, F),
+            new Rule("POST", "/api/patients/me/email-change/confirm", L, O, F, F),
+            new Rule("GET", "/api/patients/me/export", L, O, F, F),
+            new Rule("GET", "/api/patients/me/deletion-request", L, O, F, F),
+            new Rule("POST", "/api/patients/me/deletion-request", L, O, F, F),
+            new Rule("DELETE", "/api/patients/me/deletion-request", L, O, F, F),
+            new Rule("GET", "/api/practitioner/absences", L, F, O, F),
+            new Rule("POST", "/api/practitioner/absences", L, F, O, F),
+            new Rule("GET", "/api/practitioner/absences/{absenceId}/appointments", L, F, O, F),
+            new Rule("POST", "/api/practitioner/appointments/{appointmentId}/absence-decision", L, F, O, F),
+            new Rule("GET", "/api/practitioner/patients", L, F, O, F),
+            new Rule("GET", "/api/admin/reassignments", L, F, F, O),
+            new Rule("GET", "/api/admin/reassignments/candidates", L, F, F, O),
+            new Rule("GET", "/api/admin/reassignments/targets", L, F, F, O),
+            new Rule("POST", "/api/admin/reassignments", L, F, F, O),
+            new Rule("GET", "/api/patients/me/reassignments", L, O, F, F),
+            new Rule("POST", "/api/patients/me/reassignments/{id}/decision", L, F, F, F),
+            new Rule("GET", "/api/practitioner/reassignments", L, F, O, F),
+            new Rule("POST", "/api/practitioner/reassignments/{id}/decision", L, F, F, F),
+            new Rule("GET", "/api/results/me", L, O, F, F),
+            new Rule("GET", "/api/patients/{id}/results", L, F, F, F),
+            new Rule("POST", "/api/patients/{id}/results", L, F, F, F),
             // MLink-123/125: upload is staff-only; list is owner-or-staff; a download by another
             // patient is a 404 (OPEN), never a 403 that would confirm the document exists
             new Rule("POST",   "/api/patients/{patientId}/documents",                  L, F, F, O),
@@ -174,6 +209,9 @@ class AccessMatrixFunctionalTest extends FunctionalTestBase {
         String resolved = path.replace("{id}", UUID.randomUUID().toString())
                 .replace("{clinicId}", UUID.randomUUID().toString())
                 .replace("{patientId}", UUID.randomUUID().toString())
+                .replace("{absenceId}", UUID.randomUUID().toString())
+                .replace("{appointmentId}", UUID.randomUUID().toString())
+                .replace("{practitionerId}", UUID.randomUUID().toString())
                 .replace("{documentId}", UUID.randomUUID().toString());
         if (method.equals("POST") && path.endsWith("/documents")) {
             return browser.postMultipart(resolved, "Access matrix", "matrix.pdf",

@@ -32,7 +32,9 @@ public class EmailToken {
         VERIFY_EMAIL(Duration.ofHours(24)),
         ACTIVATE_ACCOUNT(Duration.ofHours(24)),
         /** A practitioner's or staff member's first staff-code setup (MLink-62, review of #97). */
-        MFA_ENROLMENT(Duration.ofMinutes(30));
+        MFA_ENROLMENT(Duration.ofMinutes(30)),
+        /** US-03: the link of "forgot my password", short-lived. */
+        PASSWORD_RESET(Duration.ofHours(1));
 
         private final Duration validity;
 

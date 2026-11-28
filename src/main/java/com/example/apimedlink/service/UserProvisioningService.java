@@ -64,6 +64,11 @@ public class UserProvisioningService {
         try {
             // TOUT (update + audit) dans la même transaction
             return tx.execute(status -> {
+                users.lockLocalAccount(id);
+                if (users.emailChangeInProgress(id)) {
+                    throw new ApiException(HttpStatus.CONFLICT, "EMAIL_CHANGE_PENDING",
+                            "Votre changement d'adresse est en cours. Réessayez dans un instant.");
+                }
                 User result = users.findById(id)
                         .map(existing -> follow(existing, normalizedEmail, normalizedUsername))
                         .orElseGet(() -> create(id, normalizedEmail, normalizedUsername));

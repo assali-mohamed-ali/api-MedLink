@@ -7,6 +7,7 @@ import com.example.apimedlink.model.AuditAction;
 import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.Slot;
 import com.example.apimedlink.model.SlotStatus;
+import com.example.apimedlink.repository.AbsenceRepository;
 import com.example.apimedlink.repository.AppointmentRepository;
 import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.repository.SlotRepository;
@@ -35,24 +36,33 @@ public class AppointmentService {
     /** V13: one BOOKED appointment per slot at most. */
     static final String ONE_ACTIVE_PER_SLOT = "appointments_one_active_per_slot";
 
+    private final AbsenceRepository absences;
     private final AppointmentRepository appointments;
     private final SlotRepository slots;
     private final PatientRepository patients;
     private final OwnershipGuard ownership;
     private final AuditService audit;
     private final AlertService alerts;
+    private final AppointmentConfirmation confirmation;
+    private final KeycloakAdminService identity;
+    private final PractitionerIdentityReconciler practitionerIdentity;
     /** H-03: no cancel less than this before the start (app.appointments.cancel-deadline-hours). */
     private final Duration cancelDeadline;
 
     public AppointmentService(AppointmentRepository appointments, SlotRepository slots, PatientRepository patients,
-            OwnershipGuard ownership, AuditService audit, AlertService alerts,
+            OwnershipGuard ownership, AuditService audit, AlertService alerts, AppointmentConfirmation confirmation,
+            KeycloakAdminService identity, AbsenceRepository absences, PractitionerIdentityReconciler practitionerIdentity,
             @Value("${app.appointments.cancel-deadline-hours}") long cancelDeadlineHours) {
+        this.absences = absences;
         this.appointments = appointments;
         this.slots = slots;
         this.patients = patients;
         this.ownership = ownership;
         this.audit = audit;
         this.alerts = alerts;
+        this.confirmation = confirmation;
+        this.identity = identity;
+        this.practitionerIdentity = practitionerIdentity;
         this.cancelDeadline = Duration.ofHours(cancelDeadlineHours);
     }
 
@@ -75,7 +85,7 @@ public class AppointmentService {
         checkCancelDeadline(slot, now);
         appointment.setStatus(AppointmentStatus.CANCELLED);
         appointment.setCancelledAt(now);
-        slot.setStatus(SlotStatus.FREE);
+        release(slot);
         audit.recordWithin(AuditAction.APPOINTMENT_CANCELLED, "APPOINTMENT", appointmentId.toString(),
                 AuditOutcome.SUCCESS);
         // MLink-37 (review on #125): the practitioner's alert, in this transaction; its mail leaves after the commit
@@ -119,9 +129,13 @@ public class AppointmentService {
         }
         Instant now = Instant.now();
         checkCancelDeadline(oldSlot, now);
+        if (!oldSlot.getPractitioner().getId().equals(newSlot.getPractitioner().getId())) {
+            throw new ApiException(HttpStatus.CONFLICT, "DIFFERENT_PRACTITIONER",
+                    "Choisissez un nouveau créneau chez le même praticien.");
+        }
         old.setStatus(AppointmentStatus.CANCELLED);
         old.setCancelledAt(now);
-        oldSlot.setStatus(SlotStatus.FREE);
+        release(oldSlot);
         appointments.saveAndFlush(old);
         slots.saveAndFlush(oldSlot);
         Appointment moved = bookLocked(newSlot, old.getPatientId(), now);
@@ -129,7 +143,14 @@ public class AppointmentService {
                 AuditOutcome.SUCCESS);
         // MLink-37: the practitioner of the old slot is told it was moved ("reporté"), and to which date
         alerts.onAppointmentMoved(old, moved);
+        confirmation.onBooked(moved);
         return moved;
+    }
+
+    /** A declared absence must not be undone by cancellation or a move. The slot is already locked. */
+    private void release(Slot slot) {
+        boolean absent = absences.covers(slot.getPractitioner().getId(), slot.getStartsAt(), slot.getEndsAt());
+        slot.setStatus(absent ? SlotStatus.CLOSED : SlotStatus.FREE);
     }
 
     private Slot slotToBook(UUID slotId) {
@@ -173,12 +194,49 @@ public class AppointmentService {
         // Ids only (the caller is taken from the session by AuditService)
         audit.recordWithin(AuditAction.APPOINTMENT_BOOKED, "APPOINTMENT", appointment.getId().toString(),
                 AuditOutcome.SUCCESS);
+        confirmation.onBooked(appointment);
+        return appointment;
+    }
+
+    /**
+     * US-30: a member of the administrative staff books a free slot for a patient (patient_id = the patient,
+     * booked_by = the staff member). Same rules and locks as a patient's own booking (MLink-102/167); 404 when the patient
+     * has no profile. Audited in the same transaction.
+     */
+    @Transactional
+    public Appointment bookFor(UUID patientId, UUID slotId, UUID staffId) {
+        if (patients.lockForBooking(patientId).isEmpty()) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "PATIENT_NOT_FOUND", "Ce patient n'existe pas.");
+        }
+        KeycloakUser account;
+        try {
+            account = identity.getUser(patientId);
+        } catch (jakarta.persistence.EntityNotFoundException missing) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "PATIENT_NOT_FOUND", "Ce patient n'existe pas.");
+        }
+        if (!account.enabled() || !account.emailVerified()) {
+            throw new ApiException(HttpStatus.CONFLICT, "PATIENT_NOT_ELIGIBLE", "Ce compte patient est inactif.");
+        }
+        Appointment appointment = bookLocked(slotToBook(slotId), patientId, staffId, Instant.now());
+        audit.recordWithin(AuditAction.APPOINTMENT_BOOKED, "APPOINTMENT", appointment.getId().toString(),
+                AuditOutcome.SUCCESS);
+        // US-08: the patient gets the same confirmation as for their own booking (the staff member is only the actor)
+        confirmation.onBooked(appointment);
         return appointment;
     }
 
     /** Books a slot already locked by the caller's transaction, for the patient (patient_id = booked_by). */
     private Appointment bookLocked(Slot slot, UUID patientId, Instant now) {
-        if (slot.getStatus() != SlotStatus.FREE || !slot.getStartsAt().isAfter(now)) {
+        return bookLocked(slot, patientId, patientId, now);
+    }
+
+    /** As above, with who booked it (the patient, or a staff member for US-30). */
+    private Appointment bookLocked(Slot slot, UUID patientId, UUID bookedBy, Instant now) {
+        if (slot.getStatus() != SlotStatus.FREE || !slot.getStartsAt().isAfter(now)
+                || !slot.getPractitioner().isBookingEnabled()
+                || !practitionerIdentity.eligibleNow(slot.getPractitioner().getId())
+                || slot.getPractitioner().getClinics().stream().noneMatch(clinic -> clinic.getId().equals(slot.getClinic().getId()))
+                || absences.covers(slot.getPractitioner().getId(), slot.getStartsAt(), slot.getEndsAt())) {
             throw new ApiException(HttpStatus.CONFLICT, "SLOT_TAKEN", SLOT_TAKEN);
         }
         // MLink-167: one place at a time. A move has already cancelled (and flushed) the appointment it replaces,
@@ -189,7 +247,9 @@ public class AppointmentService {
         slot.setStatus(SlotStatus.BOOKED);
         Appointment appointment;
         try {
-            appointment = appointments.saveAndFlush(new Appointment(slot, patientId, patientId));
+            Appointment created = new Appointment(slot, patientId, bookedBy);
+            created.setBookedByStaff(!patientId.equals(bookedBy));
+            appointment = appointments.saveAndFlush(created);
         } catch (DataIntegrityViolationException e) {
             // MLink-103: the unique index on a slot's active appointment (V13) is the last guard against a double
             // booking; losing to it is the same "taken" answer as above, never a server error

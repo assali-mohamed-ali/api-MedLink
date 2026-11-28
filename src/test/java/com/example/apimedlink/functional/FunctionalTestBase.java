@@ -444,6 +444,22 @@ public abstract class FunctionalTestBase {
             return post(path, json, true);
         }
 
+        /** A PUT from React: fetches the CSRF cookie once, then sends the JSON body with it (US-15). */
+        HttpResponse<String> putJson(String path, String json) throws Exception {
+            if (cookies.value("XSRF-TOKEN") == null) {
+                call("/api/auth/csrf");
+            }
+            HttpRequest.Builder request = HttpRequest.newBuilder(URI.create(appUrl(path)))
+                    .header("X-Forwarded-For", forwardedFor)
+                    .header(HttpHeaders.CONTENT_TYPE, MediaType.APPLICATION_JSON_VALUE)
+                    .PUT(HttpRequest.BodyPublishers.ofString(json));
+            String csrf = cookies.value("XSRF-TOKEN");
+            if (csrf != null) {
+                request.header("X-XSRF-TOKEN", csrf);
+            }
+            return http.send(request.build(), HttpResponse.BodyHandlers.ofString());
+        }
+
         private HttpRequest get(String url) {
             return HttpRequest.newBuilder(URI.create(url)).header("X-Forwarded-For", forwardedFor).GET().build();
         }
