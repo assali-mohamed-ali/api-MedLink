@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1280" height="300" viewBox="0 0 1280 300" role="img" aria-label="MedLink API : Health portal across three clinics — Spring Boot BFF">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0e5245"/>
+      <stop offset="1" stop-color="#2d6a5c"/>
+    </linearGradient>
+    <pattern id="dots" width="22" height="22" patternUnits="userSpaceOnUse">
+      <circle cx="2" cy="2" r="1.4" fill="#b1efdd" fill-opacity="0.13"/>
+    </pattern>
+  </defs>
+  <rect width="1280" height="300" rx="24" fill="url(#bg)"/>
+  <rect x="760" width="520" height="300" rx="24" fill="url(#dots)"/>
+  <circle cx="1130" cy="70" r="150" fill="#b1efdd" fill-opacity="0.07"/>
+  <circle cx="1210" cy="250" r="90" fill="#b1efdd" fill-opacity="0.06"/>
+  <g transform="translate(96 62)">
+    <rect width="76" height="76" rx="20" fill="#ffffff"/>
+    <path d="M31 16h14v15h15v14H45v15H31V45H16V31h15z" fill="#0e5245"/>
+  </g>
+  <g font-family="'Segoe UI', 'Helvetica Neue', Arial, sans-serif">
+    <text x="196" y="112" font-size="58" font-weight="700" fill="#ffffff">MedLink API</text>
+    <text x="198" y="150" font-size="22" fill="#cfeee3">Health portal across three clinics — Spring Boot BFF</text>
+    <rect x="96" y="214" width="144" height="34" rx="17" fill="#b1efdd" fill-opacity="0.16" stroke="#b1efdd" stroke-opacity="0.45"/><text x="168" y="236" text-anchor="middle" font-size="15" fill="#dff7ee">Spring Boot 4.1</text><rect x="252" y="214" width="77" height="34" rx="17" fill="#b1efdd" fill-opacity="0.16" stroke="#b1efdd" stroke-opacity="0.45"/><text x="290" y="236" text-anchor="middle" font-size="15" fill="#dff7ee">Java 17</text><rect x="341" y="214" width="127" height="34" rx="17" fill="#b1efdd" fill-opacity="0.16" stroke="#b1efdd" stroke-opacity="0.45"/><text x="404" y="236" text-anchor="middle" font-size="15" fill="#dff7ee">Keycloak 26.8</text><rect x="480" y="214" width="127" height="34" rx="17" fill="#b1efdd" fill-opacity="0.16" stroke="#b1efdd" stroke-opacity="0.45"/><text x="544" y="236" text-anchor="middle" font-size="15" fill="#dff7ee">PostgreSQL 18</text><rect x="619" y="214" width="94" height="34" rx="17" fill="#b1efdd" fill-opacity="0.16" stroke="#b1efdd" stroke-opacity="0.45"/><text x="666" y="236" text-anchor="middle" font-size="15" fill="#dff7ee">DevSecOps</text>
+  </g>
+</svg>

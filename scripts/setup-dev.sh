@@ -602,9 +602,11 @@ COOKIES="$LOG_DIR/signup-cookies.txt"
 rm -f "$COOKIES"
 curl -s -o /dev/null --max-time 10 -c "$COOKIES" -b "$COOKIES" "$APP_URL/api/auth/csrf"
 XSRF="$(awk '$6 == "XSRF-TOKEN" { print $7 }' "$COOKIES" | head -n 1)"
+# US-04: no account without the current consent version, read from the API so a new text never breaks this check
+CONSENT_VERSION="$(curl -s --max-time 10 "$APP_URL/api/auth/consent" | sed -n 's/.*"version":"\([^"]*\)".*/\1/p')"
 STATUS="$(curl -s -o /dev/null -w '%{http_code}' --max-time 30 -c "$COOKIES" -b "$COOKIES" \
     -H "X-XSRF-TOKEN: $XSRF" -H 'Content-Type: application/json' \
-    -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"Smoke-Test-2026!\",\"firstName\":\"Smoke\",\"lastName\":\"Test\",\"birthDate\":\"1990-01-01\"}" \
+    -d "{\"email\":\"$SMOKE_EMAIL\",\"password\":\"Smoke-Test-2026!\",\"firstName\":\"Smoke\",\"lastName\":\"Test\",\"birthDate\":\"1990-01-01\",\"consentVersion\":\"$CONSENT_VERSION\"}" \
     "$APP_URL/api/auth/register")"
 if [ "$STATUS" != 201 ]; then
     bad "signup: POST /api/auth/register returned $STATUS, expected 201 (log: $LOG_DIR/app.log)"

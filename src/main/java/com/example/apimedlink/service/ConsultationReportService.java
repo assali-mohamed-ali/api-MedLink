@@ -4,11 +4,16 @@ import com.example.apimedlink.exception.ApiException;
 import com.example.apimedlink.model.AuditAction;
 import com.example.apimedlink.model.AuditOutcome;
 import com.example.apimedlink.model.ConsultationReport;
+import com.example.apimedlink.model.Practitioner;
 import com.example.apimedlink.repository.AppointmentRepository;
 import com.example.apimedlink.repository.ConsultationReportRepository;
+import com.example.apimedlink.repository.PractitionerRepository;
+import java.time.Instant;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 import org.springframework.dao.DataAccessException;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.access.AccessDeniedException;
@@ -36,15 +41,18 @@ public class ConsultationReportService {
 
     private final ConsultationReportRepository reports;
     private final AppointmentRepository appointments;
+    private final PractitionerRepository practitioners;
     private final ReportCipher cipher;
     private final TransactionTemplate transaction;
     private final TransactionTemplate readOnly;
     private final AuditService audit;
 
     public ConsultationReportService(ConsultationReportRepository reports, AppointmentRepository appointments,
-            ReportCipher cipher, PlatformTransactionManager transactionManager, AuditService audit) {
+            PractitionerRepository practitioners, ReportCipher cipher, PlatformTransactionManager transactionManager,
+            AuditService audit) {
         this.reports = reports;
         this.appointments = appointments;
+        this.practitioners = practitioners;
         this.cipher = cipher;
         this.transaction = new TransactionTemplate(transactionManager);
         this.readOnly = new TransactionTemplate(transactionManager);
@@ -56,10 +64,15 @@ public class ConsultationReportService {
      * Saves a report of the caller on an attached patient. The attachment is checked first, so a stranger learns
      * nothing, not even the text rules. The report is saved in one transaction: if it fails, nothing is kept and the
      * caller gets REPORT_SAVE_FAILED, so the front keeps the draft and offers to try again (32.6). The REPORT_CREATED
-     * row is part of that transaction (32.4): a report is never kept without its trace.
+     * row is part of that transaction (32.4): a report is never kept without its trace. MLink-32 follow-up: only once a
+     * consultation with the patient has ended; before, 409 CONSULTATION_NOT_COMPLETED and nothing is saved.
      */
     public ReadableReport create(UUID practitionerId, UUID patientId, String content) {
         requireAttached(practitionerId, patientId);
+        if (!consultationCompleted(practitionerId, patientId)) {
+            throw new ApiException(HttpStatus.CONFLICT, "CONSULTATION_NOT_COMPLETED",
+                    "Vous pourrez écrire le compte-rendu une fois la consultation terminée.");
+        }
         validate(content);
         UUID id = UUID.randomUUID();
         ConsultationReport report = new ConsultationReport(id, patientId, practitionerId, cipher.encrypt(id, patientId, content));
@@ -93,6 +106,32 @@ public class ConsultationReportService {
         });
         audit.record(AuditAction.REPORT_VIEWED, RESOURCE_PATIENT_REPORTS, patientId.toString(), AuditOutcome.SUCCESS);
         return found;
+    }
+
+    /**
+     * MLink-32 follow-up: the patient's own reports, newest first, each with the practitioner who wrote it (name and
+     * specialty). Traced like a practitioner's read (REPORT_VIEWED on the patient), after the read transaction.
+     */
+    public List<PatientReport> mine(UUID patientId) {
+        List<PatientReport> found = readOnly.execute(status -> {
+            List<ConsultationReport> written = reports.findByPatientIdOrderByCreatedAtDesc(patientId);
+            Map<UUID, Practitioner> authors = practitioners
+                    .findAllById(written.stream().map(ConsultationReport::getPractitionerId).distinct().toList())
+                    .stream().collect(Collectors.toMap(Practitioner::getId, Function.identity()));
+            return written.stream().map(report -> {
+                Practitioner author = authors.get(report.getPractitionerId());
+                return new PatientReport(report.getId(), report.getCreatedAt(),
+                        cipher.decrypt(report.getId(), report.getPatientId(), report.getContentEncrypted()),
+                        author.getFirstName(), author.getLastName(), author.getSpecialty().getName());
+            }).toList();
+        });
+        audit.record(AuditAction.REPORT_VIEWED, RESOURCE_PATIENT_REPORTS, patientId.toString(), AuditOutcome.SUCCESS);
+        return found;
+    }
+
+    /** MLink-32 follow-up: a consultation with the patient has ended, so a report may be written. */
+    public boolean consultationCompleted(UUID practitionerId, UUID patientId) {
+        return appointments.existsCompletedByPractitionerAndPatient(practitionerId, patientId, Instant.now());
     }
 
     /**

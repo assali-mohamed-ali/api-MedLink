@@ -45,8 +45,8 @@ public class StatsExportService {
 
     public StatsExportService(AppointmentStatsRepository facts, AuditService audit,
             @Value("${app.stats.min-group-size:5}") int minGroupSize) {
-        if (minGroupSize < 2) {
-            throw new IllegalStateException("app.stats.min-group-size must be at least 2: a group of one is a person");
+        if (minGroupSize < 5) {
+            throw new IllegalStateException("app.stats.min-group-size must be at least 5 distinct patients");
         }
         this.facts = facts;
         this.audit = audit;
@@ -136,7 +136,17 @@ public class StatsExportService {
      */
     private static String csvCell(String value) {
         String text = value;
-        if (!text.isEmpty() && "=+-@\t\r".indexOf(text.charAt(0)) >= 0) {
+        int index = 0;
+        while (index < text.length()) {
+            char ch = text.charAt(index);
+            if (!Character.isWhitespace(ch) && !Character.isSpaceChar(ch)
+                    && !Character.isISOControl(ch) && Character.getType(ch) != Character.FORMAT) {
+                break;
+            }
+            index++;
+        }
+        if ((!text.isEmpty() && "\t\r\n".indexOf(text.charAt(0)) >= 0)
+                || (index < text.length() && "=+-@＝＋－＠".indexOf(text.charAt(index)) >= 0)) {
             text = "'" + text;
         }
         if (text.contains(",") || text.contains("\"") || text.contains("\n") || text.contains("\r")) {

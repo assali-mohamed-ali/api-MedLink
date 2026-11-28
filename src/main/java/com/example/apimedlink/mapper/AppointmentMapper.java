@@ -24,7 +24,8 @@ public final class AppointmentMapper {
                 new SlotDto.ClinicRef(clinic.getId(), clinic.getName()),
                 new SlotDto.PractitionerRef(practitioner.getId(), practitioner.getFirstName(), practitioner.getLastName()),
                 slot.getStartsAt(),
-                slot.getEndsAt());
+                slot.getEndsAt(),
+                appointment.isBookedByStaff());
     }
 
     public static AppointmentPageResponse toPageResponse(Page<Appointment> page) {

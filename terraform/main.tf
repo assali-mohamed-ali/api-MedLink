@@ -71,6 +71,8 @@ resource "docker_container" "app" {
     "MAIL_FROM=${var.mail_from}",
     "APP_FRONTEND_URL=${var.app_frontend_url}",
     "CORS_ALLOWED_ORIGINS=${var.cors_allowed_origins}",
+    # US-04: sign-ups stay closed until the consent text is approved (docs/product-decisions.md §3)
+    "APP_CONSENT_AVAILABLE=false",
   ]
 
   healthcheck {

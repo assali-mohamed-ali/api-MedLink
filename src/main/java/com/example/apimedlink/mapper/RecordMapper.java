@@ -2,6 +2,7 @@ package com.example.apimedlink.mapper;
 
 import com.example.apimedlink.dto.RecordDto;
 import com.example.apimedlink.model.Patient;
+import com.example.apimedlink.model.RecordNumbers;
 import com.example.apimedlink.service.PatientRecord;
 import java.util.List;
 
@@ -14,7 +15,8 @@ public final class RecordMapper {
         Patient patient = record.patient();
         return new RecordDto(
                 new RecordDto.PatientIdentity(patient.getId(), patient.getFirstName(), patient.getLastName(),
-                        patient.getBirthDate(), patient.getPhone()),
-                List.of());
+                        patient.getBirthDate(), patient.getPhone(), RecordNumbers.label(patient.getRecordNumber())),
+                List.of(),
+                record.canWriteReport());
     }
 }

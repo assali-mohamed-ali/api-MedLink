@@ -23,6 +23,7 @@ import com.example.apimedlink.model.User;
 import com.example.apimedlink.repository.EmailTokenRepository;
 import com.example.apimedlink.repository.PatientRepository;
 import com.example.apimedlink.repository.UserRepository;
+import com.example.apimedlink.service.ConsentPolicy;
 import com.example.apimedlink.service.KeycloakAdminService;
 import jakarta.mail.Session;
 import jakarta.mail.internet.MimeMessage;
@@ -94,8 +95,9 @@ class RegistrationControllerTest {
     private String body(String emailValue, String firstName, String birthDate) {
         return """
                 {"email":"%s","password":"%s","firstName":"%s","lastName":"Ben Salah",
-                 "birthDate":"%s","phone":"+216 22 123 456","address":"12 rue de Carthage, Sousse"}
-                """.formatted(emailValue, PASSWORD, firstName, birthDate);
+                 "birthDate":"%s","phone":"+216 22 123 456","address":"12 rue de Carthage, Sousse",
+                 "consentVersion":"%s"}
+                """.formatted(emailValue, PASSWORD, firstName, birthDate, ConsentPolicy.CURRENT_VERSION);
     }
 
     private ResultActions register(String json) throws Exception {

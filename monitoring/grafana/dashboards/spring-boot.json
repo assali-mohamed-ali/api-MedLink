@@ -1,6 +1,205 @@
 {
-  "title": "api-MedLink (placeholder)",
+  "title": "MedLink API and hosts",
   "uid": "api-medlink",
-  "panels": [],
-  "__note": "Importez un dashboard Spring Boot / Micrometer-Prometheus et pointez la datasource Prometheus (voir monitoring/prometheus/prometheus.yml)."
+  "schemaVersion": 39,
+  "panels": [
+    {
+      "id": 1,
+      "title": "API availability",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=~\"api-medlink-.+\"}"
+        }
+      ]
+    },
+    {
+      "id": 2,
+      "title": "Request rate by environment",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 0,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "sum by (job) (rate(http_server_requests_seconds_count[5m]))"
+        }
+      ]
+    },
+    {
+      "id": 3,
+      "title": "HTTP 5xx rate (%)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * sum by (job) (rate(http_server_requests_seconds_count{status=~\"5..\"}[5m])) / sum by (job) (rate(http_server_requests_seconds_count[5m]))"
+        }
+      ]
+    },
+    {
+      "id": 4,
+      "title": "HTTP p95 latency (seconds)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 8,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "histogram_quantile(0.95, sum by (job, le) (rate(http_server_requests_seconds_bucket[5m])))"
+        }
+      ]
+    },
+    {
+      "id": 5,
+      "title": "Host availability",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "up{job=\"node\"}"
+        }
+      ]
+    },
+    {
+      "id": 6,
+      "title": "Host filesystem used (%)",
+      "type": "timeseries",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 16,
+        "w": 12,
+        "h": 8
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "expr": "100 * (1 - node_filesystem_avail_bytes{job=\"node\",fstype=~\"ext[234]|xfs|btrfs\"} / node_filesystem_size_bytes{job=\"node\",fstype=~\"ext[234]|xfs|btrfs\"})"
+        }
+      ]
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "JVM heap used and max",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 0,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "bytes"
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{job}} used",
+          "expr": "sum by (job) (jvm_memory_used_bytes{job=~\"api-medlink-.+\", area=\"heap\"})"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "{{job}} max",
+          "expr": "sum by (job) (jvm_memory_max_bytes{job=~\"api-medlink-.+\", area=\"heap\"})"
+        }
+      ]
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "Database pool (Hikari)",
+      "datasource": {
+        "type": "prometheus",
+        "uid": "medlink-prometheus"
+      },
+      "gridPos": {
+        "x": 12,
+        "y": 24,
+        "w": 12,
+        "h": 8
+      },
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "decimals": 0
+        },
+        "overrides": []
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "legendFormat": "{{job}} active",
+          "expr": "sum by (job) (hikaricp_connections_active{job=~\"api-medlink-.+\"})"
+        },
+        {
+          "refId": "B",
+          "legendFormat": "{{job}} pending",
+          "expr": "sum by (job) (hikaricp_connections_pending{job=~\"api-medlink-.+\"})"
+        },
+        {
+          "refId": "C",
+          "legendFormat": "{{job}} max",
+          "expr": "sum by (job) (hikaricp_connections_max{job=~\"api-medlink-.+\"})"
+        }
+      ]
+    }
+  ]
 }

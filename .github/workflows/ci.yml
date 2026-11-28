@@ -17,7 +17,7 @@ permissions:
 jobs:
   build-test:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 55
     steps:
       - uses: actions/checkout@v7
 
@@ -101,7 +101,10 @@ jobs:
 
       # Blocking gate: test/build failures fail the job.
       - name: Build + tests
-        run: ./mvnw --no-transfer-progress --fail-fast verify
+        run: ./mvnw -B --no-transfer-progress --fail-fast clean verify
+
+      - name: Verify reverse test order
+        run: ./mvnw -B --no-transfer-progress --fail-fast test -Dsurefire.runOrder=reversealphabetical
 
       - name: Publish test report
         if: always()

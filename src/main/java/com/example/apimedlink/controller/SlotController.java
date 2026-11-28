@@ -21,7 +21,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 /** Endpoint 25.2 (MLink-98): a patient searches the free slots; its input rules are MLink-100 (25.4). */
 @RestController
-@RequestMapping("/api/slots")
+@RequestMapping({"/api/slots", "/api/admin/slots"})
 public class SlotController {
 
     /** A search looks one month ahead at most: bounds the work one request can ask of the database. */
@@ -41,7 +41,7 @@ public class SlotController {
      * 400 instead of 403 (review on #87). Every broken rule is listed in {@code details}, under its field, in French.
      */
     @GetMapping
-    @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
+    @PreAuthorize("hasAnyRole('" + Roles.PATIENT + "', '" + Roles.ADMINISTRATIVE_STAFF + "')")
     public SlotSearchResponse search(
             @RequestParam(name = "from", required = false) String fromText,
             @RequestParam(name = "to", required = false) String toText,
@@ -78,7 +78,7 @@ public class SlotController {
 
     /** The lists of the search form (MLink-163): clinics, specialties, practitioners with their clinics. */
     @GetMapping("/filters")
-    @PreAuthorize("hasRole('" + Roles.PATIENT + "')")
+    @PreAuthorize("hasAnyRole('" + Roles.PATIENT + "', '" + Roles.ADMINISTRATIVE_STAFF + "')")
     public SlotFiltersResponse filters() {
         return SlotMapper.toFiltersResponse(service.filters());
     }

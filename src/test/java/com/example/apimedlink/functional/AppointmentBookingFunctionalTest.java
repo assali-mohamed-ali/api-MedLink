@@ -2,6 +2,8 @@ package com.example.apimedlink.functional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.net.URI;
+import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.sql.Date;
 import java.sql.Timestamp;
@@ -34,6 +36,9 @@ class AppointmentBookingFunctionalTest extends FunctionalTestBase {
     @Autowired
     JdbcTemplate jdbc;
 
+    @Autowired
+    com.example.apimedlink.service.PractitionerIdentityReconciler practitionerIdentity;
+
     @Test
     void aPatientBooksAFreeSlotAndItLeavesTheSearch() throws Exception {
         UUID practitioner = insertPractitioner("Rim", "Jaziri", insertSpecialty("Cardiologie (réservation)"));
@@ -62,6 +67,67 @@ class AppointmentBookingFunctionalTest extends FunctionalTestBase {
         Map<String, Object> search = body(patient.browser().call("/api/slots?practitionerId=" + practitioner
                 + "&from=" + DAY.minus(1, ChronoUnit.HOURS) + "&to=" + DAY.plus(1, ChronoUnit.DAYS)));
         assertThat((List<?>) search.get("items")).isEmpty();
+    }
+
+    @Test
+    void anExternalKeycloakDisableAndReenableAreReconciled() throws Exception {
+        String email = uniqueEmail("external-disable-practitioner");
+        UUID practitioner = console.createUser(email, PASSWORD, "/practitioners");
+        UUID specialty = insertSpecialty("Cardiologie externe " + practitioner);
+        jdbc.update("insert into users (id, username, email) values (?, ?, ?)", practitioner, email, email);
+        jdbc.update("insert into practitioners (id, first_name, last_name, specialty_id) values (?, 'Rim', 'Test', ?)",
+                practitioner, specialty);
+        console.disable(practitioner);
+        practitionerIdentity.reconcileOne(practitioner);
+        assertThat(jdbc.queryForObject("select booking_enabled from practitioners where id=?", Boolean.class, practitioner))
+                .isFalse();
+        console.update(practitioner, java.util.Map.of("enabled", true));
+        practitionerIdentity.reconcileOne(practitioner);
+        assertThat(jdbc.queryForObject("select booking_enabled from practitioners where id=?", Boolean.class, practitioner))
+                .isTrue();
+    }
+
+    @Test
+    void aDisabledPractitionerIsHiddenAndAKnownSlotCannotBeBooked() throws Exception {
+        String email = uniqueEmail("disabled-practitioner");
+        UUID practitioner = console.createUser(email, PASSWORD, "/practitioners");
+        UUID specialty = insertSpecialty("Cardiologie (praticien inactif)");
+        jdbc.update("insert into users (id, username, email) values (?, ?, ?) on conflict (id) do nothing",
+                practitioner, email, email);
+        jdbc.update("insert into practitioners (id, first_name, last_name, specialty_id) values (?, 'Rim', 'Test', ?)",
+                practitioner, specialty);
+        UUID slot = insertSlot(practitioner, insertClinic("Clinique Praticien Inactif"), DAY, "FREE");
+        String staffEmail = uniqueEmail("disabled-practitioner-staff");
+        console.createUser(staffEmail, PASSWORD, "/administrative-staff");
+        Browser staff = new Browser().login(staffEmail, PASSWORD);
+        Patient holder = patient();
+        assertThat(holder.browser().call("/api/slots/filters").body()).contains(practitioner.toString());
+        assertThat(setEnabled(staff, practitioner, false).statusCode()).isEqualTo(204);
+
+        assertThat(holder.browser().call("/api/slots/filters").body()).doesNotContain(practitioner.toString());
+        String search = "/api/slots?practitionerId=" + practitioner + "&from="
+                + DAY.minus(1, ChronoUnit.HOURS) + "&to=" + DAY.plus(1, ChronoUnit.HOURS);
+        assertThat((List<?>) body(holder.browser().call(search)).get("items")).isEmpty();
+        assertSlotTaken(holder.browser().postJson("/api/appointments", "{\"slotId\":\"" + slot + "\"}"));
+        assertThat(jdbc.queryForObject("select count(*) from appointments where slot_id = ?", Integer.class, slot)).isZero();
+
+        assertThat(setEnabled(staff, practitioner, true).statusCode()).isEqualTo(204);
+        assertThat(holder.browser().call("/api/slots/filters").body()).contains(practitioner.toString());
+        assertThat(holder.browser().postJson("/api/appointments", "{\"slotId\":\"" + slot + "\"}").statusCode())
+                .isEqualTo(201);
+    }
+
+    private static HttpResponse<String> setEnabled(Browser staff, UUID id, boolean enabled) throws Exception {
+        if (staff.cookies.value("XSRF-TOKEN") == null) {
+            staff.call("/api/auth/csrf");
+        }
+        HttpRequest request = HttpRequest.newBuilder(URI.create(appUrl("/api/admin/users/" + id + "/status")))
+                .header("X-Forwarded-For", staff.forwardedFor)
+                .header("X-XSRF-TOKEN", staff.cookies.value("XSRF-TOKEN"))
+                .header("Content-Type", "application/json")
+                .method("PATCH", HttpRequest.BodyPublishers.ofString("{\"enabled\":" + enabled + "}"))
+                .build();
+        return staff.http.send(request, HttpResponse.BodyHandlers.ofString());
     }
 
     @Test

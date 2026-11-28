@@ -124,7 +124,8 @@ public class AppointmentReminderJob {
             return false;
         }
         Patient holder = patients.findById(appointment.getPatientId()).orElse(null);
-        if (holder == null || holder.getEmail() == null) {
+        // US-15: the preference is read again under the lock: turned off since the candidates were listed, no mail
+        if (holder == null || holder.getEmail() == null || !holder.isNotifyAppointmentReminders()) {
             return false;
         }
         Practitioner practitioner = slot.getPractitioner();

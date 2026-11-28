@@ -86,6 +86,23 @@ class RestKeycloakAdminServiceTest {
     }
 
     @Test
+    void verifiedEmailChangeMustReadBackBothLoginAndEmail() {
+        expectToken("t1", 300);
+        server.expect(requestTo(USERS + "/" + ID)).andExpect(method(HttpMethod.PUT))
+                .andExpect(content().json("""
+                        {"username":"new@example.com","email":"new@example.com","emailVerified":true}
+                        """, JsonCompareMode.STRICT))
+                .andRespond(withStatus(HttpStatus.NO_CONTENT));
+        server.expect(requestTo(USERS + "/" + ID)).andExpect(method(HttpMethod.GET))
+                .andRespond(withSuccess("""
+                        {"username":"old@example.com","email":"new@example.com","emailVerified":true}
+                        """, MediaType.APPLICATION_JSON));
+        assertThatThrownBy(() -> service.changeVerifiedEmail(ID, "new@example.com"))
+                .isInstanceOf(KeycloakUnavailableException.class);
+        server.verify();
+    }
+
+    @Test
     void createUserOnAnExistingEmailIsEmailTaken() {
         expectToken("t1", 300);
         server.expect(requestTo(USERS))
