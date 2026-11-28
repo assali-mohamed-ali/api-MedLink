@@ -1,5 +1,76 @@
 # Changelog
 
+## [1.3.0](https://github.com/assali-mohamed-ali/api-MedLink/compare/v1.2.0...v1.3.0) (2026-11-28)
+
+
+### Features
+
+* bounded monitoring stack, hardened node_exporter, JVM, pool and host panels ([0c52a5d](https://github.com/assali-mohamed-ali/api-MedLink/commit/0c52a5dd9be9f87987b0b86f15b1e980d044026a))
+* complete MedLink audit, clinic and operations follow-ups ([65be04b](https://github.com/assali-mohamed-ali/api-MedLink/commit/65be04b8bdc111f0c3ca1357570bea5fe8572cbb))
+* finalise reports only after consultation and strengthen consent and retention policy ([cb19591](https://github.com/assali-mohamed-ali/api-MedLink/commit/cb19591f7f1832cc476c4be571a2a54636b1c082))
+* implement atomic dual-approval appointment reassignment ([691122d](https://github.com/assali-mohamed-ali/api-MedLink/commit/691122dc5d96a8ff0cd2f938b64152b419f973e2))
+* intégrer le backlog MedLink US-01 à US-32 côté API ([03fa6d8](https://github.com/assali-mohamed-ali/api-MedLink/commit/03fa6d84dbede2db04f068242cdce11ca38134fe))
+* monitoring limits, hardened node_exporter, JVM/pool/host dashboards (MLink-175) ([19ade08](https://github.com/assali-mohamed-ali/api-MedLink/commit/19ade08d53c2e52dc2d6cd784f805db21492aaa8))
+* persist booking confirmation retries and staff provenance ([7afe2ca](https://github.com/assali-mohamed-ali/api-MedLink/commit/7afe2ca9b897b104f5ed54837cde8a11106e23fb))
+* prevent overlapping statistics export differencing with immutable monthly releases ([a8ea220](https://github.com/assali-mohamed-ali/api-MedLink/commit/a8ea22067c300327d5e4052edf04054ca5916ba6))
+* promote staging to prod ([159f161](https://github.com/assali-mohamed-ali/api-MedLink/commit/159f161485a24f9cf853f7492067c9ef7ad684ea))
+* protect last active administrative staff across account operations ([b518130](https://github.com/assali-mohamed-ali/api-MedLink/commit/b518130ea1f46284572e41ee04ff14b6014113c1))
+* reconcile practitioner availability with external Keycloak changes ([7d93cda](https://github.com/assali-mohamed-ali/api-MedLink/commit/7d93cda84a42b4b3fc9a0565401c48c3fc9f7364))
+* report clinic occupancy and enforce CSV export protections ([bcddb54](https://github.com/assali-mohamed-ali/api-MedLink/commit/bcddb54957c1929f99f5a42107b63c08adabab5c))
+* US-03 forgot my password with our own mailed link (not compiled, not tested) ([4fa1550](https://github.com/assali-mohamed-ali/api-MedLink/commit/4fa155044d5e1caf45677a5cadf18ea1f025f975))
+* US-04 consent recorded at sign-up (not compiled, not tested) ([a0ae8cc](https://github.com/assali-mohamed-ali/api-MedLink/commit/a0ae8cc6dc14b9e2c9d9dcc6c3bc99154e4a61b3))
+* US-04 consent text follows Tunisian data protection law (not compiled, not tested) ([c52089a](https://github.com/assali-mohamed-ali/api-MedLink/commit/c52089a1cd1fc23ef661e686fcdb7295fffa38d9))
+* US-04, US-15, US-16 consent everywhere, notification preferences, account closure ([e7a4a6f](https://github.com/assali-mohamed-ali/api-MedLink/commit/e7a4a6f35e19c7ed34a8a3f9f47da594cfd61aae))
+* US-08 confirmation mail after a booking or a move (not compiled, not tested) ([4d0c041](https://github.com/assali-mohamed-ali/api-MedLink/commit/4d0c041a6ef070333e82088388d474a633533a83))
+* US-13 and US-25 complete the examination result fields (not compiled, not tested) ([2d5975e](https://github.com/assali-mohamed-ali/api-MedLink/commit/2d5975ebed1b0b4a5fa6b953fb2a476a823d3654))
+* US-13 and US-25 examination results (not compiled, not tested) ([8bf5515](https://github.com/assali-mohamed-ali/api-MedLink/commit/8bf5515b3570003ae6b52ab797950d498cb30791))
+* US-13, US-22, US-25 record numbers, paged lists, practitioner attachments, durable notices ([0437d26](https://github.com/assali-mohamed-ali/api-MedLink/commit/0437d262d433e6bd9186df5d8c29f07af7413906))
+* US-15 patient edits own phone and address (not compiled, not tested) ([8ce580b](https://github.com/assali-mohamed-ali/api-MedLink/commit/8ce580b34be6106316fee3e71878cdbd476c423a))
+* US-16 patient deletion request, without any purge (not compiled, not tested) ([7c8a16a](https://github.com/assali-mohamed-ali/api-MedLink/commit/7c8a16adb39b4a5a88163a0f291ceb486c1a704f))
+* US-16 patient exports their own data (not compiled, not tested) ([b20ae5c](https://github.com/assali-mohamed-ali/api-MedLink/commit/b20ae5c78ef9556eda74d869a3a88982331ff503))
+* US-16 staff handle the deletion requests (not compiled, not tested) ([1f32868](https://github.com/assali-mohamed-ali/api-MedLink/commit/1f32868dfa14fc41bc52375faa61654fc29d1144))
+* US-21 practitioner absences (not compiled, not tested) ([b3dfb18](https://github.com/assali-mohamed-ali/api-MedLink/commit/b3dfb18c0e0d72c3bbc31c9b400a74b9baf5a11f))
+* US-22 practitioner searches linked patients by name (not compiled, not tested) ([29c8a46](https://github.com/assali-mohamed-ali/api-MedLink/commit/29c8a46d0e6bd35daafcd1d0ecba96fae63c96ca))
+* US-29 staff set the clinics of a practitioner (not compiled, not tested) ([d578709](https://github.com/assali-mohamed-ali/api-MedLink/commit/d578709454e0169c2520a13b494863df0e3606f0))
+* US-30 staff book an appointment for a patient (not compiled, not tested) ([e484ca9](https://github.com/assali-mohamed-ali/api-MedLink/commit/e484ca978f5bde4eced02608227dcec8518103f0))
+* verify patient email changes with password and mailbox proof ([dfe7307](https://github.com/assali-mohamed-ali/api-MedLink/commit/dfe7307ed06d965830ca62124847638c0dc99a31))
+
+
+### Bug Fixes
+
+* compile patient export and scope staff slot search ([ab567f9](https://github.com/assali-mohamed-ali/api-MedLink/commit/ab567f96d00ec951622703cec01dd66f073f9cb5))
+* enforce route-specific staff slot authorization ([1de7b69](https://github.com/assali-mohamed-ali/api-MedLink/commit/1de7b69e51d0304605e817a9784c7aa7d3bfff9f))
+* exclude practitioners disabled by MedLink from slot search and booking ([cf6001c](https://github.com/assali-mohamed-ali/api-MedLink/commit/cf6001c7e217a397e5699c8b72515f2952a75ae4))
+* harden backlog identity scheduling and access controls ([7f3251c](https://github.com/assali-mohamed-ali/api-MedLink/commit/7f3251cb9821f169d5772f50f85aab5c464281b9))
+* **identity:** permit administrative verified username changes ([019b004](https://github.com/assali-mohamed-ali/api-MedLink/commit/019b00412073820f1dab51db40160bfaef2573ce))
+* **identity:** permit administrative verified username changes and verify identity readback ([a1838ef](https://github.com/assali-mohamed-ali/api-MedLink/commit/a1838ef50eacc6ee4f1333ea26384d2cd299df23))
+* keep slots unavailable when patients cancel or move during absences ([c5075a3](https://github.com/assali-mohamed-ali/api-MedLink/commit/c5075a36c040f3c5f3af719e6790bef6c41bb533))
+* prevent stale target-slot reads during reassignment approval ([c596c5c](https://github.com/assali-mohamed-ali/api-MedLink/commit/c596c5c4128e1f3e45071fcbe0fa1f621e52f8d4))
+* restrict patient rescheduling to the original practitioner ([9581cfc](https://github.com/assali-mohamed-ali/api-MedLink/commit/9581cfc0ed5e5eb256f5865466975bd1447b6c32))
+* run the Caddy WAF as a non-root user ([5313a50](https://github.com/assali-mohamed-ali/api-MedLink/commit/5313a50a7b7d3c6023b414047e79672534258a9f))
+* US-04 APP_CONSENT_AVAILABLE is required in the full compose file ([55a32ef](https://github.com/assali-mohamed-ali/api-MedLink/commit/55a32efbbc768ff579d42726f333909e79733cf1))
+* US-04 pass APP_CONSENT_AVAILABLE to the API container ([ae112ab](https://github.com/assali-mohamed-ali/api-MedLink/commit/ae112ab97547003861a7eeca6a7daaceb558518a))
+
+
+### Documentation
+
+* add backlog coverage audit for US-01 to US-32 ([74811e7](https://github.com/assali-mohamed-ali/api-MedLink/commit/74811e78696a9a19b1735c43d57a598613d63201))
+* batch 1 matrix, decisions and acceptance for US-04, US-15, US-16 ([2c06917](https://github.com/assali-mohamed-ali/api-MedLink/commit/2c06917b6e656e657b8265e81ad031fc393f1ab6))
+* **ci:** record backlog implementation and require both Maven test orders ([b561d1b](https://github.com/assali-mohamed-ali/api-MedLink/commit/b561d1bf79e7111c155fbabc9bd6f8d72b2d757b))
+* implementation report and manual test list for the backlog work ([a0990bc](https://github.com/assali-mohamed-ali/api-MedLink/commit/a0990bc5e5370103d298339d6caa880edc8e5f60))
+* implementation report follows the staff-handled deletion and the Tunisian law check ([56fa13a](https://github.com/assali-mohamed-ali/api-MedLink/commit/56fa13ae2e21af9735eb451668083103dc939927))
+* implementation report lists US-21 and the expected MailService merge conflict ([f21664b](https://github.com/assali-mohamed-ali/api-MedLink/commit/f21664b11b8d6291642dd693a018a336dce47829))
+* monitoring limits, hardening, dashboards and how to run the config test ([d1f8b7d](https://github.com/assali-mohamed-ali/api-MedLink/commit/d1f8b7d48ac0fa82592d9e31dbc2686ab4487625))
+* preserve original acceptance criteria and matrix columns ([dee534f](https://github.com/assali-mohamed-ali/api-MedLink/commit/dee534fc363521b418c1afdcb8b85d5dd59a710b))
+* product decisions updated with the code owner's answers and Tunisian law sources ([1d80973](https://github.com/assali-mohamed-ali/api-MedLink/commit/1d809737f153e4f0ccb604f8aea81cb1870421c6))
+* README layout: banner, role overview, alerts, folded route list ([6efc774](https://github.com/assali-mohamed-ali/api-MedLink/commit/6efc774561319b80a506a5511c55f5aa7fdce164))
+* README up to date with the routes, versions, live URLs and release flow ([3c726ab](https://github.com/assali-mohamed-ali/api-MedLink/commit/3c726ab510dec579e49292f8fb1f8ae31aae2cff))
+* README up to date with the routes, versions, live URLs and release flow ([0c90e42](https://github.com/assali-mohamed-ali/api-MedLink/commit/0c90e4232949b26952cdba9ff2940d33a1d0febd))
+* reconcile backlog traceability and integration evidence ([e7fb3d1](https://github.com/assali-mohamed-ali/api-MedLink/commit/e7fb3d1944952384e488ad7bad6a1b3cc5b83ab2))
+* reconcile batch 2 coverage and add authenticated Postman checks ([7c31146](https://github.com/assali-mohamed-ali/api-MedLink/commit/7c311462da35d5bb42ce100e65230bc01830a269))
+* record the product decisions for US-03 to US-32 ([af64a93](https://github.com/assali-mohamed-ali/api-MedLink/commit/af64a93bd5f8cb4f3c1f32d3349e4fecfb62e121))
+* record verified cross-role workflows and remaining release gates ([b52c285](https://github.com/assali-mohamed-ali/api-MedLink/commit/b52c28506a2d802acbe5e94bdbce8f6ed9c33f7b))
+
 ## [1.2.0](https://github.com/assali-mohamed-ali/api-MedLink/compare/v1.1.0...v1.2.0) (2026-11-26)
 
 
